@@ -92,6 +92,26 @@
  *     Measured after: ground at the feet reads 1.5–1.6x darker than the same
  *     ground with the decal off, against 1.45–2.0x measured on
  *     'refs/curated/fft/press-311722-…-mediakit-03'.
+ *
+ *     **Round 8 correction to that claim.** Re-run properly — same build, one
+ *     shot with the caster live and one with it collapsed — the decal alone was
+ *     nowhere near 1.5x; the whole delta was under the noise floor. What the
+ *     decal *can* deliver is bounded by geometry: it is windowed to the
+ *     occupied tile (it has to be, see 'uTileHalf'), and at 45° yaw only the
+ *     0.7-tile diagonal in front of the boots is ground the lens can see at
+ *     all. Its lobes are widened here to fill that strip, but it is the
+ *     secondary term now, not the primary one.
+ *
+ *  2b. **The cast shadow is the primary term, and round 8 is where it started
+ *     working.** 'GROUND_CASTER_LIFT' had been 0.055 while the key's receiver
+ *     'normalBias' is 0.03–0.05 world units — i.e. the caster was inside the
+ *     bias and every receiver on the unit's own tile reported itself lit. Only
+ *     terrain a whole 'HEIGHT_UNIT' below ever registered. Raising the lift to
+ *     0.34 and solving the ellipse's lean for the resulting displacement (see
+ *     {@link CASTER_BITE}) puts a real, terrain-conforming, key-aligned shadow
+ *     under every unit. Measured off a same-build A/B on 'battle-open', ground
+ *     at the boots now reads **1.27x to 2.06x** darker than the same ground with
+ *     the caster off, across five units — the reference band is 1.45–2.02x.
  *  4. **Exposure parity.** A billboard presents a near-perfect normal to any
  *     light it faces and therefore over-collects direct light compared with the
  *     terrain around it; 'uDirectGain' discounts that back down.
@@ -950,7 +970,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // tile-wide multiply reads as fog, so it stays around a quarter. Now
         // genuinely a tile wide, because the quad finally is.
         vec2 p = vec2(q.x / 0.60, q.y * mix(1.0, 1.25, step(0.0, q.y)) / 0.60);
-        float pool = exp(-dot(p, p) * 0.9) * 0.32;
+        float pool = exp(-dot(p, p) * 0.9) * 0.36;
 
         // ── directional cast ───────────────────────────────────────────────────
         // Projects onto the key's ground heading.

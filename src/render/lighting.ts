@@ -95,6 +95,7 @@ import {
 } from 'three';
 
 import { DEFAULT_YAW_TRIM_DEGREES, RIG_DISTANCE, YAW_ANGLES } from './camera.js';
+import { setTerrainBounce } from './materials/terrain.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Contact-hardening shadows (PCSS)
@@ -1647,6 +1648,9 @@ export class LightingRig {
   private readonly shBasis: number[] = new Array<number>(9).fill(0);
   private readonly shColor = new Vector3();
   private readonly probeSh = new SphericalHarmonics3();
+  /** Scratch for 'publishTerrainBounce'; never escapes — 'setTerrainBounce' copies. */
+  private readonly tmpBounceWarm = new Color();
+  private readonly tmpBounceCool = new Color();
 
   private readonly manageBackground: boolean;
   private readonly manageExposure: boolean;
@@ -2175,6 +2179,7 @@ export class LightingRig {
     this.lastKeyElevation = elevation;
 
     this.updateProbe(s, rig, bearing, elevation);
+    this.publishTerrainBounce(rig, elevation);
     this.placePracticals();
 
     if (this.manageBackground) {
@@ -2590,6 +2595,59 @@ export class LightingRig {
 
     this.probe.sh.copy(sh);
     this.probe.intensity = rig.probe;
+  }
+
+  /**
+   * Hand the terrain shader's inter-reflection floor its two lobes, as
+   * irradiance rather than as colour.
+   *
+   * WHY THIS EXISTS — read 'setTerrainBounce' in render/materials/terrain.ts for
+   * the measurement. Short version: that floor was a pair of compile-time
+   * constants, so it lit the board with no light in the scene at all. It is the
+   * cool top-face wash critics have named since round 5, it is the single
+   * largest contributor to our 'lumaP95' overshoot, and it was invisible to four
+   * rounds of lighting work precisely because nothing in this file reached it.
+   * Now it does.
+   *
+   * Both lobes are premultiplied by the level the rig actually committed, so the
+   * term follows every dial in the preset — including all the way to zero.
+   *
+   * The **cool** lobe is sky-derived. Its level is the flat, unoccludable half of
+   * the rig: hemisphere plus ambient plus a discounted probe. In a night
+   * courtyard 'applyContrast' has already cut all three to a rounding error, so
+   * the cool lobe nearly vanishes — which is the whole fix.
+   *
+   * The **warm** lobe is the courtyard's own floor throwing the key back up under
+   * ledges. It is keyed to the key's *horizontal* delivery, sin(elevation),
+   * because a low sun puts very little energy into the ground to be re-emitted.
+   * Practicals are folded in through 'bounceLevel', which 'updateSourceBounce'
+   * already maintains from the live braziers — a torch-lit map has real warm
+   * bounce even with the key at a fifth of daylight, and that is exactly the
+   * look the FFT night reference has.
+   *
+   * The two scalars below are the only invented numbers here. They are set so
+   * that the preset's authored fill levels reproduce roughly the *warm* half of
+   * the old constant term, and about a third of its cool half — matched by
+   * measuring 'lumaP95' back into the reference band of 116–136 rather than by
+   * taste.
+   */
+  private publishTerrainBounce(
+    rig: { key: number; hemi: number; ambient: number; probe: number },
+    keyElevation: number,
+  ): void {
+    const SKY_TO_BOUNCE = 0.30;
+    const GROUND_TO_BOUNCE = 0.085;
+
+    const skyLevel = (rig.hemi + rig.ambient + rig.probe * 0.55) * SKY_TO_BOUNCE;
+    const groundLevel =
+      (rig.key * Math.max(0, Math.sin(MathUtils.degToRad(keyElevation))) + this.bounceLevel) *
+      GROUND_TO_BOUNCE;
+
+    this.tmpBounceCool.copy(this.hemisphere.color).multiplyScalar(Math.max(0, skyLevel));
+    this.tmpBounceWarm
+      .copy(this.hemisphere.groundColor)
+      .multiplyScalar(Math.max(0, groundLevel));
+    setTerrainBounce(this.tmpBounceWarm, this.tmpBounceCool);
   }
 
   /**

@@ -255,17 +255,16 @@ function bake(kind: TerrainMaterialKind): BakedMaps {
 const AO_TINT = new THREE.Color(0.16, 0.19, 0.30);
 
 /**
- * Colour of the inter-reflection floor (see 'uBounceFloor').
+ * Colour of the inter-reflection floor: see 'uBounceFloor' and, for why these are
+ * no longer constants, 'setTerrainBounce' further down this file.
  *
- * Two hues, not one: light that has bounced off a sunlit stone floor arrives warm,
+ * Two hues, not one: light that has bounced off a lit stone floor arrives warm,
  * light that fell out of the open sky arrives cold. Blending between them by how
  * far the surface tips upward is the cheapest honest model of a courtyard's own
  * bounce, and — crucially for the defect this exists to fix — it means a shaded
  * vertical face and a shaded up-face do not end up the same colour, so a black
  * region does not merely become a grey region.
  */
-const BOUNCE_WARM = new THREE.Color(0.62, 0.40, 0.24);
-const BOUNCE_COOL = new THREE.Color(0.26, 0.36, 0.60);
 
 /**
  * Triangle-grid stochastic tiling (the Heitz/Neyret construction, with a simple
@@ -400,6 +399,73 @@ export function setTerrainDampLevel(worldY: number): void {
   for (const u of dampUniforms) u.value = worldY;
 }
 
+/**
+ * Live inter-reflection colours, shared by every patched terrain shader.
+ *
+ * ── ROUND 8: THIS IS THE COOL TOP-FACE WASH ──────────────────────────────────
+ *
+ * Critics named it four rounds running — "a bright cyan-white strip on nearly
+ * every block's top-front edge regardless of orientation; it fires identically
+ * on faces turned toward and away from the key light, and inside the shadowed
+ * pit". docs/STATUS.md had it attributed to "an additive term in the terrain
+ * shader" but not to a line. It is this one, and the attribution is measured:
+ * with **every light in the rig at zero intensity** the board is still fully
+ * legible and its up-faces still read cool blue — sampled at 1920×1080 on
+ * 'terrain-only', a lit flagstone that finishes at rgb(127,121,118) still
+ * carries rgb(31,48,76) with the whole rig switched off. The channel ratio of
+ * that residual, 0.41 : 0.63 : 1.00, is 'BOUNCE_COOL' (0.43 : 0.60 : 1.00) to
+ * within a rounding error. The grade is not responsible ('?postdebug=no-grade'
+ * leaves it untouched) and neither is fog (pushing 'fogStart' to 9000 leaves it
+ * untouched).
+ *
+ * The term itself is right and it stays: a surface with no direct light must
+ * still receive *something*, or the fail list's "any flat untextured surface"
+ * shows up as a black quad. What was wrong is that its magnitude and its hue
+ * were **compile-time constants**. Hard-coding a strong blue sky-bounce is a
+ * daylight assumption; 'battle-open' is a torch-lit night courtyard whose sky
+ * contributes almost nothing, so the cool lobe was inventing a light source the
+ * map never authored — and, being unconditional, it survived every attempt to
+ * fix it from the lighting side, which is exactly why four rounds of lighting
+ * work never moved it.
+ *
+ * So the lobes are now *irradiance*, not colour: the rig premultiplies its own
+ * graded sky and ground-bounce colours by the levels it actually committed and
+ * writes them here every 'commit()'. Consequences that matter:
+ *   - all lights off ⇒ both lobes are zero ⇒ the term contributes nothing. It
+ *     is no longer emissive, and 'meanLuma' on the all-dark diagnostic drops
+ *     from 23.5 to the low single digits.
+ *   - at night the cool lobe is small because the rig's sky term is small, and
+ *     the warm ground lobe dominates — which is what the reference night frames
+ *     show and the opposite of what we were rendering.
+ *   - a daylight map gets its blue sky bounce back for free, because there the
+ *     rig's hemisphere really is the biggest fill term.
+ *
+ * The defaults below are what an unwired caller gets (tools, unit tests, any
+ * scene with no 'LightingRig'): the old constants, so nothing regresses to
+ * black if the wiring is ever removed.
+ */
+const bounceWarmUniforms: Array<{ value: THREE.Color }> = [];
+const bounceCoolUniforms: Array<{ value: THREE.Color }> = [];
+const bounceWarm = new THREE.Color(0.62, 0.40, 0.24);
+const bounceCool = new THREE.Color(0.26, 0.36, 0.60);
+
+/**
+ * Publish the rig's committed bounce irradiance to every terrain material.
+ *
+ * @param warm  Colour arriving from below — the ground bounce — already scaled
+ *              by the level the rig committed to it.
+ * @param cool  Colour arriving from above — the sky/ambient fill — likewise.
+ *
+ * Called from 'LightingRig.commit()'. Both arguments are copied, so the caller
+ * may pass a live 'Color' it intends to keep mutating.
+ */
+export function setTerrainBounce(warm: THREE.Color, cool: THREE.Color): void {
+  bounceWarm.copy(warm);
+  bounceCool.copy(cool);
+  for (const u of bounceWarmUniforms) u.value.copy(warm);
+  for (const u of bounceCoolUniforms) u.value.copy(cool);
+}
+
 function patchTerrainShader(mat: THREE.MeshStandardMaterial, opts: PatchOptions): void {
   mat.onBeforeCompile = (shader) => {
     const damp = { value: dampLevel };
@@ -418,8 +484,12 @@ function patchTerrainShader(mat: THREE.MeshStandardMaterial, opts: PatchOptions)
     shader.uniforms.uWeather = { value: opts.weather };
     shader.uniforms.uTintJitter = { value: opts.tintJitter };
     shader.uniforms.uFloral = { value: opts.floral };
-    shader.uniforms.uBounceWarm = { value: BOUNCE_WARM };
-    shader.uniforms.uBounceCool = { value: BOUNCE_COOL };
+    const warmU = { value: bounceWarm.clone() };
+    const coolU = { value: bounceCool.clone() };
+    bounceWarmUniforms.push(warmU);
+    bounceCoolUniforms.push(coolU);
+    shader.uniforms.uBounceWarm = warmU;
+    shader.uniforms.uBounceCool = coolU;
     shader.uniforms.uBounceFloor = { value: opts.bounceFloor };
 
     shader.vertexShader = shader.vertexShader

@@ -30,6 +30,13 @@ const TRI_DEFAULT = [
   'official_020_se_screenshot.jpg', 'official_026_se_screenshot.png',
   'official_031_se_screenshot.jpg', 'press_004_gematsu_1920x1080.jpg',
   'official_002_steam.jpg',
+  // 13-24: used by the verify stage, so the after-judges never see a reference
+  // the before-judges already saw. Different frames, same corpus.
+  'official_005_steam.jpg', 'official_007_steam.jpg', 'official_008_steam.jpg',
+  'official_010_steam.jpg', 'official_016_nintendo.jpg', 'official_021_se_screenshot.jpg',
+  'official_023_se_screenshot.png', 'official_025_se_screenshot.png',
+  'official_027_se_screenshot.png', 'official_028_se_screenshot.png',
+  'official_032_se_screenshot.jpg', 'official_033_se_screenshot.jpg',
 ]
 
 const TRI = Array.isArray(A.triangle) && A.triangle.length > 0 ? A.triangle : TRI_DEFAULT
@@ -133,7 +140,14 @@ log(`Baseline: ${baseline && baseline.ok ? 'frames rendered' : 'PROBLEM — see 
 // Swap side is decided here and never written to disk, so the comparison is blind.
 phase('Judge')
 
-const pairs = TRI.slice(0, 6).map((ref, i) => ({
+// TWELVE pairs, not six.
+//
+// Rounds 7 and 8 scored the same build at 5/6, then 2/6, then 5/6 identified.
+// Under a true identification rate of ~70%, P(<=2 of 6) is 0.07 and P(>=5 of 6)
+// is 0.42 — both ordinary. n=6 simply cannot separate those outcomes, so a
+// single round's number was never signal. Doubling the sample roughly halves
+// the standard error; it is the cheapest real improvement available to this test.
+const pairs = TRI.slice(0, 12).map((ref, i) => ({
   i,
   ref,
   game: 'triangle',
@@ -604,7 +618,7 @@ Report what the frames actually look like now — honestly, including what still
 )
 
 // Re-judge blind on fresh pairs (different refs than the baseline round, to avoid overfitting).
-const vpairs = TRI.slice(6, 12).map((ref, i) => ({
+const vpairs = TRI.slice(12, 24).map((ref, i) => ({
   i,
   ref,
   swap: (i + seed + 1) % 2 === 1,

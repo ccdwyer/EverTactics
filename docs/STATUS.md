@@ -54,7 +54,24 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 4 | 6/6 | 5/6 | test found to be confounded — see below |
 | 5 | **4/6** (baseline, cropped) | 4/6 | first identification failure |
 | 5 | 5/6 (after fixes) | 5/6 | grounding 2.5 -> 4.5 |
-| 6 | 4/6 baseline, 5/6 after | 4/6 | **plateau** — see below |
+| 6 | 4/6 baseline, 5/6 after | 4/6 | |
+| 7 | 5/6 baseline, 5/6 after | 5/6 | |
+| 8 | **2/6** baseline, 5/6 after | **6/6** baseline | see the variance note |
+
+### n=6 was never enough to read a single round
+Rounds 7 and 8 scored essentially the same build at 5/6, then 2/6, then 5/6 identified. That is not
+improvement followed by regression — it is noise. Under a true identification rate of ~70%:
+
+    P(<= 2 of 6) = 0.07        P(>= 5 of 6) = 0.42
+
+Both are ordinary outcomes of one underlying rate. **Do not read a single round's number as
+signal, and do not celebrate a good one.** Round 8's baseline of 2/6 caught and 6/6 preferring ours
+is the best result recorded here and it is probably mostly luck.
+
+Judging now runs **12 pairs per stage** (was 6), drawn from 24 curated references so the after-judges
+never see a frame the before-judges saw. Doubling n roughly halves the standard error. The honest
+long-run read across rounds 5-8 is an identification rate somewhere around 60-80%, trending down
+slowly, with preference for our frame consistently at 4-6 of 6.
 
 ### The plateau, and what it probably is
 Rounds 5 and 6 both sit at 4–5 of 6 identified. Identification has broken twice but is not
@@ -106,23 +123,57 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
 
 ## Known open items
 
-0. **THE COOL EDGE/TOP-FACE WASH IS A TERRAIN SHADER BUG, NOT LIGHTING — highest-value open fix.**
-   Critics have named this across four rounds ("a bright cyan-white edge strip on nearly every
-   block's top-front edge regardless of orientation — it fires identically on faces turned toward
-   and away from the key light, and inside the shadowed pit"). It was attributed conclusively in
-   round 8 by rendering with every light off except a warm key:
+0. **THE COOL TOP-FACE WASH — FIXED at the end of round 8. Do not re-chase it.**
+   Named by critics across four rounds ("a bright cyan-white edge strip on nearly every block's
+   top-front edge regardless of orientation — it fires identically on faces turned toward and away
+   from the key light, and inside the shadowed pit"), attributed to "the terrain shader" mid-round-8
+   but not to a line. **The line was the inter-reflection floor** — the `uBounceFloor` term in
+   `src/render/materials/terrain.ts`, added earlier in round 8 to stop unlit faces going pure black.
+   The term was right; its *magnitude and hue were compile-time constants*, so it lit the board
+   with no light in the scene at all, and its hard-coded blue sky-bounce was a daylight assumption
+   imposed on a torch-lit night courtyard. That is why four rounds of lighting work never moved it:
+   nothing in `lighting.ts` reached it.
 
-       node tools/shoot.mjs --scene battle-open --port 4173 --out shots/keyonly.png \
-         --query "lightdebug=keyIntensity:3.5,rimIntensity:0,hemiIntensity:0,ambientIntensity:0,\
+   Diagnostic that pins it (run it before believing any future claim about this):
+
+       node tools/shoot.mjs --scene terrain-only --out shots/alldark.png \
+         --query "lightdebug=keyIntensity:0,rimIntensity:0,hemiIntensity:0,ambientIntensity:0,\
    probeIntensity:0,cavity:0,practicalGain:0,sourceBounce:0"
 
-   The cool wash survives at full strength under a key whose colour is #ffd588. A warm light cannot
-   produce a cool highlight, so the term is additive/emissive in the terrain shader
-   (src/render/materials/terrain.ts). I reproduced this and confirmed it visually.
-   It is also the main contributor to our lumaP95 of ~158 against a reference band of 116-136.
-   Fix: gate it by dot(N,L) and scale it by local light contribution.
+   With **every light at zero** the board must be black. Before the fix it was fully legible and its
+   up-faces read cool blue: a flagstone finishing at rgb(127,121,118) still carried rgb(31,48,76),
+   whose channel ratio 0.41:0.63:1.00 is the old `BOUNCE_COOL` constant to a rounding error. Not the
+   grade (`?postdebug=no-grade` leaves it), not fog (`fogStart:9000` leaves it).
 
+   The fix: `LightingRig.publishTerrainBounce()` premultiplies the rig's *own* graded sky and
+   ground-bounce colours by the levels it actually committed and pushes them through
+   `setTerrainBounce()`. The lobes are now irradiance, not colour, so the term follows every dial
+   including all the way to zero.
 
+   Measured on `battle-open`, before → after:
+
+   | | before | after | reference |
+   |---|---|---|---|
+   | terrain residual with all lights off | rgb(31,48,76) | rgb(7,8,13) | ~0 |
+   | lumaP95 | 158.9 | 148.4 | 116 – 136 |
+   | meanLuma | 51.7 | 46.8 | 36 – 50 (night) |
+   | meanSaturation | 0.542 | 0.576 | 0.45 – 0.86 |
+   | darkShareOfSubject | 0.39 | 0.405 | 0.41 – 0.63 (night) |
+
+   A lit top face under the warm key now reads rgb(112,98,88) — warm — where it used to read
+   rgb(127,121,118), i.e. neutral grey under an amber light, which is its own entry on the fail list.
+   `lumaP95` is still ~12 over the band; the residue is a broad near-clipping specular lobe on stone
+   up-faces (`floor` p99 measures 244), not this term. That is the next thing to look at, and it
+   belongs to `roughRange` in `materials/terrain.ts`, not to the lighting rig.
+
+0b. **Hard two-tone chevrons over the play board — OPEN, unattributed.**
+   Small saturated wedges, one half warm cream and one half cyan, scattered across tile tops in the
+   mid-band (clearest at `shots/r8/after/crop-z.png`, a 6× crop of terrain-only at 860,490). They are
+   *lit* geometry, not an overlay: they go dark in the all-lights-off render. They survive
+   `rimIntensity:0,contrast:0`, so they are not the rim. They appear in `terrain-only`, so they are
+   not sprites or UI. Most likely a foliage/shoot card being lit warm on one face and cold on the
+   other with no softening. Hard-edged saturated artefacts sitting on tiles the player has to count
+   are a rubric problem; worth one focused session.
 
 1. **Composition (4.3) and geometry craft (4.5)** are the lowest axes. Round 6 targets them.
    The critique is no longer "wrong framing" — it is **no focal hierarchy**: everything equally
