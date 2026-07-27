@@ -79,6 +79,13 @@ import {
 
 import { applyResolution, resolveAbility } from './combat/formulas';
 
+import {
+  MAX_REACTION_DEPTH,
+  runPostHitReactions,
+  runPreemptiveReactions,
+  type ReactionHost,
+} from './combat/reactions';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tunables
 // ─────────────────────────────────────────────────────────────────────────────
@@ -443,6 +450,13 @@ function endTurn(state: BattleState, unit: Unit, events: BattleEvent[]): void {
 }
 
 function maybeEndTurn(state: BattleState, unit: Unit, events: BattleEvent[]): void {
+  // A unit can now be felled *during its own turn* — a Counter or a Hamedo answering the
+  // blow it just threw. It cannot be left holding a turn it can no longer end, so the
+  // turn closes here rather than the reducer refusing every subsequent command.
+  if (isDowned(unit)) {
+    endTurn(state, unit, events);
+    return;
+  }
   if (unit.turn.moved && unit.turn.acted) endTurn(state, unit, events);
 }
 
@@ -451,8 +465,36 @@ function maybeEndTurn(state: BattleState, unit: Unit, events: BattleEvent[]): vo
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * The reaction engine's view of the reducer.
+ *
+ * `combat/reactions.ts` needs to commit KO bookkeeping and write the combat log, both
+ * of which live here. Handing it a small host object keeps the dependency one-way.
+ */
+function reactionHost(state: BattleState, rng: Rng, depth: number): ReactionHost {
+  return {
+    state,
+    rng,
+    depth,
+    sync: (out: BattleEvent[]) => syncDeathCounters(state, out),
+    note: (actor: UnitId, text: string) => log(state, { actor, kind: 'act', text }),
+  };
+}
+
+/**
  * Run an ability that is going off *now* — either instant, or a charge coming due —
  * and commit the result. Returns the units it actually connected with.
+ *
+ * This is the reaction trigger point, and it is the only one: every path by which an
+ * ability actually strikes somebody — a commanded action, an item, a charged spell
+ * coming due, a counter-attack — funnels through here, so wiring reactions in at this
+ * single seam catches all of them and cannot be bypassed. The two phases straddle the
+ * resolution because they have to: pre-emptive reactions (Blade Grasp, Hamedo) must
+ * remove their owner from the target list *before* damage is computed, while everything
+ * else needs to read what actually landed.
+ *
+ * `depth` is the reaction-nesting counter. Commanded actions come in at 0; anything a
+ * reaction itself causes runs at {@link MAX_REACTION_DEPTH}, where no further reactions
+ * roll. That is what makes counter-chains terminate.
  */
 function fireAbility(
   state: BattleState,
@@ -461,9 +503,28 @@ function fireAbility(
   target: Vec3,
   rng: Rng,
   events: BattleEvent[],
+  depth = 0,
 ): Unit[] {
   const tiles = affectedTiles(state, actor, ability, target);
-  const targets = unitsOnTiles(state, tiles);
+  const inRange = unitsOnTiles(state, tiles);
+
+  // Phase 1 — pre-emptive reactions. Whoever turns the attack aside is dropped from
+  // the target list entirely, so the blow never lands rather than landing and being undone.
+  const host = reactionHost(state, rng, depth);
+  const preemptive = runPreemptiveReactions(host, actor, ability, inRange, events);
+  const targets = inRange.filter((u) => !preemptive.negated.has(u.id));
+
+  if (inRange.length > 0 && targets.length === 0) {
+    // Everyone in the blast turned it aside. The cast still happened; nothing landed.
+    events.push({ kind: 'cast-fire', unit: actor.id, ability: ability.id, target: { ...target } });
+    log(state, {
+      actor: actor.id,
+      kind: 'act',
+      text: `${actor.name}'s ${ability.name} is turned aside.`,
+      data: { ability: ability.id },
+    });
+    return [];
+  }
 
   const resolution = resolveAbility(state, actor, ability, targets, rng);
 
@@ -485,6 +546,9 @@ function fireAbility(
   }
   events.push(...applyResolution(state, resolution));
   syncDeathCounters(state, events);
+
+  // Phase 2 — everyone who was actually struck answers back.
+  runPostHitReactions(host, actor, ability, resolution.targets, events);
 
   const connected: Unit[] = [];
   for (const outcome of resolution.targets) {

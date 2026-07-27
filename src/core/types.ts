@@ -479,6 +479,13 @@ export type BattleEvent =
   | { kind: 'jp'; unit: UnitId; amount: number }
   | { kind: 'exp'; unit: UnitId; amount: number }
   | { kind: 'levelup'; unit: UnitId; level: number }
+  /**
+   * A reaction ability triggered. `unit` is the reactor, `source` is whoever provoked it.
+   * The reaction's mechanical consequences follow as ordinary events (damage, heal,
+   * status-add, ...); this variant exists so the renderer can announce the name the way
+   * FFT does before those land.
+   */
+  | { kind: 'reaction'; unit: UnitId; ability: AbilityId; source: UnitId }
   | { kind: 'turn-order-changed' };
 
 // ─────────────────────────────────────────────────────────────────────────────

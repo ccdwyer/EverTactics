@@ -248,7 +248,16 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     fogColor: 0x44586e,
     fogStart: 8,
     fogEnd: 52,
-    exposure: 1.0,
+    // Higher than the others, and it reaches the frame through *both* paths, so
+    // treat it as the master brightness for every dawn map — including
+    // `battle-open`, the shipping one. With post off it lands on
+    // `renderer.toneMappingExposure`; with post on the renderer is switched to
+    // `NoToneMapping` and `Game.applyPostProfile` multiplies this into
+    // `PostStack.settings.exposure` instead. (An earlier note here claimed the
+    // dawn scenes all run post-off. None of them do — `sprites-only` is the
+    // post-off diagnostic and it uses `overcast`.) At 1.0 the cloister read as a
+    // silhouette; this is what makes the garden legible.
+    exposure: 1.75,
     shadowRadius: 3.2,
     shadowNormalBiasScale: 1.2,
     probeIntensity: 0.9,
@@ -370,8 +379,11 @@ export const LIGHTING_PRACTICALS: Readonly<Record<LightingPresetName, readonly P
    */
   dawn: [
     { u: 0.5, v: 0.54, y: 0.55, color: 0x4d90ff, intensity: 9, distance: 7.5, flicker: 0.07, rate: 1.7, sway: 0.04 },
-    { u: 0.5, v: 0.12, y: 4.2, color: 0x6aa4ff, intensity: 14, distance: 9.0, flicker: 0.04, rate: 0.7 },
-    { u: 0.12, v: 0.62, y: 3.6, color: 0x5c96f0, intensity: 9, distance: 7.0, flicker: 0.04, rate: 0.9 },
+    // Outside the colonnade, not among it. Parked at v = 0.12 these sat inside a
+    // pillar and put a blown blue highlight on its shaft — a sky wash has to
+    // originate beyond the architecture it is washing, or it reads as a lamp.
+    { u: 0.5, v: 0.02, y: 3.2, color: 0x6aa4ff, intensity: 11, distance: 12.0, flicker: 0.04, rate: 0.7 },
+    { u: 0.02, v: 0.62, y: 3.0, color: 0x5c96f0, intensity: 8, distance: 10.0, flicker: 0.04, rate: 0.9 },
   ],
 
   overcast: [

@@ -34,12 +34,20 @@
  *   • hard alpha cut-off — `discard`, never blending, because pixel art with soft
  *     edges is the single most obvious "this is a cheap HD-2D knock-off" tell,
  *   • an *impostor normal* so a flat quad still turns with the key light,
- *   • a silhouette rim light derived from the 1-texel alpha gradient and the key
- *     light's screen-plane direction (so the rim lands on the lit edge only),
+ *   • full scene lighting — key, hemisphere, ambient **and every dynamic VFX
+ *     point light** — with the direct term discounted (`uDirectGain`) because a
+ *     billboard always faces the light and would otherwise out-expose the
+ *     terrain it stands on,
+ *   • ground bounce into the legs and a contact ramp at the feet, which is what
+ *     actually welds a unit to its tile,
+ *   • two silhouette rim lights derived from the 1-texel alpha gradient — warm
+ *     on the key side, cool on the fill side — weighted so a light behind the
+ *     *camera* rims nothing and a light behind the *subject* haloes evenly,
  *   • flash / tint / desaturation for damage, status and KO,
  *   • a chunky per-texel dissolve for the crystal effect,
  *   • a matching `MeshDepthMaterial` so the same alpha cut-out is respected when
- *     the unit casts into the shadow map.
+ *     the unit casts into the shadow map, pushed back along the light so the
+ *     card does not shadow itself.
  *
  * Uniform objects are shared by reference into `shader.uniforms`, so mutating
  * `bundle.uniforms.uFlash.value` takes effect immediately with no recompilation.

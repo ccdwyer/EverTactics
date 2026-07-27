@@ -38,6 +38,7 @@ import {
   sandTexel,
   snowTexel,
   stoneTexel,
+  pillarTexel,
   stoneWallTexel,
   swampTexel,
   timberTexel,
@@ -57,6 +58,7 @@ export type TerrainMaterialKind =
   | 'cliff'
   | 'bed'
   | 'stonewall'
+  | 'pillar'
   | 'timber'
   | 'foliage'
   | 'metal'
@@ -77,6 +79,7 @@ const TEXELS: Record<TerrainMaterialKind, TexelFn> = {
   dirt: dirtTexel,
   stone: stoneTexel,
   stonewall: stoneWallTexel,
+  pillar: pillarTexel,
   sand: sandTexel,
   water: bedTexel,
   deepwater: bedTexel,
@@ -102,6 +105,7 @@ const BUMP_STRENGTH: Partial<Record<TerrainMaterialKind, number>> = {
   dirt: 1.8,
   stone: 2.1,
   stonewall: 2.3,
+  pillar: 2.4,
   sand: 1.0,
   snow: 0.9,
   swamp: 1.2,
@@ -478,6 +482,11 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
     uvScale: 0.95, roughness: 1, metalness: 0, color: 0xffffff,
     aoStrength: 1.0, macroStrength: 0.24, macroScale: 0.12,
     tileGrid: 0.42, tileRotate: 0, tileSharpen: 2.2, normalScale: 0.95,
+  },
+  pillar: {
+    uvScale: 1.65, roughness: 1, metalness: 0, color: 0xffffff,
+    aoStrength: 0.9, macroStrength: 0.18, macroScale: 0.14,
+    tileGrid: 0.5, tileRotate: 0, tileSharpen: 2.4, normalScale: 0.95,
   },
   sand: {
     uvScale: 0.85, roughness: 1, metalness: 0, color: 0xffffff,

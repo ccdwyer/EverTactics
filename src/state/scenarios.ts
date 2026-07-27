@@ -486,7 +486,7 @@ const SPRITES_ONLY: Scenario = {
   blurb: 'Every unit in the roster, no terrain, no post. For judging the billboards.',
   lighting: 'overcast',
   layers: { terrain: false, sprites: true, ui: false, post: false, highlights: false },
-  camera: { yawIndex: 0, frameField: false, pixelScale: 4, focusTile: { x: 6, y: 7, z: 2 } },
+  camera: { yawIndex: 0, frameField: false, pixelScale: 3, focusTile: { x: 7, y: 6, z: 2 }, pitchDegrees: 30 },
   openCommandMenu: false,
   units: BATTLE_OPEN_UNITS.map((u, i) => ({
     ...u,

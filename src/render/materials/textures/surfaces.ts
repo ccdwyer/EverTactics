@@ -105,9 +105,9 @@ export const grassTexel: TexelFn = (u, v) => {
   );
 
   const c = {
-    r: lerp(0.056, 0.268, t),
-    g: lerp(0.100, 0.394, t),
-    b: lerp(0.046, 0.126, t),
+    r: lerp(0.058, 0.276, t),
+    g: lerp(0.094, 0.362, t),
+    b: lerp(0.048, 0.136, t),
   };
   const hueShift = clump.id - 0.5;
   c.r *= 1 + hueShift * 0.22;
@@ -154,7 +154,7 @@ export const dirtTexel: TexelFn = (u, v) => {
   const gravel = worley(u, v, 30, 509, 1.0);
   // Gravel is *earth-coloured* earth. Tinting it toward pale grey turns a dirt path
   // into a field of polka dots the moment a key light hits it.
-  const pebbleMask = smoothstep(0.16, 0.05, gravel.f1) * smoothstep(0.55, 0.85, gravel.id);
+  const pebbleMask = smoothstep(0.30, 0.06, gravel.f1) * smoothstep(0.30, 0.72, gravel.id);
   const bigStone = worley(u, v, 11, 511, 0.9);
   const cobble = smoothstep(0.17, 0.07, bigStone.f1) * smoothstep(0.88, 0.98, bigStone.id);
 
@@ -163,17 +163,22 @@ export const dirtTexel: TexelFn = (u, v) => {
   // Dry scuffed streaks running with the traffic direction.
   const scuff = fbm2p(u * 40, v * 5, 40, 6, 519, 3);
 
-  const t = clamp01(base * 0.56 + grit * 0.22 + scuff * 0.14 + (1 - crack) * 0.10);
+  const t = clamp01(base * 0.50 + grit * 0.26 + scuff * 0.16 + (1 - crack) * 0.10);
+  // Desaturated, dusty earth. A rich chocolate brown reads as chocolate.
   const c = {
-    r: lerp(0.126, 0.402, t),
-    g: lerp(0.090, 0.292, t),
-    b: lerp(0.062, 0.186, t),
+    r: lerp(0.128, 0.430, t),
+    g: lerp(0.106, 0.362, t),
+    b: lerp(0.086, 0.278, t),
   };
-  const iron = smoothstep(0.55, 0.85, base);
-  tint(c, c.r * 1.22 + 0.02, c.g * 0.96, c.b * 0.78, iron * 0.5);
+  const iron = smoothstep(0.58, 0.88, base);
+  tint(c, c.r * 1.16 + 0.02, c.g * 0.97, c.b * 0.82, iron * 0.42);
 
-  const pg = 0.24 + gravel.id * 0.14;
-  tint(c, pg, pg * 0.92, pg * 0.80, pebbleMask * 0.55);
+  const pg = 0.30 + gravel.id * 0.26;
+  tint(c, pg, pg * 0.95, pg * 0.86, pebbleMask * 0.72);
+  // Grit shadow under each piece of aggregate — this is what makes a path read as
+  // loose material instead of a painted plane.
+  const bed = smoothstep(0.06, 0.24, gravel.f1) * smoothstep(0.30, 0.72, gravel.id);
+  tint(c, 0.058, 0.046, 0.034, bed * 0.45);
   const cg = 0.28 + bigStone.id * 0.16;
   tint(c, cg, cg * 0.93, cg * 0.82, cobble * 0.6);
 
@@ -200,14 +205,14 @@ export const dirtTexel: TexelFn = (u, v) => {
  * neutral grey out by name.
  */
 export const stoneTexel: TexelFn = (u, v) => {
-  const b = masonry(u, v, 4, 4, 601, 0.34, 0.40);
+  const b = masonry(u, v, 4, 4, 601, 0.44, 0.52);
 
   // Chipped corners: bite worley cells out of the slab wherever they straddle an edge.
   const chipCell = worley(u, v, 22, 607, 1.0);
   const chipHere = smoothstep(0.30, 0.10, chipCell.f1) * smoothstep(0.45, 0.80, chipCell.id);
-  const jointRaw = 1 - smoothstep(0.0, 0.020, b.edge);
-  const joint = clamp01(jointRaw + chipHere * smoothstep(0.055, 0.012, b.edge));
-  const bevel = 1 - smoothstep(0.018, 0.062, b.edge);
+  const jointRaw = 1 - smoothstep(0.0, 0.013, b.edge);
+  const joint = clamp01(jointRaw + chipHere * smoothstep(0.040, 0.010, b.edge));
+  const bevel = 1 - smoothstep(0.013, 0.050, b.edge);
 
   // Per-slab internal character. Rotating the grain per slab is what stops a masonry
   // texture from looking like one stone photocopied.
@@ -242,8 +247,8 @@ export const stoneTexel: TexelFn = (u, v) => {
 
   // Grime that has washed into the joints and pooled at the slab edges.
   const grimeN = fbm(u * 24, v * 24, 24, 631, 3);
-  const grime = clamp01(joint * (0.6 + grimeN * 0.4) + bevel * 0.35);
-  tint(c, 0.072, 0.064, 0.052, grime * 0.86);
+  const grime = clamp01(joint * (0.6 + grimeN * 0.4) + bevel * 0.30);
+  tint(c, 0.118, 0.102, 0.080, grime * 0.82);
 
   // Moss creeping out of the joints where it is damp.
   const damp = smoothstep(0.52, 0.84, warpedFbm(u * 4, v * 4, 4, 641, 1.5, 3));
@@ -317,8 +322,8 @@ export const stoneWallTexel: TexelFn = (u, v) => {
   tint(c, 0.336, 0.352, 0.192, lichen * 0.5);
 
   // Grime pooled in the mortar.
-  const grime = clamp01(joint * (0.62 + fbm(u * 22, v * 22, 22, 743, 2) * 0.38) + bevel * 0.30);
-  tint(c, 0.062, 0.056, 0.048, grime * 0.90);
+  const grime = clamp01(joint * (0.62 + fbm(u * 22, v * 22, 22, 743, 2) * 0.38) + bevel * 0.26);
+  tint(c, 0.100, 0.088, 0.070, grime * 0.86);
 
   tint(c, 0.15, 0.136, 0.110, pitting * 0.20);
 
@@ -827,5 +832,60 @@ export const rubbleTexel: TexelFn = (u, v) => {
     b: c.b,
     h: (1 - edge) * (0.45 + chunks.id * 0.3) + (1 - smallEdge) * 0.2 + grain * 0.1,
     rough: 0.86 + grain * 0.12,
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fluted pillar stone
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A column drum. Vertical flutes plus sparse horizontal drum joints — the two
+ * features that make a cylinder read as a carved column instead of a pipe. `u` runs
+ * around the shaft and `v` runs down it under the terrain's world-planar projection,
+ * so the flutes are authored as a function of `u` alone.
+ */
+export const pillarTexel: TexelFn = (u, v) => {
+  const flutes = 8;
+  const fu = ((u * flutes) % 1 + 1) % 1;
+  // Rounded groove with a sharp arris between each pair.
+  const groove = Math.cos((fu - 0.5) * Math.PI * 2) * 0.5 + 0.5;
+  const arris = 1 - smoothstep(0.0, 0.10, Math.min(fu, 1 - fu));
+
+  // Drum joints: a few horizontal beds, not a course pattern.
+  const drums = 3;
+  const dv = ((v * drums) % 1 + 1) % 1;
+  const jointN = (fbm(u * 30, v * 8, 30, 1951, 2) - 0.5) * 0.02;
+  const joint = 1 - smoothstep(0.0, 0.020, Math.min(dv, 1 - dv) + jointN);
+  const drumIdx = Math.floor(v * drums);
+  const drumTone = hash2(drumIdx, 0, 1953);
+
+  const grain = streak(u, v, 26, 1957, 1.57, 3.0, 3);
+  const speck = fbm(u * 150, v * 150, 150, 1959, 2);
+  const chipCell = worley(u, v, 24, 1961, 1.0);
+  const chip = smoothstep(0.16, 0.04, chipCell.f1) * smoothstep(0.72, 0.94, chipCell.id);
+
+  const t = clamp01(
+    0.36 + groove * 0.30 + (drumTone - 0.5) * 0.22 + (grain - 0.5) * 0.22 + (speck - 0.5) * 0.09,
+  );
+  const c = {
+    r: lerp(0.176, 0.782, t),
+    g: lerp(0.156, 0.702, t),
+    b: lerp(0.126, 0.554, t),
+  };
+  // Bright arris catching the key light.
+  tint(c, c.r * 1.16 + 0.03, c.g * 1.14 + 0.026, c.b * 1.10 + 0.02, arris * 0.4);
+  // Grime and moss collect in the flutes and along the beds.
+  const damp = smoothstep(0.55, 0.86, warpedFbm(u * 7, v * 7, 7, 1963, 1.5, 3));
+  tint(c, 0.126, 0.164, 0.088, (1 - groove) * damp * 0.42);
+  tint(c, 0.092, 0.080, 0.062, joint * 0.80);
+  tint(c, 0.140, 0.126, 0.100, chip * 0.5);
+
+  return {
+    r: c.r,
+    g: c.g,
+    b: c.b,
+    h: groove * 0.62 + arris * 0.12 + grain * 0.14 - joint * 0.35 - chip * 0.2,
+    rough: 0.72 + (1 - groove) * 0.14 + joint * 0.12,
   };
 };

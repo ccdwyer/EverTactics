@@ -50,6 +50,27 @@
  * and nothing pops when the camera turns. The alpha cut-out is repeated in a
  * matching `MeshDepthMaterial` so the unit casts its real silhouette into the
  * shadow map rather than a rectangle.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * GROUNDING
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Four separate things have to agree before a billboard reads as standing *in*
+ * the scene rather than in front of it, and all four live here or in
+ * `materials/sprite.ts`:
+ *
+ *  1. **Position.** `terrain.ts` centres tile (x, y) on world (x, y) — the top
+ *     face spans ±TILE_SIZE/2 about the *integer* coordinate. Anchoring a unit
+ *     at (x + 0.5, y + 0.5) puts it on the corner where four tiles meet, which
+ *     is what every unit was doing.
+ *  2. **A real cast shadow.** See `shadowSide` in `materials/sprite.ts`: three
+ *     renders the shadow pass back-faces-only for a `FrontSide` material, which
+ *     silently discards a camera-facing billboard whenever the light is on the
+ *     camera's side.
+ *  3. **Contact darkening** — a tight multiply patch on the tile, covering the
+ *     hairline the shadow map cannot resolve at the feet.
+ *  4. **Exposure parity.** A billboard presents a near-perfect normal to any
+ *     light it faces and therefore over-collects direct light compared with the
+ *     terrain around it; `uDirectGain` discounts that back down.
  */
 
 import * as THREE from 'three';
@@ -302,6 +323,31 @@ export interface SheetLayout {
    * on. Measured per sheet from the lowest opaque scanline in the pose band.
    */
   groundOffset: number;
+  /**
+   * Per-cell horizontal offset, in texels, from the centre of the cell to the
+   * centre of the art's **contact patch** — the opaque pixels in the lowest few
+   * scanlines of that pose.
+   *
+   * The FFT poses are not centred in their 64-texel cells: the asymmetric ones
+   * are drawn facing screen-left with the body pushed to one side, so a quad
+   * centred on the cell plants the figure's feet several texels off the middle
+   * of its tile. That shows up immediately as a contact shadow sitting beside
+   * the boots instead of under them, and as a cast shadow starting from the
+   * wrong place. Subtracting this puts the feet — not the cell — on the tile
+   * centre. Empty cells store 0.
+   */
+  footCenterX: readonly number[];
+  /**
+   * Per-cell height, in texels, from the bottom edge of the cell to the topmost
+   * opaque scanline of that pose — i.e. where the character's head actually is.
+   *
+   * An FFT cell is 64x80 but a standing figure only fills the lower ~40 texels
+   * of it; the rest is headroom for jump and cast poses. Anything that hangs
+   * *above* the unit — the turn chevron, the status strip, floating combat text —
+   * has to anchor to this and not to `frameHeight`, or it hovers half a tile
+   * above the head over an apparently empty square. Empty cells store 0.
+   */
+  headTopY: readonly number[];
 }
 
 export interface SpriteSheetOverrides {
@@ -453,13 +499,91 @@ function detectLayout(image: IndexedImage): SheetLayout {
     }
   }
 
+  const rows = Math.max(1, Math.floor(image.height / frameHeight));
+  const extents = measureCellExtents(image, frameWidth, frameHeight, columns, rows);
+
   return {
     frameWidth,
     frameHeight,
     columns,
-    rows: Math.max(1, Math.floor(image.height / frameHeight)),
+    rows,
     groundOffset: frameHeight - 1 - lastOpaque,
+    footCenterX: extents.footCenterX,
+    headTopY: extents.headTopY,
   };
+}
+
+/** How many scanlines up from a pose's lowest opaque row count as its footprint. */
+const FOOT_BAND_TEXELS = 6;
+
+/**
+ * Measure, per cell, where the art's feet and head actually are.
+ *
+ * See {@link SheetLayout.footCenterX} and {@link SheetLayout.headTopY}. The foot
+ * centre is the midpoint of the *extent* of the opaque pixels in the bottom few
+ * rows rather than their mean, because a mean is dragged sideways by a trailing
+ * cape or a planted weapon butt while the midpoint tracks the stance.
+ *
+ * One pass over the sheet, once per sheet at load: 512x512 bytes.
+ */
+function measureCellExtents(
+  image: IndexedImage,
+  frameWidth: number,
+  frameHeight: number,
+  columns: number,
+  rows: number,
+): { footCenterX: number[]; headTopY: number[] } {
+  const footCenterX = new Array<number>(columns * rows).fill(0);
+  const headTopY = new Array<number>(columns * rows).fill(0);
+  const opaqueAt = (x: number, yTopDown: number): boolean =>
+    (image.indices[(image.height - 1 - yTopDown) * image.width + x] ?? 0) !== 0;
+
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const x0 = column * frameWidth;
+      const x1 = Math.min(image.width, x0 + frameWidth);
+      const y0 = row * frameHeight;
+      const y1 = Math.min(image.height, y0 + frameHeight);
+
+      const rowHasArt = (y: number): boolean => {
+        for (let x = x0; x < x1; x++) if (opaqueAt(x, y)) return true;
+        return false;
+      };
+
+      let lowest = -1;
+      for (let y = y1 - 1; y >= y0; y--) {
+        if (rowHasArt(y)) {
+          lowest = y;
+          break;
+        }
+      }
+      if (lowest < 0) continue;
+
+      let highest = lowest;
+      for (let y = y0; y <= lowest; y++) {
+        if (rowHasArt(y)) {
+          highest = y;
+          break;
+        }
+      }
+      // Texels from the cell's bottom edge up to (and including) the top row.
+      headTopY[row * columns + column] = y1 - highest;
+
+      let minX = Infinity;
+      let maxX = -Infinity;
+      for (let y = lowest; y > Math.max(y0 - 1, lowest - FOOT_BAND_TEXELS); y--) {
+        for (let x = x0; x < x1; x++) {
+          if (!opaqueAt(x, y)) continue;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+      if (minX > maxX) continue;
+
+      footCenterX[row * columns + column] = (minX + maxX) / 2 + 0.5 - (x0 + frameWidth / 2);
+    }
+  }
+  return { footCenterX, headTopY };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -519,13 +643,13 @@ function getContactShadowTexture(): THREE.CanvasTexture {
       // Flat core out to r≈0.34, then a quick smooth shoulder. A single pow()
       // falloff from the centre reads as an airbrushed blob; a plateau plus a
       // shoulder reads as occlusion.
-      const core = 1 - smoothstep(0.3, 0.86, r);
+      const core = 1 - smoothstep(0.16, 0.92, r);
       const occlusion = core * core;
-      const value = Math.round(255 * (1 - occlusion * 0.88));
+      const value = Math.round(255 * (1 - occlusion * 0.62));
       const o = (y * size + x) * 4;
       image.data[o] = value;
       image.data[o + 1] = Math.round(value * 0.99);
-      image.data[o + 2] = Math.round(Math.min(255, value * 1.04 + 4)); // cool it
+      image.data[o + 2] = Math.round(Math.min(255, value * 1.05 + 5)); // cool it
       image.data[o + 3] = 255;
     }
   }
@@ -578,31 +702,86 @@ function getSelectionRingTexture(): THREE.CanvasTexture {
   return selectionRingTexture;
 }
 
-/** Active-turn chevron that hovers above the head. */
+/**
+ * Active-turn chevron that hovers above the head.
+ *
+ * **Authored as pixels, not as a path.** It was previously drawn as a vector
+ * chevron on a 64px canvas and minified through a mipmap chain, and because the
+ * canvas stores un-premultiplied alpha every mip level averaged the dark outline
+ * against transparent *black* — the marker rendered as a gold chevron sitting on
+ * a dark rectangular plate, which is exactly the "cheap overlay" tell the rest of
+ * this file exists to avoid. At the marker's real size, 13 texels, there is no
+ * reason to filter at all: draw it at 1:1 and let `NearestFilter` scale it.
+ */
+const TURN_MARKER_ROWS = [
+  '##.........##',
+  '###.......###',
+  '.###.....###.',
+  '..###...###..',
+  '...###.###...',
+  '....#####....',
+  '.....###.....',
+  '......#......',
+];
+
+/** Texel width of the marker bitmap — the quad is sized from this. */
+const TURN_MARKER_TEXELS = TURN_MARKER_ROWS[0]?.length ?? 13;
+
 let turnMarkerTexture: THREE.CanvasTexture | null = null;
 function getTurnMarkerTexture(): THREE.CanvasTexture {
   if (turnMarkerTexture) return turnMarkerTexture;
-  const size = 64;
-  const { canvas, ctx } = makeCanvas(size);
-  ctx.clearRect(0, 0, size, size);
-  const path = (inset: number) => {
-    ctx.beginPath();
-    ctx.moveTo(size * 0.5, size * (0.86 - inset * 0.02));
-    ctx.lineTo(size * (0.12 + inset * 0.02), size * (0.30 + inset * 0.02));
-    ctx.lineTo(size * (0.32 + inset * 0.02), size * (0.20 + inset * 0.02));
-    ctx.lineTo(size * 0.5, size * (0.52 - inset * 0.02));
-    ctx.lineTo(size * (0.68 - inset * 0.02), size * (0.20 + inset * 0.02));
-    ctx.lineTo(size * (0.88 - inset * 0.02), size * (0.30 + inset * 0.02));
-    ctx.closePath();
+
+  const w = TURN_MARKER_TEXELS;
+  const h = TURN_MARKER_ROWS.length;
+  // One texel of margin so the 8-neighbour outline has somewhere to live.
+  const cw = w + 2;
+  const ch = h + 2;
+  const { canvas, ctx } = makeCanvas(Math.max(cw, ch));
+  canvas.width = cw;
+  canvas.height = ch;
+  ctx.clearRect(0, 0, cw, ch);
+
+  const fill = new Array<boolean>(cw * ch).fill(false);
+  TURN_MARKER_ROWS.forEach((row, y) => {
+    for (let x = 0; x < w; x++) {
+      if (row[x] === '#') fill[(y + 1) * cw + (x + 1)] = true;
+    }
+  });
+
+  const put = (x: number, y: number, colour: string) => {
+    ctx.fillStyle = colour;
+    ctx.fillRect(x, y, 1, 1);
   };
-  ctx.fillStyle = '#1a1408';
-  path(0);
-  ctx.fill();
-  ctx.fillStyle = '#ffd977';
-  path(2);
-  ctx.fill();
-  turnMarkerTexture = canvasTexture(canvas);
-  return turnMarkerTexture;
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      if (fill[y * cw + x]) continue;
+      let adjacent = false;
+      for (let dy = -1; dy <= 1 && !adjacent; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue;
+          if (fill[ny * cw + nx]) {
+            adjacent = true;
+            break;
+          }
+        }
+      }
+      if (adjacent) put(x, y, '#1a1408');
+    }
+  }
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) if (fill[y * cw + x]) put(x, y, '#ffd977');
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  turnMarkerTexture = texture;
+  return texture;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1291,6 +1470,8 @@ export class UnitSprite {
 
   private readonly options: Required<UnitSpriteOptions>;
   private readonly frameRect = new THREE.Vector4();
+  /** Flat cell index currently displayed — indexes `layout.footCenterX`. */
+  private frameCell = 0;
 
   private walker: PathWalker | null = null;
   private walkResolve: (() => void) | null = null;
@@ -1398,12 +1579,17 @@ export class UnitSprite {
     }
 
     {
-      const w = texelsToWorld(14);
-      const geometry = new THREE.PlaneGeometry(w, w);
+      // Sized from the bitmap so one source texel is exactly one sheet texel —
+      // the marker then scales by the same integer factor as the sprite art.
+      const map = getTurnMarkerTexture();
+      const geometry = new THREE.PlaneGeometry(
+        texelsToWorld(map.image.width),
+        texelsToWorld(map.image.height),
+      );
       const material = new THREE.MeshBasicMaterial({
-        map: getTurnMarkerTexture(),
+        map,
         transparent: true,
-        alphaTest: 0.35,
+        alphaTest: 0.5,
         depthWrite: false,
         depthTest: false,
         toneMapped: false,
@@ -1590,9 +1776,15 @@ export class UnitSprite {
       this.bundle.uniforms.uSaturation.value = 0.25;
       this.setSelection('none');
       this.setTurnMarker(false);
+      // A body on the floor is still drawn as an upright billboard, so its
+      // shadow would be a standing figure's — the one silhouette that gives the
+      // trick away. Drop out of the shadow pass and let the contact patch, which
+      // is on the ground where the body actually is, carry the grounding.
+      this.mesh.castShadow = false;
     } else {
       this.animator.play('idle', { restart: true });
       this.bundle.uniforms.uSaturation.value = 1;
+      this.mesh.castShadow = this.options.castShadow;
     }
     this.statusStrip.visible = !value;
   }
@@ -1744,8 +1936,13 @@ export class UnitSprite {
     this.applyFrame(frame.cell, mirror);
 
     // 3 — pose. Offsets are whole texels so the art stays pixel-locked.
+    //     The pose's own offsets and the cell's foot-centre correction are both
+    //     art-space, so both flip with the mirror; rounding happens once, after
+    //     they are summed, so the art never lands half a texel out.
     const pose = this.animator.pose();
-    const offsetX = Math.round(pose.offsetX + (frame.offsetX ?? 0)) * (mirror ? -1 : 1);
+    const footCenter = this.sheet.layout.footCenterX[this.frameCell] ?? 0;
+    const offsetX =
+      Math.round(pose.offsetX + (frame.offsetX ?? 0) - footCenter) * (mirror ? -1 : 1);
     const offsetY = Math.round(pose.offsetY + (frame.offsetY ?? 0));
 
     // 4 — flash / crystal timers.
@@ -1841,8 +2038,13 @@ export class UnitSprite {
       this.ring.material.opacity = 0.75 + Math.sin(this.ringPulse * 3.4) * 0.15;
     }
 
-    // 7 — overhead furniture rides the sprite, billboarded like it.
-    const headTexels = this.sheet.layout.frameHeight - this.sheet.layout.groundOffset;
+    // 7 — overhead furniture rides the sprite, billboarded like it. Anchored to
+    //     the *measured* top of this pose's art, not to the top of the cell: the
+    //     cell is 80 texels tall and a standing figure is about 40, so using the
+    //     cell would park the chevron half a tile above an empty-looking square.
+    const headTexels =
+      (this.sheet.layout.headTopY[this.frameCell] || this.sheet.layout.frameHeight) -
+      this.sheet.layout.groundOffset;
     const headY = this.mesh.position.y + texelsToWorld(headTexels) * pose.scaleY;
 
     if (this.markerVisible) {
@@ -1850,7 +2052,9 @@ export class UnitSprite {
       const bob = Math.round(Math.sin(this.markerPhase * 2.6) * 1.5);
       this.turnMarker.position.set(
         this.mesh.position.x,
-        headY + texelsToWorld(24 + bob),
+        // A third of a body-height of clear air reads as a marker hovering over
+        // an empty square; the chevron wants to sit just off the crown.
+        headY + texelsToWorld(7 + bob),
         this.mesh.position.z,
       );
       this.turnMarker.rotation.set(0, view.yawRadians, 0, 'YXZ');
@@ -1904,6 +2108,7 @@ export class UnitSprite {
   }
 
   private applyFrame(cell: number, mirror = false): void {
+    this.frameCell = cell;
     this.sheet.frameRect(cell, this.frameRect);
     this.bundle.setFrame(
       this.frameRect.x,

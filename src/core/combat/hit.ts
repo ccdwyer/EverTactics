@@ -331,12 +331,35 @@ export function rollCrit(attacker: Unit, direction: AttackDirection, rng: Rng): 
 
 /**
  * Reaction abilities trigger on Brave, as in FFT. Units that cannot act cannot react.
+ *
+ * The reaction's own `accuracy` is its *base* trigger chance, scaled by Brave:
+ * `trigger% = accuracy * Brave / 100`. A reaction with accuracy 100 therefore fires at
+ * exactly Brave%, which is the FFT number; a rarer one like Meatbone Slash (50) fires at
+ * half that. Passing no ability reads as accuracy 100.
  */
-export function reactionChance(unit: Unit): number {
-  if (cannotEvade(unit)) return 0;
-  return deriveStats(unit).brave;
+export interface ReactionRollOptions {
+  /**
+   * Skip the "can this unit still defend itself" gate.
+   *
+   * Only `ko`-triggered reactions set this — Dragon Spirit and Last Word fire *because*
+   * their owner just went down, so refusing them for being incapacitated would make
+   * them unreachable by construction.
+   */
+  ignoreIncapacity?: boolean;
 }
 
-export function rollReaction(unit: Unit, rng: Rng): boolean {
-  return rng.chance(reactionChance(unit));
+export function reactionChance(unit: Unit, ability?: Ability, opts: ReactionRollOptions = {}): number {
+  if (opts.ignoreIncapacity !== true && cannotEvade(unit)) return 0;
+  const brave = deriveStats(unit).brave;
+  const base = ability === undefined ? 100 : ability.accuracy;
+  return Math.max(0, Math.min(100, Math.floor((base * brave) / 100)));
+}
+
+export function rollReaction(
+  unit: Unit,
+  rng: Rng,
+  ability?: Ability,
+  opts: ReactionRollOptions = {},
+): boolean {
+  return rng.chance(reactionChance(unit, ability, opts));
 }

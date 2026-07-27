@@ -155,6 +155,15 @@ export interface DofSettings {
   nearSpread: number;
 }
 
+/**
+ * DoF values for the current frame: the authored settings after the reference floor and the
+ * resolution rescale. Mutated in place each frame — the render loop must not allocate.
+ */
+type ResolvedDof = Omit<DofSettings, 'intensity' | 'maxCoCPixels'> & {
+  /** Maximum blur radius in pixels of the CURRENT framebuffer. */
+  cocPixelsThisFrame: number;
+};
+
 export interface GradeSettings {
   enabled: boolean;
   /** Blend between ungraded and graded. */
@@ -268,8 +277,23 @@ const QUALITY: Record<PostQuality, QualityProfile> = {
 export const REFERENCE_FLOOR = {
   /** Blur radius at the softest part of the frame, in pixels at 1080p. Measured ~20px. */
   dofCoCPixels: 20,
-  /** Half-height of the fully sharp band, in UV. Measured: the sharp stripe is ~1/3 of frame height. */
-  dofTiltBand: 0.17,
+  /**
+   * Half-height of the fully sharp band, in UV. `resolveDof` takes `min(authored, this)`,
+   * so this is a cap on sharpness, not a target: a scenario cannot ask for a wider band.
+   *
+   * Re-measured against VISUAL_TARGET.md section 3, which says the reference frame's
+   * *top ~15% and bottom ~20%* are soft — i.e. the sharp stripe is roughly two thirds of
+   * frame height, not the one third this constant used to claim. At 0.17, with the band
+   * centred on v = 0.52, everything above v = 0.35 and below v = 0.69 defocused, which on
+   * `battle-open` is the top three tile rows and the whole lower half of the board. Section
+   * 3 was refined this round precisely to say that is a defect: the blur belongs on the
+   * scenery past the board, and the focus band has to contain the playable field.
+   *
+   * 0.28 keeps the board sharp and still lands the softness on the same fraction of the
+   * frame the references soften. The corner term (`dofTiltRadial`) and the CoC floor are
+   * what keep this from reading as "weak or absent depth of field".
+   */
+  dofTiltBand: 0.28,
   /** Falloff past the band. Short, so the transition is visible rather than a slow smear. */
   dofTiltFalloff: 0.22,
   /** Corner-term weight. */
@@ -306,7 +330,10 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       intensity: 0.055,
       threshold: 1.15,
       softKnee: 0.55,
-      radius: 1.0,
+      // Wide and soft. The references bloom torches and spell light into a halo several
+      // times the size of the source; a tight radius at the same intensity reads as a
+      // sharpened highlight instead of glow, which is the mobile-game tell.
+      radius: 1.35,
       clamp: 12.0,
       tint: [1.0, 0.98, 0.94],
     },
@@ -476,6 +503,25 @@ export class PostStack implements PostEffectsHost {
   private lutMix = 0;
   private lutFadeSpeed = 0;
   private pendingGradeName: string;
+
+  /** Reused by {@link resolveDof} so the per-frame path allocates nothing. */
+  private readonly resolvedDof: ResolvedDof = {
+    enabled: true,
+    tiltMix: 1,
+    focusDistance: 18,
+    focusRange: 6,
+    cocScale: 0.55,
+    tiltCenter: [0.5, 0.52],
+    tiltAngle: 0,
+    tiltBand: REFERENCE_FLOOR.dofTiltBand,
+    tiltFalloff: REFERENCE_FLOOR.dofTiltFalloff,
+    tiltRadial: REFERENCE_FLOOR.dofTiltRadial,
+    tiltRadialStart: 0.42,
+    bokehBoost: 1.6,
+    nearStrength: 0.9,
+    nearSpread: 0.4,
+    cocPixelsThisFrame: REFERENCE_FLOOR.dofCoCPixels,
+  };
 
   private readonly waves: Shockwave[] = [];
   private readonly waveUniform: Vector4[] = [];
@@ -1180,21 +1226,31 @@ export class PostStack implements PostEffectsHost {
    *
    * `intensity` scales the blur, but only down to the floor — see REFERENCE_FLOOR for why.
    */
-  private resolveDof(): DofSettings & { cocPixelsThisFrame: number } {
+  private resolveDof(): ResolvedDof {
     const d = this.settings.dof;
     const floor = this.respectReferenceFloor;
-    const heightScale = this.height / 1080;
+    const out = this.resolvedDof;
 
     const dialled = d.maxCoCPixels * d.intensity;
     const pixels1080 = floor ? Math.max(dialled, REFERENCE_FLOOR.dofCoCPixels) : dialled;
 
-    return {
-      ...d,
-      tiltBand: floor ? Math.min(d.tiltBand, REFERENCE_FLOOR.dofTiltBand) : d.tiltBand,
-      tiltFalloff: floor ? Math.min(d.tiltFalloff, REFERENCE_FLOOR.dofTiltFalloff) : d.tiltFalloff,
-      tiltRadial: floor ? Math.max(d.tiltRadial, REFERENCE_FLOOR.dofTiltRadial) : d.tiltRadial,
-      cocPixelsThisFrame: pixels1080 * heightScale,
-    };
+    out.enabled = d.enabled;
+    out.tiltMix = d.tiltMix;
+    out.focusDistance = d.focusDistance;
+    out.focusRange = d.focusRange;
+    out.cocScale = d.cocScale;
+    out.tiltCenter = d.tiltCenter;
+    out.tiltAngle = d.tiltAngle;
+    out.nearStrength = d.nearStrength;
+    out.nearSpread = d.nearSpread;
+    out.bokehBoost = d.bokehBoost;
+    out.tiltRadialStart = d.tiltRadialStart;
+    out.tiltBand = floor ? Math.min(d.tiltBand, REFERENCE_FLOOR.dofTiltBand) : d.tiltBand;
+    out.tiltFalloff = floor ? Math.min(d.tiltFalloff, REFERENCE_FLOOR.dofTiltFalloff) : d.tiltFalloff;
+    out.tiltRadial = floor ? Math.max(d.tiltRadial, REFERENCE_FLOOR.dofTiltRadial) : d.tiltRadial;
+    // Sized against the frame, not the framebuffer: `maxCoCPixels` is authored at 1080p.
+    out.cocPixelsThisFrame = pixels1080 * (this.height / 1080);
+    return out;
   }
 
   /** Put the sharp band on a world position — e.g. the acting unit. */

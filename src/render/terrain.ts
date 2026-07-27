@@ -48,8 +48,12 @@ const CHAMFER = 0.062;
 const CHAMFER_DROP = 0.052;
 /** Subdivisions per tile edge on top faces (also used for ramps and AO resolution). */
 const TOP_SUBDIV = 3;
-/** Drop, in world units, at which a side face becomes a sculpted cliff. */
-const CLIFF_MIN_DROP = 1.2;
+/**
+ * Drop, in world units, at which a side face becomes a sculpted cliff rather than a
+ * flat extruded quad. One tile of elevation (two half-tiles) is already enough to
+ * read as a cube if it is left flat, so the threshold sits just under it.
+ */
+const CLIFF_MIN_DROP = 0.85;
 /** How far the outermost side faces extend below the lowest tile. */
 const SKIRT = 1.35;
 /** Water column depth (in half-tiles) carved beneath each water surface. */
@@ -1289,7 +1293,7 @@ function addBannerCloth(
     for (let i = 0; i <= cols; i++) {
       const u = i / cols - 0.5;
       // Vertical folds, deepening toward the free bottom edge.
-      const fold = Math.sin(u * Math.PI * 5 + hash3(i, 0, 0, seed) * 0.6) * 0.035 * (0.35 + t);
+      const fold = Math.sin(u * Math.PI * 5 + hash3(i, 0, 0, seed) * 0.6) * 0.022 * (0.35 + t);
       const bow = Math.sin(t * Math.PI) * 0.02;
       const off = fold + bow;
       const x = cx + sx * u * width + nx * off;
@@ -1297,7 +1301,7 @@ function addBannerCloth(
       // Slight scalloped hem.
       const hem = j === rows ? Math.abs(Math.sin(u * Math.PI * 3)) * 0.06 : 0;
       const y = cy - t * height - hem;
-      const dn = Math.cos(u * Math.PI * 5) * 0.9;
+      const dn = Math.cos(u * Math.PI * 5) * 0.55;
       const n = [nx + sx * dn * 0.5, 0.12, nz + sz * dn * 0.5];
       const l = Math.hypot(n[0]!, n[1]!, n[2]!) || 1;
       row.push(v(x, y, z, n[0]! / l, n[1]! / l, n[2]! / l));
@@ -1333,6 +1337,7 @@ function addBannerCloth(
  */
 function addColumn(
   bucket: Bucket,
+  shaftBucket: Bucket,
   cx: number, cz: number,
   y0: number, y1: number,
   radius: number,
@@ -1341,27 +1346,29 @@ function addColumn(
   const h = y1 - y0;
   if (h < 0.25) return;
   const yaw = hash3(Math.round(cx * 4), Math.round(cz * 4), 3, seed) * 0.4;
-  const plinthH = Math.min(0.16, h * 0.14);
-  const capH = Math.min(0.20, h * 0.18);
-  const shaft0 = y0 + plinthH + 0.05;
+  const plinthH = Math.min(0.13, h * 0.11);
+  const capH = Math.min(0.17, h * 0.15);
+  const shaft0 = y0 + plinthH + 0.04;
   const shaft1 = y1 - capH;
 
   bucket.hint = 0.42;
-  addBox(bucket, cx, y0 + plinthH / 2, cz, radius * 1.42, plinthH / 2, radius * 1.42, yaw);
+  addBox(bucket, cx, y0 + plinthH / 2, cz, radius * 1.44, plinthH / 2, radius * 1.44, yaw);
   bucket.hint = 0.55;
-  addPrism(bucket, cx, cz, y0 + plinthH, shaft0, radius * 1.22, radius * 1.06, 10, yaw, 0, false);
+  addPrism(bucket, cx, cz, y0 + plinthH, shaft0, radius * 1.26, radius * 1.10, 12, yaw, 0, false);
 
-  // Shaft, gently tapered (entasis) and faceted so the flutes catch the key light.
-  bucket.hint = 0.86;
-  addPrism(bucket, cx, cz, shaft0, shaft1, radius * 1.04, radius * 0.86, 12, yaw, 0.012, false);
+  // Shaft, gently tapered (entasis). It gets its own fluted material: masonry courses
+  // wrapped around a cylinder read as a stack of discs, which is what a totem pole is.
+  shaftBucket.hint = 0.88;
+  addPrism(shaftBucket, cx, cz, shaft0, shaft1, radius * 1.06, radius * 0.88, 16, yaw, 0.014, false);
 
   // Necking ring + flared echinus + square abacus.
-  bucket.hint = 0.8;
-  addPrism(bucket, cx, cz, shaft1, shaft1 + capH * 0.22, radius * 0.94, radius * 0.94, 12, yaw, 0, false);
-  addPrism(bucket, cx, cz, shaft1 + capH * 0.22, shaft1 + capH * 0.62, radius * 0.9, radius * 1.30, 12, yaw, 0, false);
+  bucket.hint = 0.82;
+  addPrism(bucket, cx, cz, shaft1, shaft1 + capH * 0.20, radius * 0.96, radius * 0.96, 12, yaw, 0, false);
+  addPrism(bucket, cx, cz, shaft1 + capH * 0.20, shaft1 + capH * 0.60, radius * 0.92, radius * 1.34, 12, yaw, 0, false);
   bucket.hint = 0.95;
-  addBox(bucket, cx, shaft1 + capH * 0.81, cz, radius * 1.46, capH * 0.19, radius * 1.46, yaw);
+  addBox(bucket, cx, shaft1 + capH * 0.80, cz, radius * 1.50, capH * 0.20, radius * 1.50, yaw);
   bucket.hint = -1;
+  shaftBucket.hint = -1;
 }
 
 /** A balustrade run along one tile edge: end posts, a moulded rail, and balusters. */
@@ -1379,20 +1386,21 @@ function addBalustrade(
   const ux = dx / len;
   const uz = dz / len;
   const yaw = Math.atan2(uz, ux);
-  const railH = 0.46;
-  const postH = 0.58;
+  const railH = 0.50;
+  const postH = 0.64;
 
   bucket.hint = 0.62;
   // End posts.
   for (const t of [0, 1]) {
     const px = x0 + dx * t;
     const pz = z0 + dz * t;
-    addBox(bucket, px, baseY + postH * 0.5, pz, 0.085, postH * 0.5, 0.085, yaw);
-    addBox(bucket, px, baseY + postH + 0.035, pz, 0.105, 0.035, 0.105, yaw);
+    addBox(bucket, px, baseY + postH * 0.5, pz, 0.105, postH * 0.5, 0.105, yaw);
+    addBox(bucket, px, baseY + postH + 0.04, pz, 0.128, 0.04, 0.128, yaw);
+    addPrism(bucket, px, pz, baseY + postH + 0.08, baseY + postH + 0.19, 0.075, 0.02, 8, yaw, 0, true);
   }
   // Bottom plinth rail.
   bucket.hint = 0.5;
-  addBox(bucket, x0 + dx * 0.5, baseY + 0.055, z0 + dz * 0.5, len * 0.5, 0.055, 0.062, yaw);
+  addBox(bucket, x0 + dx * 0.5, baseY + 0.06, z0 + dz * 0.5, len * 0.5, 0.06, 0.078, yaw);
   // Balusters — little turned vases.
   const n = Math.max(2, Math.round(len / 0.21));
   bucket.hint = 0.72;
@@ -1407,8 +1415,8 @@ function addBalustrade(
   }
   // Top rail, with a chamfered cap.
   bucket.hint = 0.94;
-  addBox(bucket, x0 + dx * 0.5, baseY + railH - 0.02, z0 + dz * 0.5, len * 0.5, 0.038, 0.078, yaw);
-  addBox(bucket, x0 + dx * 0.5, baseY + railH + 0.035, z0 + dz * 0.5, len * 0.5, 0.022, 0.095, yaw);
+  addBox(bucket, x0 + dx * 0.5, baseY + railH - 0.025, z0 + dz * 0.5, len * 0.5, 0.045, 0.092, yaw);
+  addBox(bucket, x0 + dx * 0.5, baseY + railH + 0.042, z0 + dz * 0.5, len * 0.5, 0.026, 0.112, yaw);
   bucket.hint = -1;
 }
 
@@ -1434,6 +1442,82 @@ function addParapet(
   addBox(bucket, mx, baseY + h * 0.5, mz, len * 0.5, h * 0.5, 0.12, yaw);
   bucket.hint = 0.92;
   addBox(bucket, mx, baseY + h + 0.038, mz, len * 0.5 + 0.02, 0.038, 0.155, yaw);
+  bucket.hint = -1;
+}
+
+/**
+ * A pilaster buttress running down the outer face of the diorama's pedestal, with a
+ * weathered sloping top and a spreading foot. Three or four of these per side turn a
+ * blank retaining wall into architecture and, more importantly, break the silhouette
+ * — a smooth extruded prism is what makes a diorama look like a box.
+ */
+function addButtress(
+  bucket: Bucket,
+  cx: number, cz: number,
+  topY: number, baseY: number,
+  outX: number, outZ: number,
+  seed: number,
+): void {
+  const h = topY - baseY;
+  if (h < 0.6) return;
+  const yaw = Math.atan2(outZ, outX);
+  const half = 0.30;
+  const proud = 0.30;
+  const px = cx + outX * (0.5 + proud * 0.5);
+  const pz = cz + outZ * (0.5 + proud * 0.5);
+  const along = (a: number): [number, number] =>
+    outX === 0 ? [half * a, 0] : [0, half * a];
+  void along;
+
+  bucket.hint = 0.5;
+  // Shaft, in two set-offs: the lower stage is wider, which is how a real buttress
+  // is built and, more usefully here, doubles the number of silhouette edges.
+  addBox(
+    bucket, px, baseY + h * 0.72, pz,
+    outX === 0 ? half : proud * 0.5 + 0.02, h * 0.28, outX === 0 ? proud * 0.5 + 0.02 : half,
+    0,
+  );
+  bucket.hint = 0.44;
+  const lowProud = proud * 1.45;
+  addBox(
+    bucket,
+    cx + outX * (0.5 + lowProud * 0.5), baseY + h * 0.44, cz + outZ * (0.5 + lowProud * 0.5),
+    outX === 0 ? half * 1.18 : lowProud * 0.5 + 0.02, h * 0.28,
+    outX === 0 ? lowProud * 0.5 + 0.02 : half * 1.18,
+    0,
+  );
+  // The offset between the two stages gets its own weathered slope.
+  const offY = baseY + h * 0.72;
+  const oa = 0.5 + proud;
+  const ob = 0.5 + lowProud;
+  const qa: [number, number, number] = [cx + outX * oa - (outX === 0 ? half : 0), offY, cz + outZ * oa - (outZ === 0 ? half : 0)];
+  const qb: [number, number, number] = [cx + outX * oa + (outX === 0 ? half : 0), offY, cz + outZ * oa + (outZ === 0 ? half : 0)];
+  const qc: [number, number, number] = [cx + outX * ob + (outX === 0 ? half * 1.18 : 0), offY - 0.24, cz + outZ * ob + (outZ === 0 ? half * 1.18 : 0)];
+  const qd: [number, number, number] = [cx + outX * ob - (outX === 0 ? half * 1.18 : 0), offY - 0.24, cz + outZ * ob - (outZ === 0 ? half * 1.18 : 0)];
+  bucket.hint = 0.9;
+  flatQuad(bucket, [qa, qb, qc, qd], cx, offY, cz);
+  // Spreading foot.
+  bucket.hint = 0.30;
+  addBox(
+    bucket,
+    cx + outX * (0.5 + lowProud * 0.62), baseY + 0.18, cz + outZ * (0.5 + lowProud * 0.62),
+    outX === 0 ? half * 1.34 : lowProud * 0.62 + 0.03, 0.18,
+    outX === 0 ? lowProud * 0.62 + 0.03 : half * 1.34,
+    0,
+  );
+  // Weathered sloping cap, cut as a wedge so the top sheds water toward the wall.
+  bucket.hint = 0.9;
+  const capY = topY - 0.10;
+  const o = 0.5 + proud;
+  const a: [number, number, number] = [cx + outX * o - (outX === 0 ? half : 0), capY, cz + outZ * o - (outZ === 0 ? half : 0)];
+  const b: [number, number, number] = [cx + outX * o + (outX === 0 ? half : 0), capY, cz + outZ * o + (outZ === 0 ? half : 0)];
+  const c: [number, number, number] = [cx + outX * 0.5 + (outX === 0 ? half : 0), capY + 0.26, cz + outZ * 0.5 + (outZ === 0 ? half : 0)];
+  const d: [number, number, number] = [cx + outX * 0.5 - (outX === 0 ? half : 0), capY + 0.26, cz + outZ * 0.5 - (outZ === 0 ? half : 0)];
+  flatQuad(bucket, [a, b, c, d], cx, capY, cz);
+  const e: [number, number, number] = [a[0], capY - 0.14, a[2]];
+  const f: [number, number, number] = [b[0], capY - 0.14, b[2]];
+  flatQuad(bucket, [e, f, b, a], cx, capY, cz);
+  void seed;
   bucket.hint = -1;
 }
 
@@ -1761,10 +1845,12 @@ function populateProps(
   width: number,
   height: number,
   columns: readonly ColumnSpec[],
+  pedestalBaseY: number,
   bucketFor: (k: TerrainMaterialKind) => Bucket,
   ember: Bucket,
 ): PropPlacement {
   const stone = bucketFor('stonewall');
+  const pillar = bucketFor('pillar');
   const timber = bucketFor('timber');
   const foliage = bucketFor('foliage');
   const metal = bucketFor('metal');
@@ -1779,11 +1865,12 @@ function populateProps(
   for (const c of columns) {
     addColumn(
       stone,
+      pillar,
       c.tx * TILE_SIZE,
       c.ty * TILE_SIZE,
       c.baseHalf * HEIGHT_UNIT,
       c.topHalf * HEIGHT_UNIT,
-      0.33,
+      0.35,
       PROP_SEED ^ (c.tx * 31 + c.ty),
     );
   }
@@ -1841,6 +1928,26 @@ function populateProps(
         if (offMap) {
           if (built) {
             addParapet(stone, ax, az, bx, bz, y, dx, dy, PROP_SEED ^ (tx * 7 + ty * 13 + dx));
+            // A string course two thirds of the way down, and a buttress every third
+            // bay. Both are what stop the pedestal reading as one extruded prism.
+            const drop = y - pedestalBaseY;
+            if (drop > 1.2) {
+              stone.hint = 0.62;
+              const bandY = y - drop * 0.55;
+              const mxb = (ax + bx) / 2 + dx * 0.53;
+              const mzb = (az + bz) / 2 + dy * 0.53;
+              addBox(
+                stone, mxb, bandY, mzb,
+                dx === 0 ? 0.5 : 0.085, 0.10, dx === 0 ? 0.085 : 0.5,
+              );
+              stone.hint = -1;
+              if ((tx * 3 + ty * 5 + dx + dy) % 3 === 0) {
+                addButtress(
+                  stone, ox, oz, y, pedestalBaseY, dx, dy,
+                  PROP_SEED ^ (tx * 23 + ty * 41 + dx),
+                );
+              }
+            }
           } else if (rnd(tx, ty, dx * 3 + dy * 5 + 40) > 0.55) {
             // A rustic post-and-rail fence at the rim of natural ground.
             addBalustrade(timber, ax, az, bx, bz, y, PROP_SEED ^ (tx * 17 + ty * 5 + dy));
@@ -1863,7 +1970,7 @@ function populateProps(
           const n = tileAtIn(tiles, width, height, tx + dx, ty + dy);
           if (!n || n.height < t.height - 1) lower++;
         }
-        if (lower >= 2 && built && rnd(tx, ty, 61) > 0.45) {
+        if (lower >= 2 && built && rnd(tx, ty, 61) > 0.15) {
           stone.hint = 0.72;
           addPrism(stone, ox, oz, y + 0.09, y + 0.20, 0.20, 0.14, 10, 0, 0, false);
           addPrism(stone, ox, oz, y + 0.20, y + 0.46, 0.14, 0.19, 10, 0, 0.06, false);
@@ -2462,7 +2569,9 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
 
   // ── props ───────────────────────────────────────────────────────────────
   const emberBucket = new Bucket();
-  const placement = populateProps(srcTiles, width, height, columnSpecs, bucketFor, emberBucket);
+  const placement = populateProps(
+    srcTiles, width, height, columnSpecs, column.baseY, bucketFor, emberBucket,
+  );
 
   // ── assemble ────────────────────────────────────────────────────────────
   const highlightGeo = new THREE.BufferGeometry();

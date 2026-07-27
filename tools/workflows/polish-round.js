@@ -10,12 +10,39 @@ export const meta = {
 }
 
 const ROOT = '/Users/chris/Developer/EverTactics'
-const round = (args && args.round) || 1
-const seed = (args && args.seed) || 7
+
+// `args` can arrive as an object or as a JSON string depending on how the run was
+// launched. Round 1 silently lost its entire reference list to exactly this: every
+// `args.triangle` read was undefined, the judge pipeline iterated an empty array,
+// and the workflow reported success with zero verdicts. Normalise, then assert.
+const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
+
+const round = A.round || 1
+const seed = A.seed || 7
 
 // Curated reference frames — battle dioramas only, no key art or character renders.
-const TRI = args && args.triangle ? args.triangle : []
-const FFT = args && args.fft ? args.fft : []
+// Hard-coded fallback so an args mishap degrades to "judged against the wrong six"
+// rather than "silently judged nothing".
+const TRI_DEFAULT = [
+  'official_001_steam.jpg', 'official_003_steam.jpg', 'official_009_steam.jpg',
+  'official_019_se_screenshot.jpg', 'official_024_se_screenshot.png',
+  'press_002_gematsu_1920x1080.jpg', 'official_006_steam.jpg',
+  'official_020_se_screenshot.jpg', 'official_026_se_screenshot.png',
+  'official_031_se_screenshot.jpg', 'press_004_gematsu_1920x1080.jpg',
+  'official_002_steam.jpg',
+]
+
+const TRI = Array.isArray(A.triangle) && A.triangle.length > 0 ? A.triangle : TRI_DEFAULT
+
+if (!Array.isArray(TRI) || TRI.length < 2) {
+  throw new Error(
+    'polish-round: no reference frames to judge against. The blind A/B is the ' +
+    'entire point of this workflow — refusing to run a round that would report ' +
+    'success without judging anything.',
+  )
+}
+
+log(`Round ${round}: judging against ${TRI.length} reference frames.`)
 
 const BRIEF = `Project: EverTactics — a AAA-quality tactical RPG (Final Fantasy Tactics / Triangle Strategy lineage) in Three.js.
 Working directory: ${ROOT}
@@ -192,29 +219,64 @@ phase('Fix')
 
 const FIXERS = [
   {
-    label: 'fix-terrain',
-    own: 'src/render/terrain.ts, src/render/materials/terrain.ts, src/render/materials/water.ts, and any new files under src/render/materials/textures/',
-    focus: `TEXTURE DENSITY and GEOMETRY CRAFT — currently the weakest link in almost every tactics-game
-clone, and the fastest thing a critic spots.
+    label: 'fix-world',
+    own: 'src/render/stage.ts, src/render/sky.ts (new), src/render/backdrop.ts (new), src/render/atmosphere.ts (new)',
+    focus: `KILL THE VOID. This is the single highest-leverage fix in the project and nothing else on this
+list comes close.
 
-Study refs/curated/triangle/ and refs/curated/fft/ closely. In those frames there is not one flat
-polygon. Stone has per-block colour variation, mortar lines, edge wear and grime pooling in corners.
-Grass has clumping, directional variation and darker roots between blades. FFT's terrain is
-hand-painted: texture flows across tile boundaries rather than tiling per-tile.
+Measured: roughly HALF of our 1920x1080 frame is flat background colour (src/render/stage.ts clears
+to 0x05060a). The map is a small object centred in emptiness with a hard silhouette. It reads as a
+3D asset viewer with a turntable, not a place.
+
+Open refs/curated/triangle/ and look at what is actually behind and around their maps: the
+environment CONTINUES past the play area — background walls, distant architecture, crates, lanterns,
+hanging banners, drifting embers, atmospheric haze. The board bleeds off the frame edges. There is
+no hard silhouette against a flat colour anywhere in either reference game.
+
+Build:
+- A graded sky/atmosphere: a vertical gradient tuned per map mood, not a flat clear colour.
+- Distance haze/fog that the terrain fades into, coloured to the map's cool tone.
+- A far silhouette layer — distant architecture, hills, spires — parallaxed behind the board.
+  Even simple layered silhouettes with correct haze read enormously better than a void.
+- Ambient particulate: slow drifting motes/embers/dust, lit by the scene, depth-sorted.
+  Both references have this and it is a big part of why they feel like a place.
+- Ground the diorama: the board should not float. Either extend terrain past the play area into
+  haze, or give the pedestal a base that dissolves into fog.
+
+Coordinate by contract only — do NOT edit terrain.ts, lighting.ts, post.ts, camera.ts or anything
+in src/ui/ or src/core/. Four other fixers own those. Expose whatever hooks you need and say so
+clearly in your report.
+
+Verify by rendering and LOOKING. Success is: less than 25% of the frame is flat background colour,
+and the board no longer has a hard silhouette against emptiness.`,
+  },
+  {
+    label: 'fix-terrain',
+    own: 'src/render/terrain.ts, src/render/materials/terrain.ts, src/render/materials/water.ts, src/core/grid.ts, and any new files under src/render/materials/textures/',
+    focus: `BREAK THE BOX. Round 1 substantially improved your materials — stochastic tiling, per-edge
+chamfer, real props, coursed masonry. Texture density is no longer the weak link. Do NOT spend this
+round re-polishing materials.
+
+The problem now is SHAPE. The map is a square footprint with uniform-height walls on all four sides
+and a flat lawn inside. Its silhouette is a rectangle from every camera yaw, and the pedestal
+masonry dominates the lower third of the frame. Round 1's own report flagged this and said the fix
+was outside its file list — this round it is inside yours: you also own src/core/grid.ts, where the
+map data lives.
 
 Do:
-- Author genuinely detailed procedural materials (multi-octave noise, worley/voronoi for stone
-  blocks and grass clumps, directional streaking for wear). Generate to canvas/DataTexture at
-  adequate resolution. Flat colour + a single noise octave is a fail.
-- Break per-tile repetition: vary UV offset/rotation per tile, or use triplanar world-space UVs so
-  the pattern crosses tile boundaries.
-- Bake real ambient occlusion into vertex colours — sample neighbour heights so crevices between
-  tiles and the inside corners of walls darken. This is what makes it read as sculpted.
-- Chamfer tile top edges. Hard 90-degree corners read as programmer art.
-- Add PROPS. An empty tile field reads as a test scene no matter how well textured. The references
-  are full of railings, stairs, pillars, banners, crates, torches, foliage, rubble. Build a prop
-  system and populate the maps.
-- Water: animated normals, depth-based colour ramp, fresnel reflection, refraction, shoreline foam.`,
+- Author an irregular plan for orbonne-courtyard: drop a corner, terrace the north side away, add a
+  ramp and an overhang, open a gap that lets the camera see into the interior. Vary wall heights.
+  The silhouette must be interesting from all four yaw positions.
+- Thin the exterior pedestal slab dramatically so repeated brick underside stops being ~40% of the
+  object's mass.
+- Add real vertical interest INSIDE the play area — the references are full of stairs, platforms at
+  different heights, bridges. FFT maps are famous for height mattering; ours is a flat lawn.
+- Natural surfaces still read as chunky cubes on top. Add per-tile top-face displacement on dirt
+  and grass so embankments stop being stepped boxes.
+
+CRITICAL: src/core/grid.ts is pure game logic — it must NOT import three.js, and the maps must stay
+legal (reachable, no unreachable spawn tiles). Run \`npx vitest run\` after any grid change; there are
+66 pathfinding tests and 8 playthrough tests that will catch a broken map.`,
   },
   {
     label: 'fix-lighting-vfx',
@@ -240,26 +302,32 @@ Do:
   },
   {
     label: 'fix-post-camera',
-    own: 'src/render/post.ts, src/render/camera.ts, and any files under src/render/materials/post/',
-    focus: `DEPTH OF FIELD, GRADING and COMPOSITION.
+    own: 'src/render/post.ts, src/render/camera.ts, src/state/scenarios.ts, and any files under src/render/materials/post/',
+    focus: `COMPOSITION FIRST. Round 1's critic scored composition 3/10 and lighting 2/10; these are
+concrete, already-diagnosed defects with file references. Fix them before any new effect work.
 
-Measured from refs/curated/triangle/: the top ~15% and bottom ~20% of the frame are visibly soft;
-only a horizontal band through the middle is sharp. Our instinct will be to under-do this. Push it
-until it reads as a miniature, then back off slightly.
+**(1) The board is shrunk into the void.** \`fitWholeField: true\` in src/state/scenarios.ts forces
+the zoom floor to zoomLevels[0] in src/render/camera.ts, which is why the map is a small object in
+a sea of background. Set it false and let the board BLEED PAST THE FRAME EDGES the way both
+reference games do. Open refs/curated/triangle/ and confirm: their maps run off the edge.
 
-Also measured: a character is roughly 12% of frame height in Triangle Strategy, ~17% in FFT.
-If our units fill a third of the screen the composition is wrong — pull the camera back.
+**(2) Pitch is too top-down.** 40 degrees flattens the height differences the map exists to express.
+FFT sits nearer 30 and gets far more read on vertical faces. Also break the perfect symmetry — the
+map diamond is currently centred and square to frame, which reads as a turntable. Compose it:
+action on a diagonal, negative space used deliberately.
 
-Do:
-- Strong tilt-shift / DOF with quality bokeh and a controllable focus band.
-- Colour grading via a real 3D LUT per map mood. Crush blacks toward the map's cool tone (blacks
-  should be blue or warm-brown, never neutral) and push highlights warm. Neither reference uses
-  neutral grey anywhere.
-- Bloom: wide, soft, low intensity, physically-motivated threshold. Only genuinely bright things
-  bloom. A global haze is a fail.
-- Film grain and a strong dark vignette — both references have both, clearly visible.
-- Verify the camera framing against the reference measurements above and fix the default zoom.
-- Verify pixel-snapping: sprite texels must land on whole device pixels or the art shimmers.`,
+**(3) DOF is blurring gameplay.** dof: 0.35 blurs pillars and gameplay-relevant tiles at the top and
+bottom of the board. READ THE UPDATED docs/VISUAL_TARGET.md section 3 — an earlier version of that
+rubric told you to push DOF harder and it was wrong. In both reference games the blur is on SCENERY;
+the tiles a player must count stay sharp. The focus band must contain the whole playable board with
+falloff beyond it. Pull vignette from 0.8 to ~0.35 — it is compounding an already-dark frame.
+
+**(4) Sprites and terrain are not one image.** Sprites are crisp nearest-neighbour at full
+saturation over smoothed, graded, desaturated terrain. Route sprites through the same LUT so they
+share the scene grade. Shared frequency and shared tint are the whole reason FFT's composite reads
+as a single picture. Coordinate with the fix-sprites agent by contract; you own the LUT side.
+
+Then, secondary:`,
   },
   {
     label: 'fix-sprites',
@@ -284,7 +352,27 @@ Do:
   {
     label: 'fix-ui',
     own: 'src/ui/** (everything under src/ui/)',
-    focus: `UI CRAFT.
+    focus: `TWO SPECIFIC BUGS FIRST, then craft. Round 1's critic scored UI 6/10 — the highest of any
+axis — so the chrome is already good. These are the things dragging it down:
+
+**(1) The command menu sits ON TOP OF THE BOARD and buries units.** src/ui/styles.css centres
+\`.et-hud__menus\` between the two side columns (margin-inline: auto), which puts it over the map
+centre. In the current frame it occludes the acting unit and at least two other party members.
+FFT anchors the command window to ONE SIDE, never over the acting unit. This is a playability bug,
+not a taste note. Fix it.
+
+**(2) The UI forms a picture frame that squeezes the game into the middle.** A 12-card roster strip
+pinned to the top edge, two large portrait panels bottom-left and bottom-right, key hints along the
+bottom. The playfield ends up the SMALLEST element in the composition. That is backwards — the
+board is the game. Cut global type size by roughly 25%, shrink the panels, and give the board room.
+
+**(3) The turn-order portraits do not match the units on the field.** The roster strip currently
+shows a lizard, a goat and an octopus sitting beside competent human faces, while twelve human
+sprites stand on the map. Portraits must correspond to the actual unit's job and gender. Look at
+public/assets/portraits/ and at how src/ui/portraitCatalog.ts picks them, and make the mapping
+correct and visually coherent — one art direction, not a grab bag.
+
+Then, if time remains, general craft:
 
 Compare against the UI in refs/curated/fft/ and refs/curated/triangle/ — open the frames that show
 menus, the turn-order bar, and unit info panels, and study the actual chrome: ornate framed panels,
