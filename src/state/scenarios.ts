@@ -35,7 +35,7 @@ import type {
   Zodiac,
 } from '@core/types';
 import type { PersonalityId } from '@core/ai';
-import type { LightingPresetName } from '@render/lighting';
+import type { LightingPreset, LightingPresetName } from '@render/lighting';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -112,6 +112,13 @@ export interface Scenario {
   readonly mapId: string;
   readonly seed: number;
   readonly lighting: LightingPresetName;
+  /**
+   * Per-scenario patch on top of the preset AND on top of the map's own authored
+   * lighting. Use it for the things only the composition knows — a walled
+   * courtyard needs a higher sun than the open plains or the whole interior sits
+   * in the shadow of its own wall.
+   */
+  readonly lightingTune?: Partial<LightingPreset>;
   readonly grade: string;
   readonly layers: ScenarioLayers;
   readonly camera: ScenarioCamera;
@@ -325,28 +332,28 @@ const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
   {
     id: 'p-aldric', name: 'Aldric', job: 'knight', gender: 'male', team: 'player',
     level: 14, zodiac: 'leo', brave: 72, faith: 58,
-    at: { x: 6, y: 12 }, facing: 'N', equipment: KNIGHT_KIT,
+    at: { x: 6, y: 10 }, facing: 'N', equipment: KNIGHT_KIT,
     secondary: 'squire', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
     ct: 82,
   },
   {
     id: 'p-seryn', name: 'Seryn', job: 'white-mage', gender: 'female', team: 'player',
     level: 13, zodiac: 'virgo', brave: 55, faith: 78,
-    at: { x: 6, y: 13 }, facing: 'N', equipment: WHITE_MAGE_KIT,
+    at: { x: 7, y: 11 }, facing: 'N', equipment: WHITE_MAGE_KIT,
     secondary: 'chemist', reaction: 'regenerator', support: 'half-mp', movement: 'move-hp-up',
     ct: 34,
   },
   {
     id: 'p-belric', name: 'Belric', job: 'archer', gender: 'male', team: 'player',
     level: 13, zodiac: 'sagittarius', brave: 68, faith: 52,
-    at: { x: 2, y: 11 }, facing: 'N', equipment: ARCHER_KIT,
+    at: { x: 2, y: 9 }, facing: 'N', equipment: ARCHER_KIT,
     secondary: 'squire', reaction: 'arrow-guard', support: 'concentrate', movement: 'jump-plus-2',
     ct: 61,
   },
   {
     id: 'p-ivane', name: 'Ivane', job: 'black-mage', gender: 'female', team: 'player',
     level: 13, zodiac: 'scorpio', brave: 48, faith: 82,
-    at: { x: 8, y: 13 }, facing: 'N', equipment: BLACK_MAGE_KIT,
+    at: { x: 9, y: 11 }, facing: 'N', equipment: BLACK_MAGE_KIT,
     secondary: 'time-mage', reaction: 'absorb-mp', support: 'magick-attack-up',
     movement: 'move-mp-up',
     ct: 47,
@@ -354,14 +361,14 @@ const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
   {
     id: 'p-torvald', name: 'Torvald', job: 'monk', gender: 'male', team: 'player',
     level: 14, zodiac: 'aries', brave: 80, faith: 45,
-    at: { x: 8, y: 11 }, facing: 'N', equipment: MONK_KIT,
+    at: { x: 8, y: 9 }, facing: 'N', equipment: MONK_KIT,
     secondary: 'knight', reaction: 'brave-up', support: 'martial-arts', movement: 'move-plus-2',
     ct: 25,
   },
   {
     id: 'p-nessa', name: 'Nessa', job: 'thief', gender: 'female', team: 'player',
     level: 12, zodiac: 'gemini', brave: 66, faith: 60,
-    at: { x: 4, y: 12 }, facing: 'N', equipment: THIEF_KIT,
+    at: { x: 3, y: 11 }, facing: 'N', equipment: THIEF_KIT,
     secondary: 'archer', reaction: 'sunken-state', support: 'gained-jp-up', movement: 'move-plus-2',
     ct: 55,
   },
@@ -419,9 +426,25 @@ const BATTLE_OPEN: Scenario = {
   mapId: 'orbonne-courtyard',
   seed: 20260727,
   lighting: 'dawn',
-  grade: 'cathedral',
+  // Orbonne's cloister is a box: its own walls rise 4-5 world units above the
+  // sunken garden, so the preset's 24-degree dawn sun leaves the entire playable
+  // interior in shadow. Lift the key over the wall and warm the fill.
+  lightingTune: {
+    keyElevation: 54,
+    keyAzimuth: 138,
+    keyIntensity: 3.1,
+    hemiIntensity: 1.25,
+    ambientIntensity: 0.42,
+    skyColor: 0xa8c4e8,
+    groundColor: 0x6d5b46,
+    rimIntensity: 0.7,
+    shadowRadius: 2.4,
+  },
+  grade: 'ivalice-noon',
   layers: { terrain: true, sprites: true, ui: true, post: true, highlights: true },
-  camera: { yawIndex: 0, frameField: true, focusTile: { x: 6, y: 7, z: 3 } },
+  // 40 degrees rather than the 30-degree default: a walled cloister seen from
+  // 30 shows mostly its own outer wall. This looks down into the garden.
+  camera: { yawIndex: 0, frameField: true, pitchDegrees: 40 },
   // The reference games are clean. A tactics board has to stay readable across
   // the whole frame, so the tilt-shift band is a hint of miniature depth rather
   // than the wall of blur the stack defaults to.

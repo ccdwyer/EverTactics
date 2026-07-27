@@ -37,6 +37,7 @@ import {
   buildScenario,
   getScenario,
   overrideScenario,
+  scenarioMapDef,
   type BuiltScenario,
   type Scenario,
 } from './scenarios';
@@ -63,7 +64,7 @@ import type {
 } from '@core/types';
 
 import { IsoCamera, TILE_SIZE } from '@render/camera';
-import { LIGHTING_PRESETS, LightingRig } from '@render/lighting';
+import { LightingRig } from '@render/lighting';
 import { SpriteLayer, type UnitSprite } from '@render/sprites';
 import { Stage } from '@render/stage';
 import { Terrain, buildTerrain, tileWorldPosition } from '@render/terrain';
@@ -177,6 +178,7 @@ export class Game {
 
     this.lighting = new LightingRig(this.stage.scene, { preset: this.scenario.lighting });
     this.lighting.bindRenderer(this.stage.renderer);
+    this.applyMapLighting();
 
     this.vfx = new VfxSystem({ tileSize: TILE_SIZE, seed: this.scenario.seed });
     this.vfx.addTo(this.stage.scene);
@@ -212,11 +214,14 @@ export class Game {
       await this.stage.addLoadBarrier(this.spawnSprites(), 'sprites');
     }
 
-    this.frameCamera();
     this.installFrameCallbacks();
     this.installPointerHandling();
 
+    // Framing has to happen after the first resize: `frameField` picks the
+    // largest zoom level that fits the drawing buffer, and before `resize()` the
+    // buffer is still 1x1.
     this.stage.resize();
+    this.frameCamera();
     this.stage.start();
 
     // Run the clock to the first turn before releasing the convergence barrier,
@@ -237,9 +242,7 @@ export class Game {
     const stack = this.post?.stack;
     if (!stack) return;
     const profile = this.scenario.post ?? {};
-    const preset = LIGHTING_PRESETS[this.scenario.lighting];
-
-    stack.settings.exposure = (profile.exposure ?? 1) * preset.exposure;
+    stack.settings.exposure = (profile.exposure ?? 1) * this.lighting.current.exposure;
 
     const dof = profile.dof ?? 1;
     if (dof <= 0) {
@@ -257,13 +260,36 @@ export class Game {
     if (profile.vignette !== undefined) stack.setEffectIntensity('vignette', profile.vignette * 0.26);
   }
 
+  /**
+   * Fold the map's authored lighting into the preset, then the scenario's own
+   * patch on top. `MapDef.lighting` is real data the map author wrote down (sun
+   * bearing, elevation, sky and ground fill, fog) and nothing was reading it.
+   */
+  private applyMapLighting(): void {
+    const def = scenarioMapDef(this.scenario);
+    if (def) {
+      const m = def.lighting;
+      this.lighting.tune({
+        keyColor: m.sunColor,
+        keyIntensity: m.sunIntensity,
+        keyAzimuth: m.sunAzimuth,
+        keyElevation: m.sunElevation,
+        skyColor: m.skyColor,
+        groundColor: m.groundColor,
+        ambientIntensity: m.ambientIntensity,
+        fogColor: m.fogColor,
+      });
+    }
+    if (this.scenario.lightingTune) this.lighting.tune(this.scenario.lightingTune);
+  }
+
   private buildTerrain(): void {
     const terrain = buildTerrain(this.state.field);
     this.terrain = terrain;
     this.stage.scene.add(terrain);
 
     // The map author's own sun direction, so water glint agrees with the key.
-    const preset = LIGHTING_PRESETS[this.scenario.lighting];
+    const preset = this.lighting.current;
     const water = terrain.water;
     if (water) {
       const azimuth = THREE.MathUtils.degToRad(preset.keyAzimuth);
@@ -294,7 +320,7 @@ export class Game {
       .sub(this.lighting.key.target.position)
       .normalize()
       .multiplyScalar(-1);
-    this.sprites.setKeyLight(direction.clone(), LIGHTING_PRESETS[this.scenario.lighting].rimColor);
+    this.sprites.setKeyLight(direction.clone(), this.lighting.current.rimColor);
   }
 
   private async spawnSprites(): Promise<void> {
@@ -315,7 +341,7 @@ export class Game {
 
   private frameCamera(): void {
     const cam = this.scenario.camera;
-    if (cam.frameField) this.camera.frameField(this.state.field, 3);
+    if (cam.frameField) this.camera.frameField(this.state.field, 4);
     if (cam.pixelScale !== undefined) void this.camera.setPixelScale(cam.pixelScale, true);
     if (cam.focusTile) this.camera.focusTile(cam.focusTile, { immediate: true });
   }
@@ -383,10 +409,10 @@ export class Game {
     const active = this.activeUnit();
     if (!active) return;
 
-    this.camera.focusTile(active.pos, { immediate: this.shot });
-    if (this.scenario.camera.focusTile) {
-      this.camera.focusTile(this.scenario.camera.focusTile, { immediate: true });
-    }
+    // A scenario that asked for the whole board framed keeps the whole board
+    // framed; only a free camera chases the active unit.
+    if (this.scenario.camera.frameField) this.frameCamera();
+    else this.camera.focusTile(active.pos, { immediate: this.shot });
 
     if (active.team === 'player' && this.scenario.openCommandMenu) {
       this.enterCommandMode(active);
@@ -675,7 +701,10 @@ export class Game {
   private enterCommandMode(unit: Unit): void {
     this.setMode({ kind: 'command' });
     this.ui.setActiveUnit(unitVM(this.state, unit));
-    this.ui.showCommandMenu(commandItemsFor(this.state, unit), this.menuAnchorFor(unit));
+    // Unanchored: the menu docks bottom-centre in the HUD rail. Hanging it off
+    // the unit is more FFT-authentic but on a framed 14x14 board it lands on top
+    // of the half of the field the player is choosing between.
+    this.ui.showCommandMenu(commandItemsFor(this.state, unit));
     for (const sprite of this.sprites.all) {
       sprite.setSelection(sprite.unitId === unit.id ? 'active' : 'none');
       sprite.setTurnMarker(sprite.unitId === unit.id);

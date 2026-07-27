@@ -83,9 +83,10 @@ page.on('pageerror', (e) => errors.push(String(e)));
 
 mkdirSync(outDir, { recursive: true });
 
-// `play=1` asks the app to boot into an interactive battle rather than a posed
-// screenshot frame; the scene still selects which battle.
-const url = `http://localhost:${port}/?scene=${encodeURIComponent(scene)}&play=1`;
+// `scene=` (as opposed to `shot=`) boots a live, interactive battle rather than a
+// posed screenshot frame. `debug=1` exposes window.__EVERTACTICS__ so each step
+// can report what the game thought was happening, not just what it looked like.
+const url = `http://localhost:${port}/?scene=${encodeURIComponent(scene)}&debug=1`;
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
 let booted = true;

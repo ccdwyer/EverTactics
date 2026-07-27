@@ -26,6 +26,27 @@
  * Intensities are physical (three ≥ r155 has no legacy lighting mode). The key
  * is in the low single digits and the tone mapper does the rest; `exposure` is
  * part of the preset because mood is exposure as much as it is colour.
+ *
+ * COLOUR IS NOT OPTIONAL. Every preset here commits to a complementary split —
+ * a saturated warm key against a saturated cool fill, or the reverse. Neutral
+ * white light on a stone courtyard is the single fastest way to read as an
+ * untuned engine test, and the reference corpus contains no such frame. Look at
+ * `refs/curated/triangle/press_002_gematsu_1920x1080.jpg`: the entire village is
+ * near-black except for orange pools around each fire, and the grass inside
+ * those pools is *orange*, not green-with-a-warm-tint.
+ *
+ * PRACTICALS. Those pools come from real point lights, not from painting the
+ * texture. `LIGHTING_PRACTICALS` gives each preset a handful of placed point
+ * lights (braziers, window shafts, moon-through-the-arches) positioned in
+ * normalised diorama space so they land correctly on any map size. They flicker
+ * on a summed-sine noise so a torch never reads as a static blob.
+ *
+ * THE PROBE. `AmbientLight` is a constant added to every surface regardless of
+ * which way it faces — a flat grey wash, which is exactly the thing the fail
+ * list forbids. A `LightProbe` instead stores irradiance as spherical harmonics,
+ * so ambient can be *directional*: warm from the key side, cold from the fill
+ * side, earth-bounce from below. That is the cheap irradiance term that keeps
+ * shadowed faces coloured rather than merely dark.
  */
 
 import {
@@ -36,11 +57,14 @@ import {
   Fog,
   Group,
   HemisphereLight,
+  LightProbe,
   MathUtils,
   Object3D,
   PCFSoftShadowMap,
+  PointLight,
   Scene,
   Sphere,
+  SphericalHarmonics3,
   Vector3,
   type WebGLRenderer,
 } from 'three';
@@ -380,6 +404,27 @@ export class LightingRig {
     this.to = toLive(target);
     this.blend = 0;
     this.blendDuration = durationSeconds;
+  }
+
+  /**
+   * Patch individual fields of the live mood without leaving the current preset.
+   *
+   * This is how a map's own authored lighting (`MapDef.lighting` in
+   * `core/grid.ts` carries sun colour, bearing, elevation, sky/ground fill and
+   * fog per map) reaches the rig: pick the preset for the time of day, then tune
+   * it to the diorama. Applies immediately and cancels any cross-fade in flight,
+   * since a half-finished fade plus a patch is not a state worth defining.
+   */
+  tune(patch: Partial<LightingPreset>): void {
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      (this.live as Record<string, number>)[key] = value;
+      (this.to as Record<string, number>)[key] = value;
+      (this.from as Record<string, number>)[key] = value;
+    }
+    this.blend = 1;
+    this.blendDuration = 0;
+    this.commit();
   }
 
   /** True when no cross-fade is in flight. Used for render convergence. */
