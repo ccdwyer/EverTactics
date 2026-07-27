@@ -127,6 +127,39 @@ A frame with any of these is not shippable:
 - Sprites at full saturation over a graded, desaturated map — they must share one grade
 - Turn-order portraits that do not match the units actually on the field
 
+
+## Reference luminance — cite a FILE, never "the references"
+
+Two agents once spent a whole round pulling exposure in opposite directions, each quoting "the
+references": one said meanLuma 66–88, the other 38.4. Both were right about their own sample.
+
+Measured across all 28 curated Triangle frames, `meanLuma` spans **36.5 to 142.6** — a 4× range —
+because the corpus holds night interiors *and* daylight snowfields. There is no single reference
+luminance. Match the band that fits the scene's mood:
+
+| mood | meanLuma | lumaP95 | darkShareOfSubject | example |
+|---|---|---|---|---|
+| night / interior | 36 – 50 | 116 – 136 | 0.41 – 0.63 | `press_002`, `official_009`, `official_033` |
+| overcast / dusk | 50 – 70 | 135 – 190 | 0.25 – 0.48 | `official_016`, `official_007`, `official_027` |
+| daylight / snow | 84 – 143 | 152 – 242 | 0.01 – 0.24 | `official_001`, `official_020`, `official_026` |
+
+`battle-open` is a torch-lit night courtyard and belongs in the first row. It currently measures
+luma 45.8 / p95 155.9 / dark 0.42 at `post.exposure: 2.1`.
+
+**This is why `meanLuma` is reported but never gated** — a gate would have to know the scene's mood,
+and a frame is not wrong for being bright.
+
+## Exposure has exactly one owner
+
+`Game.applyPostProfile` used to compute `scenario.post.exposure * lightingPreset.exposure`. Two
+owners on one dial cancel each other: in one round the scenario value went 2.65 → 3.4 → 3.9 while
+the preset factor was cut 1.4 → 0.95, the product barely moved, and both parties concluded their
+change "wasn't reaching the frame".
+
+A scenario's `post.exposure` is now **final**; the preset's value applies only when a scenario
+declines to state one. If you own lighting, own the *ratios* — key/fill, chroma, colour split,
+bounce — all of which survive whatever absolute exposure lands on.
+
 ## How the blind test works
 
 `tools/ab.mjs` normalises our frame and a reference frame to identical size and encoding and writes
