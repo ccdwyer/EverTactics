@@ -31,7 +31,7 @@ import type {
   Unit,
   Vec3,
 } from '@core/types';
-import { portraitForId } from '@ui/portraits';
+import { portraitForUnit } from '@ui/portraits';
 import type {
   AbilityItemVM,
   CommandItemVM,
@@ -52,7 +52,14 @@ import type {
  * unless the roster is larger than the catalogue.
  */
 export function portraitFor(unit: Unit): string {
-  return portraitForId(`${unit.id}:${unit.gender}`);
+  // Cast the face from the unit's actual job and gender rather than hashing its
+  // id across the whole catalogue — otherwise the turn rail shows a lizard and a
+  // goat beside twelve human sprites on the field. Unmapped jobs fall back to
+  // the curated pool inside `portraitForUnit`.
+  return portraitForUnit(unit.id, {
+    job: getJob(unit.currentJob).name,
+    gender: unit.gender,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +147,10 @@ export function turnOrderVM(state: BattleState, limit = 12): TurnEntryVM[] {
       name: unit.name,
       team: unit.team,
       portrait: portraitFor(unit),
+      // Also pass the cast inputs so the rail stays correct if a producer ever
+      // omits `portrait`.
+      job: getJob(unit.currentJob).name,
+      gender: unit.gender,
       current: i === 0 && state.active === unit.id,
       ticksUntil: entry.tick,
       ...(charging ? { note: 'Charging' } : {}),
