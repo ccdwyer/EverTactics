@@ -386,7 +386,7 @@ is the whole composition score.** The environment agent attributed it precisely 
 
     farTop / board luminance = 1.05      references sit at 0.46 - 0.53
 
-It is NOT the environment layer: with `environment.setEnabled(false)` the ratio is still 0.90, and
+It is NOT the environment layer: with environment.setEnabled(false) the ratio is still 0.90, and
 hiding the sky mesh or the haze banks each moves it only ~1 luma. It is terrain geometry reaching
 the top of frame plus post bloom. That is yours.
 
@@ -398,8 +398,8 @@ composition axis fell to 3.8 last round while texture and geometry rose.
 Options, in rough order of bluntness: a top-weighted luminance falloff in the composite; reducing
 bloom contribution above the focal band; letting distance haze pull the far terrain toward the sky
 value so it stops carrying highlights; pulling the camera so less empty sky is in frame at all.
-Get farTop/board under 0.6 without flattening the board itself (check `localContrast` does not
-fall below ~25 and `backgroundFraction` stays inside 0.087-0.180).
+Get farTop/board under 0.6 without flattening the board itself (check localContrast does not
+fall below ~25 and backgroundFraction stays inside 0.087-0.180).
 
 **(1) The older composition note, largely superseded — verify before acting:** Earlier rounds fixed the void and the framing;
 what critics now describe is a frame with no focal hierarchy — everything equally detailed, equally

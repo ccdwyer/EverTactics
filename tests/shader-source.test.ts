@@ -36,6 +36,34 @@ function tsFiles(dir: string): string[] {
   return out;
 }
 
+/**
+ * Workflow scripts have the same hazard for the same reason: the fixer briefs are
+ * long prose inside template literals. Scoping this guard to `src/render` only was
+ * itself a mistake — within an hour of adding it, the same bug was reintroduced in
+ * `tools/workflows/polish-round.js`, which the guard did not cover.
+ */
+const WORKFLOWS = resolve(__dirname, '../tools/workflows');
+
+describe('workflow scripts', () => {
+  it('parse — no backticks stranded inside brief template literals', async () => {
+    const { execFileSync } = await import('node:child_process');
+    for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.js'))) {
+      const full = join(WORKFLOWS, file);
+      // A workflow script uses top-level await and a bare `return`, so wrap it in
+      // an async function before asking node to parse it.
+      const src = readFileSync(full, 'utf8').replace(/^export const meta/m, 'const meta');
+      const wrapped =
+        'async function _w(){const args={},log=()=>{},phase=()=>{},' +
+        'agent=async()=>({}),parallel=async()=>[],pipeline=async()=>[];\n' +
+        src +
+        '\n}';
+      expect(() => {
+        execFileSync('node', ['--check', '/dev/stdin'], { input: wrapped, stdio: 'pipe' });
+      }, `${file} does not parse — usually a backtick inside a brief template literal`).not.toThrow();
+    }
+  });
+});
+
 describe('shader sources', () => {
   it('has no backticks in comment lines', () => {
     const offences: string[] = [];
