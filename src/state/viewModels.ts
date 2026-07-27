@@ -160,6 +160,12 @@ export function turnOrderVM(state: BattleState, limit = 8): TurnEntryVM[] {
       // omits `portrait`.
       job: getJob(unit.currentJob).name,
       gender: unit.gender,
+      // The HP sliver under each chip face. Every entry in FFT's Combat Timeline
+      // carries one — it is how a player picks the wounded enemy out of the queue
+      // without hovering. Max comes from derived stats, not raw, so equipment and
+      // job multipliers are reflected.
+      hp: Math.max(0, unit.stats.hp),
+      maxHp: deriveStats(unit).maxHp,
       current: i === 0 && state.active === unit.id,
       ticksUntil: entry.tick,
       ...(charging ? { note: 'Charging' } : {}),

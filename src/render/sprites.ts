@@ -788,7 +788,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
       uTailDir: { value: new THREE.Vector2(0, 1) },
       /** How far the cast tail reaches, in world units. cot(elevation) driven. */
       uTailLength: { value: 0.7 },
-      uDensity: { value: SHADOW_DENSITY },
+      uDensity: { value: 0.0 }, // AB
     },
     vertexShader: /* glsl */ `
       varying vec2 vUvDecal;

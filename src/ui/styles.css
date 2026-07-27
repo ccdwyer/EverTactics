@@ -278,7 +278,11 @@
    it, and it survives the 2x crop the critics judge at. */
 .et-panel__vellum {
   position: absolute;
-  inset: -13px;
+  /* Reaches out over the border strip so the weave runs across the frame too,
+     not just the field inside it. Derived from --panel-frame for the same reason
+     the corner insets are: an absolutely positioned child starts at the padding
+     box, so covering the border means backing out its full width. */
+  inset: calc(-1 * var(--panel-frame));
   background-image:
     var(--grain),
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.5) 0 1px, transparent 1px 3px),
