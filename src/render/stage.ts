@@ -2,26 +2,26 @@
  * EverTactics — the Stage.
  *
  * Owns the WebGL renderer, the scene, the frame loop and the render-target
- * pipeline. Everything else in `render/` plugs into this.
+ * pipeline. Everything else in 'render/' plugs into this.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * COLOUR PIPELINE
  * ─────────────────────────────────────────────────────────────────────────────
  * The scene is *never* rendered straight to the canvas. It is rendered into a
- * half-float, linear-working-space render target (`sceneTarget`) that carries a
+ * half-float, linear-working-space render target ('sceneTarget') that carries a
  * depth texture, and a present step converts that to display sRGB.
  *
  * three applies tone mapping and output colour conversion only when the render
  * destination is the canvas, so rendering into the target leaves us with clean
  * linear HDR — exactly what SSAO, bloom and a grade LUT need to work on. The
- * default present step is three's `OutputPass`, which reads
- * `renderer.toneMapping` / `renderer.outputColorSpace` and does the conversion
- * once, at the end. When `src/render/post.ts` installs a `PostPipeline` it takes
+ * default present step is three's 'OutputPass', which reads
+ * 'renderer.toneMapping' / 'renderer.outputColorSpace' and does the conversion
+ * once, at the end. When 'src/render/post.ts' installs a 'PostPipeline' it takes
  * over that final step and is responsible for the same conversion.
  *
  * Textures loaded elsewhere must set their own colour space: colour maps
- * (albedo, sprite sheets) → `SRGBColorSpace`; data maps (normal, roughness,
- * palette LUTs, index textures) → `NoColorSpace`/linear. Getting a palette LUT
+ * (albedo, sprite sheets) → 'SRGBColorSpace'; data maps (normal, roughness,
+ * palette LUTs, index textures) → 'NoColorSpace'/linear. Getting a palette LUT
  * wrong is the single most common source of "why are the colours slightly off".
  *
  * ─────────────────────────────────────────────────────────────────────────────
@@ -29,21 +29,21 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Fixed-step logic, free-running render.
  *
- *   real delta → clamped to `maxDelta` (a tab-switch must not fast-forward the
- *   battle) → accumulated → drained in `fixedStep` slices, at most `maxSubSteps`
+ *   real delta → clamped to 'maxDelta' (a tab-switch must not fast-forward the
+ *   battle) → accumulated → drained in 'fixedStep' slices, at most 'maxSubSteps'
  *   per frame (the rest is dropped rather than spiralling) → the leftover
- *   fraction is handed to render callbacks as `alpha` for interpolation.
+ *   fraction is handed to render callbacks as 'alpha' for interpolation.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * CONVERGENCE / `window.__EVERTACTICS_READY__`
+ * CONVERGENCE / 'window.__EVERTACTICS_READY__'
  * ─────────────────────────────────────────────────────────────────────────────
- * `tools/shoot.mjs` blocks on that flag, so it is load-bearing. The stage
+ * 'tools/shoot.mjs' blocks on that flag, so it is load-bearing. The stage
  * declares convergence on the first frame where *all* of these hold:
  *
- *   • every registered load barrier has settled (`addLoadBarrier`, `hold`)
- *   • the camera reports `settled` (no rotate/zoom/follow/shake in flight)
- *   • the post pipeline reports `converged` (TAA/SSAO accumulation finished)
- *   • that has been true for `stableFrames` consecutive presented frames
+ *   • every registered load barrier has settled ('addLoadBarrier', 'hold')
+ *   • the camera reports 'settled' (no rotate/zoom/follow/shake in flight)
+ *   • the post pipeline reports 'converged' (TAA/SSAO accumulation finished)
+ *   • that has been true for 'stableFrames' consecutive presented frames
  *
  * Barriers are *fail-open*: a rejected promise still releases, and an error is
  * logged. A broken loader must produce a diagnosable screenshot, not a hang.
@@ -85,7 +85,7 @@ declare global {
 // Contracts other render modules code against
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** What the Stage needs from a camera rig. `IsoCamera` satisfies this. */
+/** What the Stage needs from a camera rig. 'IsoCamera' satisfies this. */
 export interface StageCamera {
   readonly camera: Camera;
   /** Called on every resize with the DEVICE-pixel drawing buffer size. */
@@ -102,11 +102,11 @@ export interface PostRenderContext {
   camera: Camera;
   /**
    * The composed scene: half-float, LINEAR working colour space, no tone
-   * mapping applied. `source.depthTexture` is a full-precision depth buffer for
+   * mapping applied. 'source.depthTexture' is a full-precision depth buffer for
    * SSAO / DoF / fog reconstruction.
    */
   source: WebGLRenderTarget;
-  /** Same as `source.depthTexture`, hoisted for convenience. */
+  /** Same as 'source.depthTexture', hoisted for convenience. */
   depth: DepthTexture;
   /** Drawing-buffer size in device pixels. */
   width: number;
@@ -114,17 +114,17 @@ export interface PostRenderContext {
   pixelRatio: number;
   /** Seconds since the previous presented frame, already clamped. */
   deltaSeconds: number;
-  /** Seconds since `start()`. */
+  /** Seconds since 'start()'. */
   elapsedSeconds: number;
   /** Monotonic presented-frame counter. */
   frame: number;
 }
 
 /**
- * Implemented by `src/render/post.ts`.
+ * Implemented by 'src/render/post.ts'.
  *
  * The pipeline OWNS the final present: it must end with the canvas
- * (`renderer.setRenderTarget(null)`) containing tone-mapped, display-sRGB
+ * ('renderer.setRenderTarget(null)') containing tone-mapped, display-sRGB
  * pixels. Everything it receives is linear HDR.
  */
 export interface PostPipeline {
@@ -136,9 +136,9 @@ export interface PostPipeline {
   /**
    * Set by a pipeline that composes the scene itself (it needs its own colour
    * target plus a sprite-only mask pass, which cannot be reconstructed from a
-   * flattened buffer). Stage then skips its own scene→`sceneTarget` render and
-   * hands `ctx.source` over purely as a spare target. `src/render/post.ts`'s
-   * `PostStack` works this way; see `createPostPipeline` in `src/state/render.ts`.
+   * flattened buffer). Stage then skips its own scene→'sceneTarget' render and
+   * hands 'ctx.source' over purely as a spare target. 'src/render/post.ts''s
+   * 'PostStack' works this way; see 'createPostPipeline' in 'src/state/render.ts'.
    */
   readonly rendersScene?: boolean;
   dispose(): void;
@@ -147,7 +147,7 @@ export interface PostPipeline {
 export type ToneMappingName = 'aces' | 'agx' | 'neutral';
 
 export interface StageOptions {
-  /** Element the canvas is appended to. Defaults to `#app`, then `document.body`. */
+  /** Element the canvas is appended to. Defaults to '#app', then 'document.body'. */
   container?: HTMLElement;
   /** Use an existing canvas instead of creating one. */
   canvas?: HTMLCanvasElement;
@@ -156,7 +156,7 @@ export interface StageOptions {
   /** MSAA sample count on the scene target. 0 disables. */
   samples?: number;
   toneMapping?: ToneMappingName;
-  /** Initial exposure. `LightingRig` overrides this per preset when bound. */
+  /** Initial exposure. 'LightingRig' overrides this per preset when bound. */
   exposure?: number;
   /** Fixed logic step, in seconds. */
   fixedStep?: number;
@@ -170,12 +170,12 @@ export interface StageOptions {
   renderWhilePaused?: boolean;
   /** Auto-start the rAF loop in the constructor. */
   autoStart?: boolean;
-  /** Expose the stage on `window.__EVERTACTICS_STAGE__` for tooling. */
+  /** Expose the stage on 'window.__EVERTACTICS_STAGE__' for tooling. */
   exposeGlobal?: boolean;
   /**
-   * Sky / backdrop / atmosphere. Pass `{ enabled: false }` for diagnostic
+   * Sky / backdrop / atmosphere. Pass '{ enabled: false }' for diagnostic
    * scenes that want to look at geometry against a flat colour.
-   * See `src/render/atmosphere.ts`.
+   * See 'src/render/atmosphere.ts'.
    */
   environment?: WorldEnvironmentOptions | false;
 }
@@ -203,10 +203,10 @@ export class Stage {
    *
    * Stage owns it because Stage owns the scene and the frame loop, and because
    * the alternative — making every caller remember to install it — is exactly
-   * how the board ended up floating in `clearColor` for two rounds. It
-   * self-configures by reading `scene.background`, `scene.fog`, the key
-   * `DirectionalLight` and the `terrain:*` group, so nothing else has to call
-   * anything. See `src/render/atmosphere.ts` for the escape hatches.
+   * how the board ended up floating in 'clearColor' for two rounds. It
+   * self-configures by reading 'scene.background', 'scene.fog', the key
+   * 'DirectionalLight' and the 'terrain:*' group, so nothing else has to call
+   * anything. See 'src/render/atmosphere.ts' for the escape hatches.
    */
   readonly environment: WorldEnvironment | null;
 
@@ -342,7 +342,7 @@ export class Stage {
 
   /**
    * Install (or clear) the post stack. The pipeline owns the final present; see
-   * {@link PostPipeline}. Passing `null` restores the built-in tone-map/encode
+   * {@link PostPipeline}. Passing 'null' restores the built-in tone-map/encode
    * present, so the game is always renderable with or without post.
    */
   setPostPipeline(pipeline: PostPipeline | null): void {
@@ -367,7 +367,7 @@ export class Stage {
     this.rafHandle = requestAnimationFrame(this.frame);
   }
 
-  /** Stop the rAF driver entirely. `start()` resumes with a fresh delta. */
+  /** Stop the rAF driver entirely. 'start()' resumes with a fresh delta. */
   stop(): void {
     if (!this.running) return;
     this.running = false;
@@ -442,7 +442,7 @@ export class Stage {
   // ── convergence barriers ──────────────────────────────────────────────────
 
   /**
-   * Hold off `__EVERTACTICS_READY__` until `promise` settles. Rejection releases
+   * Hold off '__EVERTACTICS_READY__' until 'promise' settles. Rejection releases
    * the barrier and logs — a broken loader yields a diagnosable frame, not a
    * hang.
    */

@@ -16,8 +16,8 @@
  *     the same beat of the same ability is byte-identical run to run. That is what makes
  *     the visual critic loop meaningful.
  *  4. **Event-driven.** Abilities play as a timeline (windup → cast → travel → impact →
- *     aftermath). `play()` returns a promise that resolves when the effect is done, so the
- *     battle event stream can await it, and `onImpact` fires on the exact frame the hit
+ *     aftermath). 'play()' returns a promise that resolves when the effect is done, so the
+ *     battle event stream can await it, and 'onImpact' fires on the exact frame the hit
  *     lands so damage numbers and hit-stop are in sync with the visuals.
  */
 
@@ -183,7 +183,7 @@ function buildAtlas(): HTMLCanvasElement {
   const C = ATLAS_CELL;
   const H = C / 2;
 
-  // NOTE: `draw` receives the cell's canvas-space origin because `putImageData` ignores
+  // NOTE: 'draw' receives the cell's canvas-space origin because 'putImageData' ignores
   // the current transform and clip — pixel-authored cells must place themselves.
   const cell = (index: number, draw: (g: CanvasRenderingContext2D, cx: number, cy: number) => void): void => {
     const cx = (index % ATLAS_GRID) * C;
@@ -252,14 +252,14 @@ function buildAtlas(): HTMLCanvasElement {
   //
   // ORIENTATION MATTERS, and it was wrong until round 4.
   //
-  // `v` here runs 1 at the cell's top row to 0 at its bottom row, so the wide
+  // 'v' here runs 1 at the cell's top row to 0 at its bottom row, so the wide
   // opaque base is at the TOP of the cell image. That is deliberate and it is
   // the opposite of what reads naturally when you author the bitmap.
   //
-  // The chain: the atlas is uploaded with `flipY = false`, so texture v = 0 is
-  // the cell's first (top) canvas row; the quad is a `PlaneGeometry` whose
+  // The chain: the atlas is uploaded with 'flipY = false', so texture v = 0 is
+  // the cell's first (top) canvas row; the quad is a 'PlaneGeometry' whose
   // uv.y = 0 sits at local −Y. So the cell's top row lands at the BOTTOM of the
-  // billboard. A velocity-stretched particle (`stretch > 0`) then aligns local
+  // billboard. A velocity-stretched particle ('stretch > 0') then aligns local
   // +Y with its direction of travel — which means for a rising flame the cell's
   // *bottom* row is what points upward.
   //
@@ -912,9 +912,9 @@ class ParticleBatch {
   }
 
   /**
-   * Turn on ortho depth stratification. `sizeGain`/`dimGain` are the fraction of
-   * size and alpha lost across half the band; `pivot` is the view distance that
-   * gets neither, `range` the half-width of the band in world units.
+   * Turn on ortho depth stratification. 'sizeGain'/'dimGain' are the fraction of
+   * size and alpha lost across half the band; 'pivot' is the view distance that
+   * gets neither, 'range' the half-width of the band in world units.
    */
   setDepthResponse(sizeGain: number, dimGain: number, pivot: number, range: number): void {
     (this.material.uniforms['uDepthResponse']!.value as Vector2).set(sizeGain, dimGain);
@@ -996,7 +996,7 @@ void main() {
  * "no bloom halo", "the light sources have no volumetric presence".
  *
  * The card is driven from the light's *live* intensity, so it breathes with the
- * flicker `lighting.ts` is applying — which is what ties the particle layer and
+ * flicker 'lighting.ts' is applying — which is what ties the particle layer and
  * the lighting rig into one effect instead of two systems that happen to be in
  * the same place.
  */
@@ -1058,7 +1058,7 @@ class GlowCards {
     this.tintAttr.array[index * 4 + 3] = radius;
   }
 
-  /** Commit `count` live cards; the rest are collapsed to zero radius. */
+  /** Commit 'count' live cards; the rest are collapsed to zero radius. */
   commit(count: number): void {
     for (let i = count; i < this.capacity; i++) {
       this.tintAttr.array[i * 4 + 3] = 0;
@@ -1313,7 +1313,7 @@ export interface MagicCircleOptions {
 
 /**
  * A ground sigil. Built as a tessellated disc rather than a screen-space decal so it can
- * be conformed to stepped terrain via the `groundHeight` sampler without needing to read
+ * be conformed to stepped terrain via the 'groundHeight' sampler without needing to read
  * the depth buffer we are currently rendering into.
  */
 class MagicCircle {
@@ -1608,9 +1608,9 @@ class RisingShapes {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Every effect in this file emits a real `PointLight`.
+ * Every effect in this file emits a real 'PointLight'.
  *
- * This is not garnish. In `refs/curated/triangle/press_002_gematsu_1920x1080.jpg`
+ * This is not garnish. In 'refs/curated/triangle/press_002_gematsu_1920x1080.jpg'
  * the entire village is lit *by* the fires: the ground under each flame is
  * orange, the grass twenty units away is black, and the sprite standing between
  * two of them is warm on both sides and dark in the middle. A particle system
@@ -1620,13 +1620,13 @@ class RisingShapes {
  *
  * Three constraints shape the implementation:
  *
- *  1. **Fixed pool.** Adding or removing a light changes `NUM_POINT_LIGHTS`,
+ *  1. **Fixed pool.** Adding or removing a light changes 'NUM_POINT_LIGHTS',
  *     which recompiles every material in the scene. That hitch would land on
  *     precisely the frame a spell detonates. So the pool is allocated once, and
  *     idle lights sit at intensity 0.
  *  2. **Clock-driven, not timeline-driven.** Envelopes are evaluated from the
- *     system clock in `update()` rather than from a `VfxTimeline` span, because
- *     a timeline can be `cancel()`ed mid-flight and a light left switched on at
+ *     system clock in 'update()' rather than from a 'VfxTimeline' span, because
+ *     a timeline can be 'cancel()'ed mid-flight and a light left switched on at
  *     full intensity is a far worse artefact than a missing one.
  *  3. **Priority eviction.** Six lights is not many. A detonation outranks a
  *     charge glow, so when the pool is full the lowest-priority slot is stolen.
@@ -1634,9 +1634,9 @@ class RisingShapes {
 const MAX_VFX_LIGHTS = 6;
 
 /**
- * Irradiance ceiling for a spawned VFX light, measured `VFX_LIGHT_NEAR` tiles out.
+ * Irradiance ceiling for a spawned VFX light, measured 'VFX_LIGHT_NEAR' tiles out.
  *
- * ROUND-5, and it is the same defect `lighting.ts` fixed on the braziers.
+ * ROUND-5, and it is the same defect 'lighting.ts' fixed on the braziers.
  *
  * Effect definitions in this file author peaks up to 110 candela. At the default
  * decay of 1.55 that puts an irradiance of **110** on the stone a tile from the
@@ -1661,7 +1661,7 @@ const WHITE_TINT = /*@__PURE__*/ new Color(1, 0.97, 0.9);
 export interface VfxLightOptions {
   /** Linear HDR colour. Element palettes feed this directly. */
   color: Color;
-  /** Peak intensity in candela; irradiance at distance d is `intensity / d²`. */
+  /** Peak intensity in candela; irradiance at distance d is 'intensity / d²'. */
   intensity: number;
   /** Cutoff radius in TILES. Past this the light contributes exactly nothing. */
   radius: number;
@@ -1671,7 +1671,7 @@ export interface VfxLightOptions {
   hold?: number;
   /** Seconds of decay. Quadratic, so it reads as a real falloff rather than a dissolve. */
   fall?: number;
-  /** Height above `position`, in tiles. Ground-level lights bury themselves in the terrain. */
+  /** Height above 'position', in tiles. Ground-level lights bury themselves in the terrain. */
   lift?: number;
   /** Flicker depth 0..1 applied across the whole envelope. */
   flicker?: number;
@@ -1693,7 +1693,7 @@ export interface VfxLightHandle {
   moveTo(position: Vector3): void;
   /** Retint mid-flight (a bolt that turns from white to blue as it cools). */
   setColor(color: Color): void;
-  /** Start the decay now rather than after `hold` expires. */
+  /** Start the decay now rather than after 'hold' expires. */
   release(fallSeconds?: number): void;
 }
 
@@ -1724,7 +1724,7 @@ class VfxLightPool {
   constructor(group: Group, count: number) {
     for (let i = 0; i < count; i++) {
       const light = new PointLight(0xffffff, 0, 10, 2);
-      // Named from the rig's own constant, not from a string literal. `lighting.ts`
+      // Named from the rig's own constant, not from a string literal. 'lighting.ts'
       // scans the scene for this prefix and folds every live spell light into the
       // scene's bounce/irradiance term, so a detonation warms the shadow side of
       // the whole diorama for the frames it burns rather than only lighting
@@ -1737,7 +1737,7 @@ class VfxLightPool {
       // shows no cast shadows at all despite an extremely strong nearby key
       // light — a fire that bright should be throwing long hard shadows off the
       // fence posts and the rock", and "the warm pools read as emissive quads
-      // rather than as illumination". A point light with `castShadow` off
+      // rather than as illumination". A point light with 'castShadow' off
       // illuminates *through* everything, so a detonation lit the far side of
       // every wall it was behind, left no bar of darkness across the flagstones,
       // and put no mark under the unit standing in it. Emitting a real light was
@@ -1746,18 +1746,18 @@ class VfxLightPool {
       // decal that happens to be attached to a lamp.
       //
       // Slot 0, and only slot 0. A point-light shadow is a cube map — six render
-      // passes — and `acquire` steers the highest-priority spawn here so the
+      // passes — and 'acquire' steers the highest-priority spawn here so the
       // shadow lands on the detonation rather than on whichever sparkle got the
       // slot first.
       //
       // Two details that matter more than they look:
       //
-      //  - `castShadow` is set ONCE, at construction, and never toggled.
-      //    Toggling it changes `NUM_POINT_LIGHT_SHADOWS`, which recompiles every
+      //  - 'castShadow' is set ONCE, at construction, and never toggled.
+      //    Toggling it changes 'NUM_POINT_LIGHT_SHADOWS', which recompiles every
       //    material in the scene — a hitch that would land on precisely the
       //    frame a spell detonates, which is the worst frame in the game to drop.
-      //  - `autoUpdate = false` then makes the idle cost zero. three skips the
-      //    six passes entirely unless `needsUpdate` is set, and `update()` sets
+      //  - 'autoUpdate = false' then makes the idle cost zero. three skips the
+      //    six passes entirely unless 'needsUpdate' is set, and 'update()' sets
       //    it only while this slot is burning. The map is rendered once at
       //    startup so the sampler is never bound to a null texture; a stale map
       //    is harmless while the light sits at intensity 0, because a point
@@ -1768,7 +1768,7 @@ class VfxLightPool {
         light.shadow.camera.near = 0.25;
         light.shadow.camera.far = 12;
         light.shadow.camera.updateProjectionMatrix();
-        // Same policy as the key light in `lighting.ts`: near-zero constant bias
+        // Same policy as the key light in 'lighting.ts': near-zero constant bias
         // so contact stays attached to the caster's feet, and the acne work done
         // by a normal offset sized to roughly one shadow texel. A spell light
         // sits close to the geometry it lights, so peter-panning here is far more
@@ -1831,7 +1831,7 @@ class VfxLightPool {
         continue;
       }
       if (s.light.castShadow) {
-        // The whole reason `autoUpdate` is off: the six cube passes run on the
+        // The whole reason 'autoUpdate' is off: the six cube passes run on the
         // frames a spell is actually burning and on no others. The far plane
         // follows the light's own cutoff so the depth range is spent on the
         // blast radius rather than on empty air twenty tiles out.
@@ -1882,8 +1882,8 @@ class VfxLightPool {
 
 /**
  * Trauma-based shake (Squirrel Eiserloh's model): callers add *trauma*, the rig reads
- * `offset`/`roll` which are driven by trauma², so small hits barely register and heavy
- * ones snap the frame. Camera.ts should apply `offset` in camera-local space.
+ * 'offset'/'roll' which are driven by trauma², so small hits barely register and heavy
+ * ones snap the frame. Camera.ts should apply 'offset' in camera-local space.
  */
 export class ShakeRig {
   /** Camera-local offset in world units. */
@@ -1948,7 +1948,7 @@ export class TimeControl {
     return s;
   }
 
-  /** Freeze (or heavily slow) the frame for `seconds`. The classic heavy-hit punctuation. */
+  /** Freeze (or heavily slow) the frame for 'seconds'. The classic heavy-hit punctuation. */
   stop(seconds: number, scale = 0.02): void {
     this.stops.push({ remaining: seconds, scale });
   }
@@ -1991,7 +1991,7 @@ export interface TimelineContext {
 
 /**
  * A tiny keyframe sequencer. Cues fire once at a time; spans get called every frame with a
- * normalised 0..1 parameter. `promise` resolves when the timeline ends, which is what the
+ * normalised 0..1 parameter. 'promise' resolves when the timeline ends, which is what the
  * battle event pump awaits before advancing to the next event.
  */
 export class VfxTimeline {
@@ -2107,7 +2107,7 @@ export interface BurstSpec {
   stretch?: number;
   fadeIn?: number;
   fadeOut?: number;
-  /** Rotational motion about the vertical axis through `position`. */
+  /** Rotational motion about the vertical axis through 'position'. */
   orbit?: { omega: number; radial?: number };
   /** Random birth delay range in seconds. Staggering a burst is what gives it a shape. */
   delay?: [number, number];
@@ -2166,9 +2166,9 @@ export interface VfxSystemOptions {
  * Round-2 critics wrote "no particulate VFX of any kind — no dust motes, embers,
  * or ambient haze" and "static geometry under static light reads as a viewport,
  * not a game". They are describing the absence of this. Both reference frames
- * are full of it: `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` has
+ * are full of it: 'refs/curated/triangle/press_002_gematsu_1920x1080.jpg' has
  * embers with visible motion trails drifting across every fire, and
- * `official_005_steam.jpg` has fine dust hanging in the spell light. It is the
+ * 'official_005_steam.jpg' has fine dust hanging in the spell light. It is the
  * cheapest cue in the whole renderer that the scene is a *place* with air in it.
  *
  * Two populations, because they read differently and are driven by different
@@ -2255,7 +2255,7 @@ export class VfxSystem {
   private readonly timelines: VfxTimeline[] = [];
   private readonly lights: VfxLightPool;
   private readonly lightColor = new Color();
-  /** Debounce + scratch for the automatic emission light. See `autoLight`. */
+  /** Debounce + scratch for the automatic emission light. See 'autoLight'. */
   private readonly autoLightColor = new Color();
   private readonly autoLightAt = new Vector3(1e9, 1e9, 1e9);
   private autoLightClock = -1e9;
@@ -2270,7 +2270,7 @@ export class VfxSystem {
   // atmosphere pops back in over the following seconds — which is far more
   // noticeable than the extra draw call costs.
   private readonly ambienceBatch: ParticleBatch;
-  /** Visible glare bodies for the practicals. See `GlowCards`. */
+  /** Visible glare bodies for the practicals. See 'GlowCards'. */
   private readonly glow: GlowCards;
   private readonly glowPos = new Vector3();
   private readonly ambience: Required<AmbienceOptions>;
@@ -2288,10 +2288,10 @@ export class VfxSystem {
   private readonly hazeAccum: number[] = [];
   private emberScan = 0;
   private readonly ambColor = new Color();
-  /** Scratch for `sampleIrradiance`, which is called while `ambColor` is in use. */
+  /** Scratch for 'sampleIrradiance', which is called while 'ambColor' is in use. */
   private readonly irradiance = new Color();
   /**
-   * Mote tint actually used. Defaults to `ambience.color`, but if the map has
+   * Mote tint actually used. Defaults to 'ambience.color', but if the map has
    * practicals it drifts toward their average hue, so the dust in a torchlit
    * cloister is torch-coloured and the dust in a cold crypt is not. A caller who
    * passes an explicit colour keeps it.
@@ -2310,7 +2310,7 @@ export class VfxSystem {
   private readonly v0 = new Vector3();
   private readonly v1 = new Vector3();
   private readonly v2 = new Vector3();
-  /** Holds the burst origin for the whole of `emit` — callers may legitimately pass one of
+  /** Holds the burst origin for the whole of 'emit' — callers may legitimately pass one of
    *  the other scratch vectors in, and the per-particle maths would clobber it. */
   private readonly vBase = new Vector3();
   private readonly spawnScratch: ParticleSpawn = {
@@ -2545,7 +2545,7 @@ export class VfxSystem {
       const base = this.emberBase[i]!;
       if (base <= 0 || !light.visible) continue;
       light.getWorldPosition(this.glowPos);
-      // The rig is flickering this light every frame; `drive` is how hard the
+      // The rig is flickering this light every frame; 'drive' is how hard the
       // flame is burning *right now*, and both the size and the brightness of the
       // glare follow it. A constant-radius halo over a flickering light is the
       // giveaway that the two are separate systems.
@@ -2569,7 +2569,7 @@ export class VfxSystem {
         c.g * gain,
         c.b * gain,
         // Wide and faint, which is what the reference braziers actually do: in
-        // `press_002` each fire throws a soft warm bloom two to three tiles
+        // 'press_002' each fire throws a soft warm bloom two to three tiles
         // across with a very small hot centre. The failure mode we came from was
         // the opposite shape — narrow, clipped, and hard-edged.
         (1.35 + 0.5 * drive) * this.tileSize,
@@ -2586,12 +2586,12 @@ export class VfxSystem {
    *
    * The atmosphere has to know two things nobody hands it: how big the map is,
    * and where the practicals are. Both are already in the scene graph, so it
-   * reads them rather than requiring `game.ts` to wire another call — a mote
+   * reads them rather than requiring 'game.ts' to wire another call — a mote
    * field that only appears when someone remembers to configure it is a mote
    * field that will be missing from the screenshot that gets judged.
    *
-   * Terrain meshes are named `terrain-<kind>` by `terrain.ts` and practical
-   * lights `brazier-light`, the same two conventions `lighting.ts` relies on.
+   * Terrain meshes are named 'terrain-<kind>' by 'terrain.ts' and practical
+   * lights 'brazier-light', the same two conventions 'lighting.ts' relies on.
    * Re-scanned on an interval because terrain can be rebuilt at any time.
    */
   private rescanScene(): void {
@@ -2612,9 +2612,9 @@ export class VfxSystem {
       const light = o as PointLight;
       if (light.isPointLight) {
         if (this.emberSources.length >= GLOW_CAPACITY) return;
-        // Two sources of fire, one convention. `terrain.ts` names its brazier
-        // props `brazier-light`; `lighting.ts` names the preset's placed lights
-        // `PracticalN`, and on the night maps *those* are the torches — the whole
+        // Two sources of fire, one convention. 'terrain.ts' names its brazier
+        // props 'brazier-light'; 'lighting.ts' names the preset's placed lights
+        // 'PracticalN', and on the night maps *those* are the torches — the whole
         // preset is built around them. Excluding them meant the night map's own
         // key lights had no glare and threw no embers, which is the exact failure
         // ("unlit quads pretending to be light sources") this system exists to
@@ -2624,7 +2624,7 @@ export class VfxSystem {
         const isProp = o.name.startsWith('brazier');
         const warm = light.color.r > light.color.b * 1.2;
         if (!isProp && !(o.name.startsWith('Practical') && warm)) return;
-        // `lighting.ts` stamps the authored level here before it starts driving
+        // 'lighting.ts' stamps the authored level here before it starts driving
         // flicker, so this is the only honest "how bright is this fire meant to
         // be" reading available once the rig has taken the light over.
         const base = (light.userData['baseIntensity'] as number | undefined) ?? light.intensity;
@@ -2675,7 +2675,7 @@ export class VfxSystem {
   /**
    * Spawn one mote somewhere in the diorama's air column.
    *
-   * `age` back-dates the birth so the field can be primed in a single frame:
+   * 'age' back-dates the birth so the field can be primed in a single frame:
    * a screenshot taken 1.2 s after boot must show a settled atmosphere, not
    * twelve motes that have just appeared at the floor.
    *
@@ -2759,7 +2759,7 @@ export class VfxSystem {
     // every mote reads as a lens artefact; a spread reads as dust.
     const c = this.ambColor.copy(this.moteTint);
     if (rng.next() < 0.35) c.lerp(WHITE_TINT, 0.45);
-    // Sample the real lights at the mote's own position. `warmth` comes back in
+    // Sample the real lights at the mote's own position. 'warmth' comes back in
     // roughly 0..1.4 and carries the summed, falloff-weighted colour with it.
     const warmth = this.sampleIrradiance(s.position, c);
     const a =
@@ -2797,11 +2797,11 @@ export class VfxSystem {
    * which is why every previous round's atmosphere was a flat overlay pasted over
    * a lit scene ("the dust motes… sit on top of shadowed geometry", "untinted by
    * the fire beside them"). This is a hand-rolled irradiance probe using the same
-   * falloff shape the GPU uses for a `PointLight`: inverse power plus three's
+   * falloff shape the GPU uses for a 'PointLight': inverse power plus three's
    * smooth window at the cutoff radius, so a mote fades out at exactly the
    * distance the stone under it does.
    *
-   * `tint` is pulled toward the summed light colour in place, weighted by how
+   * 'tint' is pulled toward the summed light colour in place, weighted by how
    * strongly lit the point is. The return value is a normalised 0..~1.4
    * "how much light is here", used to scale opacity.
    */
@@ -2844,12 +2844,12 @@ export class VfxSystem {
    *
    *  - **Short life, high rate.** 0.26–0.5 s. A tongue that lives a second
    *    travels a tile and a half and the plume reads as smoke; the flame in
-   *    `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` is a *dense*
+   *    'refs/curated/triangle/press_002_gematsu_1920x1080.jpg' is a *dense*
    *    object, which means many particles each present for a moment.
    *  - **Decelerating, not ballistic.** High initial rise with heavy drag, so
    *    the tongues bunch near the bowl and thin toward the tip. That taper is
    *    the entire silhouette of a flame; constant velocity gives a column.
-   *  - **Velocity stretch.** `stretch` aligns the quad with screen-space motion,
+   *  - **Velocity stretch.** 'stretch' aligns the quad with screen-space motion,
    *    so a tongue elongates upward and the torn tip of the atlas cell points
    *    the way it is going. A camera-facing round blob is the thing we already
    *    had, and it was called a bloom disc.
@@ -2859,8 +2859,8 @@ export class VfxSystem {
    *    is a flame that has lost its hue to the tonemapper, which is exactly the
    *    "blown-out white disc" note.
    *
-   * The particle is born *below* the light, because `lighting.ts` and
-   * `terrain.ts` both place a brazier's point light at flame height so its pool
+   * The particle is born *below* the light, because 'lighting.ts' and
+   * 'terrain.ts' both place a brazier's point light at flame height so its pool
    * lands correctly on the floor. Spawning at the light would start the fire in
    * the middle of itself.
    */
@@ -2879,7 +2879,7 @@ export class VfxSystem {
       this.v1.z + Math.sin(a0) * r0,
     );
 
-    // Hotter flame = faster, taller tongues. `drive` is the light's live flicker,
+    // Hotter flame = faster, taller tongues. 'drive' is the light's live flicker,
     // so the plume visibly surges on the same curve that brightens the stone.
     const surge = 0.82 + 0.4 * drive;
     s.velocity.set(
@@ -2929,7 +2929,7 @@ export class VfxSystem {
    * One slow, wide, near-transparent warm plume above a practical.
    *
    * The honest version of heat shimmer is a screen-space refraction pass, which
-   * lives in `post.ts` and is not this file's to write. What *is* this file's is
+   * lives in 'post.ts' and is not this file's to write. What *is* this file's is
    * the thing the shimmer would be distorting: hot air above a fire is visible
    * in both reference corpora as a soft column that swallows contrast and
    * carries the flame's colour a good height above the flame itself. Rendered as
@@ -3013,7 +3013,7 @@ export class VfxSystem {
    * Keep the air populated.
    *
    * Spawn rate is derived from the target population and the mean lifetime, so
-   * `motes` is a *standing* count rather than a rate anyone has to convert by
+   * 'motes' is a *standing* count rather than a rate anyone has to convert by
    * hand — halve it for a perf dial and the field thins to half, it does not
    * take eight seconds to get there.
    */
@@ -3035,7 +3035,7 @@ export class VfxSystem {
     // alone: roughly 42% of motes are born in a fire's thermal and live 3.0–6.5 s
     // against the drifting field's 5.5–11. Using 8.25 here after the split was
     // introduced would quietly run the standing population ~18% under whatever
-    // `motes` asked for — a density bug that looks like an art decision.
+    // 'motes' asked for — a density bug that looks like an art decision.
     const meanLife = 0.42 * 4.75 + 0.58 * 8.25;
     const rate = opts.motes / meanLife;
 
@@ -3080,8 +3080,8 @@ export class VfxSystem {
       }
       if (budget <= 0) this.emberAccum[i] = 0;
 
-      // The flame body runs off the same `drive`, and that is the whole point of
-      // reading it from the light rather than from a timer: `lighting.ts` is
+      // The flame body runs off the same 'drive', and that is the whole point of
+      // reading it from the light rather than from a timer: 'lighting.ts' is
       // flickering this brazier every frame, so the plume surges and gutters on
       // exactly the curve that brightens and dims the stone around it. One
       // event, two renderers agreeing about it.
@@ -3177,13 +3177,13 @@ export class VfxSystem {
       const sp = rng.range(speed[0], speed[1]) * this.tileSize;
       if (sp !== 0) {
         if (shape === 'cone' || spec.direction) {
-          // Sample inside a cone about `dir`.
+          // Sample inside a cone about 'dir'.
           const cosA = Math.cos(spread);
           const z = rng.range(cosA, 1);
           const phi = rng.next() * Math.PI * 2;
           const r = Math.sqrt(Math.max(0, 1 - z * z));
           this.v0.set(r * Math.cos(phi), r * Math.sin(phi), z);
-          // Rotate the +Z-aligned sample onto `dir`.
+          // Rotate the +Z-aligned sample onto 'dir'.
           this.v1.set(0, 0, 1);
           const q = new Quaternion().setFromUnitVectors(this.v1, dir);
           this.v0.applyQuaternion(q);
@@ -3239,7 +3239,7 @@ export class VfxSystem {
    * Give every bright additive burst a real light, whether its author asked or not.
    *
    * THE CONTRACT IS "VFX EMITS LIGHT", AND IT WAS BEING KEPT BY ELEVEN EFFECTS
-   * OUT OF TWENTY-FIVE. `impactPunch` spawns a proper flash and the charge
+   * OUT OF TWENTY-FIVE. 'impactPunch' spawns a proper flash and the charge
    * helper spawns a gathering glow, but the other fourteen archetypes — every
    * heal, every buff, every generic elemental burst, and the whole windup/cast/
    * travel half of the ones that *do* punch — put several hundred particles at
@@ -3249,9 +3249,9 @@ export class VfxSystem {
    * surroundings looks pasted on".
    *
    * Fixing it one builder at a time is twenty-five chances to forget, so it is
-   * enforced at the choke point instead. Every burst passes through `emit()`, and
-   * `emit()` already knows everything needed to size a light: how bright the
-   * particles are (`color0` is linear HDR), how many there are, how far they
+   * enforced at the choke point instead. Every burst passes through 'emit()', and
+   * 'emit()' already knows everything needed to size a light: how bright the
+   * particles are ('color0' is linear HDR), how many there are, how far they
    * spread, and how long they live. The envelope is derived from the burst's own
    * lifetime, so the light rises with the flash and dies with the last spark
    * rather than running on a hand-authored constant that can drift out of sync.
@@ -3259,7 +3259,7 @@ export class VfxSystem {
    * Three guards keep it from taking the pool over:
    *  - Only *bright* additive bursts qualify. Smoke, dust and blood are alpha
    *    blended or sit under 1.0, and a light on those would be wrong anyway.
-   *  - Priority 1, the floor, so a detonation's own `impactPunch` light (3) and
+   *  - Priority 1, the floor, so a detonation's own 'impactPunch' light (3) and
    *    a charge glow (2) always win the eviction.
    *  - A short spatial/temporal debounce, because effects legitimately fire four
    *    or five bursts at one point on one frame to build a single shape, and
@@ -3357,7 +3357,7 @@ export class VfxSystem {
     slot.light.position.copy(slot.home);
     slot.light.color.copy(o.color);
     slot.light.distance = Math.max(0.5, o.radius * this.tileSize);
-    // Extended-source falloff, for the same reason `lighting.ts` gives its
+    // Extended-source falloff, for the same reason 'lighting.ts' gives its
     // braziers one: a fireball is a two-metre ball of luminous gas, not a point,
     // and at decay 2 the only way to make its light reach the far edge of the
     // blast is to clip everything within half a tile of the centre to white. The
@@ -3392,7 +3392,7 @@ export class VfxSystem {
 
   /**
    * Convenience: spawn a light coloured by an element palette. The palette's
-   * `core` is already linear HDR (fire peaks at 5.5 red), so it doubles as a
+   * 'core' is already linear HDR (fire peaks at 5.5 red), so it doubles as a
    * light colour without a second set of authored constants — the flame and the
    * light it casts can never drift out of agreement.
    */
@@ -3623,7 +3623,7 @@ export class VfxSystem {
     (ribbon.material.uniforms['uEdgeColor']!.value as Color).copy(new Color(0.9, 1.0, 1.5));
     ribbon.material.uniforms['uCoreWidth']!.value = 0.22;
 
-    // The arc is swept in the plane that faces the camera, rotated by `tilt`. A slash
+    // The arc is swept in the plane that faces the camera, rotated by 'tilt'. A slash
     // authored in world space foreshortens into an unreadable squiggle at 45 degrees of
     // yaw; one authored in the view plane always reads as a blade stroke.
     const right = new Vector3().crossVectors(new Vector3(0, 1, 0), this.cameraDir);
@@ -3850,7 +3850,7 @@ export class VfxSystem {
 
   /**
    * Start a persistent charge effect (FFT charge-time abilities). The circle and motes
-   * stay up until `release()` or `cancel()`.
+   * stay up until 'release()' or 'cancel()'.
    */
   beginCharge(origin: Vector3, element: Element = 'none'): ChargeHandle {
     const tl = new VfxTimeline();
@@ -3877,8 +3877,8 @@ export class VfxSystem {
     }
 
     // The caster is underlit by what they are gathering. Held open for the whole
-    // charge and released by `close()`, so the light's lifetime is exactly the
-    // ability's — this is why `spawnLight` returns a handle.
+    // charge and released by 'close()', so the light's lifetime is exactly the
+    // ability's — this is why 'spawnLight' returns a handle.
     const chargeLight = this.spawnElementLight(origin, element, {
       intensity: 26,
       radius: 6.5,

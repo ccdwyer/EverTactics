@@ -84,7 +84,7 @@ void main() {
 }
 `;
 
-/** 9-tap tent upsample, additively combined with the finer mip already in `uPrev`. */
+/** 9-tap tent upsample, additively combined with the finer mip already in 'uPrev'. */
 export const BLOOM_UP_FRAG = /* glsl */ `
 precision highp float;
 varying vec2 vUv;

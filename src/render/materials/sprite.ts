@@ -4,38 +4,38 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * WHY THIS EXISTS
  * ─────────────────────────────────────────────────────────────────────────────
- * Every sheet in `public/assets/sprites/` is an **8-bit colour-mapped PNG** (PNG
+ * Every sheet in 'public/assets/sprites/' is an **8-bit colour-mapped PNG** (PNG
  * colour type 3) carrying a 16-entry PLTE and *no* tRNS chunk — palette index 0
  * is the FFT transparency slot. That is the original indexed art, undamaged, so
  * there is no quantisation step and no "nearest colour" guessing anywhere in this
  * file: we parse the PNG ourselves, keep the index bytes, and upload them as an
  * R8 texture. The fragment shader reads the index and looks it up in a 16 x N
- * palette LUT built from the matching `.act` files in `public/assets/palettes/`.
+ * palette LUT built from the matching '.act' files in 'public/assets/palettes/'.
  *
  * Recolouring a unit for its team is therefore a single uniform write
- * (`uPaletteRow`), costs nothing, and is exactly how the original engine did it.
+ * ('uPaletteRow'), costs nothing, and is exactly how the original engine did it.
  *
  * Verified against the shipped assets:
  *   - 457/457 sheets are colour type 3, bit depth 8, non-interlaced, 16-entry PLTE.
- *   - 416/457 have a `.act` family whose `battle_pal1` is byte-identical to the
- *     PNG's own PLTE, which is what `SHEET_PALETTE_FAMILY` in `sprites.ts` records.
- *     The remaining 41 (Dark Knight, Onion Knight, the TWotL guests) have no `.act`
+ *   - 416/457 have a '.act' family whose 'battle_pal1' is byte-identical to the
+ *     PNG's own PLTE, which is what 'SHEET_PALETTE_FAMILY' in 'sprites.ts' records.
+ *     The remaining 41 (Dark Knight, Onion Knight, the TWotL guests) have no '.act'
  *     family shipped; they render from their baked palette only.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT THE MATERIAL DOES
  * ─────────────────────────────────────────────────────────────────────────────
- * It is a patched `MeshLambertMaterial`, not a from-scratch `ShaderMaterial`, so
+ * It is a patched 'MeshLambertMaterial', not a from-scratch 'ShaderMaterial', so
  * the sprites sit inside three's real lighting/shadow/tone-mapping/fog pipeline
  * rather than a parallel one that drifts out of sync with the terrain. On top of
  * that we inject:
  *
- *   • palette lookup (replaces `map_fragment`),
- *   • hard alpha cut-off — `discard`, never blending, because pixel art with soft
+ *   • palette lookup (replaces 'map_fragment'),
+ *   • hard alpha cut-off — 'discard', never blending, because pixel art with soft
  *     edges is the single most obvious "this is a cheap HD-2D knock-off" tell,
  *   • an *impostor normal* so a flat quad still turns with the key light,
  *   • full scene lighting — key, hemisphere, ambient **and every dynamic VFX
- *     point light** — with the direct term discounted (`uDirectGain`) because a
+ *     point light** — with the direct term discounted ('uDirectGain') because a
  *     billboard always faces the light and would otherwise out-expose the
  *     terrain it stands on,
  *   • ground bounce into the legs and a contact ramp at the feet, which is what
@@ -45,12 +45,12 @@
  *     *camera* rims nothing and a light behind the *subject* haloes evenly,
  *   • flash / tint / desaturation for damage, status and KO,
  *   • a chunky per-texel dissolve for the crystal effect,
- *   • a matching `MeshDepthMaterial` so the same alpha cut-out is respected when
+ *   • a matching 'MeshDepthMaterial' so the same alpha cut-out is respected when
  *     the unit casts into the shadow map, pushed back along the light so the
  *     card does not shadow itself.
  *
- * Uniform objects are shared by reference into `shader.uniforms`, so mutating
- * `bundle.uniforms.uFlash.value` takes effect immediately with no recompilation.
+ * Uniform objects are shared by reference into 'shader.uniforms', so mutating
+ * 'bundle.uniforms.uFlash.value' takes effect immediately with no recompilation.
  */
 
 import * as THREE from 'three';
@@ -81,7 +81,7 @@ async function inflate(data: Uint8Array): Promise<Uint8Array> {
   if (typeof DecompressionStream === 'undefined') {
     throw new Error('sprite: DecompressionStream is unavailable; cannot decode PNG IDAT.');
   }
-  // `data` is a view into the fetched buffer; Blob copies it, which is what we want.
+  // 'data' is a view into the fetched buffer; Blob copies it, which is what we want.
   const blob = new Blob([data as unknown as BlobPart]);
   const stream = blob.stream().pipeThrough(new DecompressionStream('deflate'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
@@ -270,7 +270,7 @@ export function parseActPalette(buffer: ArrayBuffer): Uint8Array {
   return bytes.slice(0, 48);
 }
 
-/** Load one `.act` palette. */
+/** Load one '.act' palette. */
 export async function loadActPalette(url: string): Promise<Uint8Array> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`sprite: failed to load ${url} (${response.status}).`);
@@ -278,7 +278,7 @@ export async function loadActPalette(url: string): Promise<Uint8Array> {
 }
 
 /**
- * Unused palette slots in the shipped `.act` set are all-black rather than
+ * Unused palette slots in the shipped '.act' set are all-black rather than
  * absent, so they must be filtered out before a team colour is chosen.
  */
 export function isPaletteEmpty(palette: Uint8Array): boolean {
@@ -374,18 +374,18 @@ export interface SpriteUniforms {
    * Diffuse **wrap** for every direct light — see {@link SPRITE_LIGHT_WRAP}.
    *
    * This is the single measurement that changed round 4. Rendering
-   * `reflectedLight.directDiffuse` straight to the framebuffer, the two units
-   * standing three tiles from `battle-open`'s brazier came back at luma 8/255
+   * 'reflectedLight.directDiffuse' straight to the framebuffer, the two units
+   * standing three tiles from 'battle-open''s brazier came back at luma 8/255
    * and 28/255 while the stone beside their boots was blown to white: a
    * camera-facing card presents a normal that is very nearly *perpendicular* to
-   * a lateral light, so `saturate(dot(N, L))` is ~0 and a hard Lambert term
+   * a lateral light, so 'saturate(dot(N, L))' is ~0 and a hard Lambert term
    * gives the figure nothing at all. That is precisely the critics' "units
    * standing directly adjacent to the orange fire are lit flat cool-blue; they
    * are receiving ambient only".
    *
    * A standing figure is not a card, it is roughly a cylinder, and a cylinder
    * lit from the side is lit across a full half of its circumference. Wrapping
-   * the diffuse term — `(N·L + w) / (1 + w)` — is the standard cheap stand-in
+   * the diffuse term — '(N·L + w) / (1 + w)' — is the standard cheap stand-in
    * for that, and it is normalised so a light hitting the card head-on still
    * peaks at exactly 1 and cannot out-expose the terrain.
    */
@@ -416,7 +416,7 @@ export interface SpriteUniforms {
   /**
    * Shoulder on the *albedo*, not on the light. See {@link SPRITE_ALBEDO_SHOULDER}.
    *
-   * A flat `uAlbedoScale` is the wrong tool on its own: dividing every palette
+   * A flat 'uAlbedoScale' is the wrong tool on its own: dividing every palette
    * entry by the same number darkens a black leather boot as hard as it darkens
    * a white robe, and the boot was already sitting under the terrain. Measured
    * on the round-3 frame, the white-robed mage read luma 154 against grass at
@@ -438,13 +438,13 @@ export interface SpriteUniforms {
   /** Reflectance the shoulder leaves untouched. Everything below it lifts slightly. */
   uAlbedoPivot: { value: number };
   /**
-   * Highlight shoulder on the accumulated light. Above `uShadeKnee` the shade
+   * Highlight shoulder on the accumulated light. Above 'uShadeKnee' the shade
    * term compresses instead of climbing, so a billboard that catches the key
    * dead-on cannot out-expose a terrain surface at the same orientation.
    *
    * **Round-3 measurement.** At knee 0.85 / compress 1.6 this was not a shoulder,
-   * it was a clamp. Rendering `spriteShade` straight to the framebuffer, every
-   * unit in `battle-open` came back at 230–242/255 — the mage standing in the
+   * it was a clamp. Rendering 'spriteShade' straight to the framebuffer, every
+   * unit in 'battle-open' came back at 230–242/255 — the mage standing in the
    * shaded garden, the knight in the lantern pool and the archer on the sunlit
    * ledge were within 5% of each other, even though their *direct* terms
    * differed by 3.5x. That is precisely the critics' "sprites carry flat baked
@@ -462,7 +462,7 @@ export interface SpriteUniforms {
    * essentially all of it, and the resulting floor was high enough on its own to
    * saturate the shade term with the key completely occluded. Discounting the
    * indirect term is what lets a shadowed unit actually go dark, and it is the
-   * counterpart to `uDirectGain` doing the same job for the key.
+   * counterpart to 'uDirectGain' doing the same job for the key.
    */
   uIndirectGain: { value: number };
   /**
@@ -475,8 +475,8 @@ export interface SpriteUniforms {
   /**
    * Chroma pull toward the scene. Shipped HD-2D never leaves a sprite at 100%
    * palette saturation over a graded map — the FFT night frames desaturate and
-   * cool every unit until it belongs to the light. `uSceneTint` is multiplied
-   * in and `uGradeSaturation` pulls the art toward its own luma; both are
+   * cool every unit until it belongs to the light. 'uSceneTint' is multiplied
+   * in and 'uGradeSaturation' pulls the art toward its own luma; both are
    * subtle by design, because overdoing it turns pixel art to mud.
    */
   uSceneTint: { value: THREE.Color };
@@ -524,7 +524,7 @@ export interface SpriteUniforms {
    * ROUND 5 — every vertical ramp in this shader was anchored to the wrong end.
    * ─────────────────────────────────────────────────────────────────────────
    * The foot occlusion, the ground bounce and the sky-occlusion gradient were
-   * all driven by `spriteCellUv.y`, i.e. by position within the **cell**. But an
+   * all driven by 'spriteCellUv.y', i.e. by position within the **cell**. But an
    * FFT cell is 80 texels tall and a standing figure fills roughly texels 4-46
    * of it — the rest is headroom for jump and cast poses, and a couple of texels
    * of slack underneath. Measured on the shipped sheets, the standing poses sit
@@ -541,12 +541,12 @@ export interface SpriteUniforms {
    *   • the sky-occlusion gradient covered only the bottom half of its intended
    *     range, so head and boots differed by far less than intended.
    *
-   * Driving all three from the *measured* art extent — `footBottomY` and
-   * `headTopY` out of `SheetSheet.layout`, updated per frame — is what makes
+   * Driving all three from the *measured* art extent — 'footBottomY' and
+   * 'headTopY' out of 'SheetSheet.layout', updated per frame — is what makes
    * them land where the body is.
    */
   uFootBaseTexels: { value: number };
-  /** Height of this pose's art above `uFootBaseTexels`, in texels. */
+  /** Height of this pose's art above 'uFootBaseTexels', in texels. */
   uBodyTexels: { value: number };
   /** Occlusion baked into the lowest texels of the art, where it meets the tile. */
   uFootShade: { value: number };
@@ -711,9 +711,9 @@ float spriteHash(vec2 p) {
 
 /**
  * How strongly a light rims the silhouette at a point whose outward edge normal
- * (in the quad's screen plane) is \`outward\`.
+ * (in the quad's screen plane) is \'outward\'.
  *
- * \`lightView\` is the light's *travel* direction in view space. Its z component
+ * \'lightView\' is the light's *travel* direction in view space. Its z component
  * says where the light stands relative to the camera: positive means it is
  * travelling toward the lens, i.e. it is behind the subject and backlights it;
  * negative means it is behind the camera and can produce no rim at all. The xy
@@ -740,18 +740,18 @@ float spriteRimTerm(vec3 lightView, vec2 outward) {
 
 /**
  * Wrapped diffuse for **every** direct light — key, rim and every dynamic VFX
- * point light three has already resolved into `IncidentLight`.
+ * point light three has already resolved into 'IncidentLight'.
  *
- * Appended after `<lights_lambert_pars_fragment>`, which has just `#define`d
- * `RE_Direct` to three's hard-Lambert term; re-pointing the macro is the only
+ * Appended after '<lights_lambert_pars_fragment>', which has just '#define'd
+ * 'RE_Direct' to three's hard-Lambert term; re-pointing the macro is the only
  * way to change the BRDF of a stock material without forking the whole chunk,
  * and it leaves shadow masking, light culling and the point-light attenuation
  * exactly as three computes them (the shadow factor is folded into
- * `directLight.color` upstream, so a unit in the key's shadow still receives
+ * 'directLight.color' upstream, so a unit in the key's shadow still receives
  * nothing from it).
  *
  * See {@link SpriteUniforms.uLightWrap} for why a billboard needs this at all.
- * The `/(1 + w)` normalisation keeps a head-on light at unity, so the change
+ * The '/(1 + w)' normalisation keeps a head-on light at unity, so the change
  * cannot make a sprite brighter than the terrain facet beside it — it only
  * stops a *lateral* light from being thrown away.
  */
@@ -780,10 +780,10 @@ const SPRITE_VERTEX_TAIL = /* glsl */ `
 `;
 
 /**
- * Palette lookup. `diffuseColor` is deliberately left white so that the Lambert
+ * Palette lookup. 'diffuseColor' is deliberately left white so that the Lambert
  * accumulation downstream produces *pure incoming light*, which we then apply to
  * the art ourselves with a controllable influence. Multiplying the art into
- * `diffuseColor` instead would make the sprites obey three's full BRDF and read
+ * 'diffuseColor' instead would make the sprites obey three's full BRDF and read
  * as plastic.
  */
 const SPRITE_MAP_FRAGMENT = /* glsl */ `
@@ -1023,21 +1023,21 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
 /**
  * Depth-pass vertex push — the other half of the billboard shadow problem.
  *
- * Once the quad casts into the shadow map (see `shadowSide` above) it is also a
+ * Once the quad casts into the shadow map (see 'shadowSide' above) it is also a
  * *receiver* of that same map, and a flat card sitting exactly on top of its own
  * recorded depth shadows itself completely: every unit renders as a black
- * silhouette. Global `shadow.bias` would fix it by destroying the terrain's own
+ * silhouette. Global 'shadow.bias' would fix it by destroying the terrain's own
  * self-shadowing, so the offset is applied here, to this material only.
  *
  * The light is orthographic, so translating along its view −Z is a **pure depth
  * change**: the silhouette written into the map does not move by a single texel,
  * it is merely recorded slightly further away. The unit therefore sits in front
- * of its own shadow, while ground more than `uShadowPush` further along the
+ * of its own shadow, while ground more than 'uShadowPush' further along the
  * light ray is still occluded normally.
  *
  * The cost is a small band of unshadowed floor right at the feet — the ground
- * there is less than `uShadowPush` behind the caster. That band is exactly what
- * the contact-darkening decal in `sprites.ts` covers, which is why both exist.
+ * there is less than 'uShadowPush' behind the caster. That band is exactly what
+ * the contact-darkening decal in 'sprites.ts' covers, which is why both exist.
  */
 const DEPTH_PROJECT_VERTEX = /* glsl */ `
   #include <project_vertex>
@@ -1085,7 +1085,7 @@ let programCacheSalt = 0;
  * Build the material pair for one sprite instance.
  *
  * One instance per unit: the per-unit state (frame, palette row, flash, tint,
- * dissolve) all lives in uniforms, and `customProgramCacheKey` keeps every
+ * dissolve) all lives in uniforms, and 'customProgramCacheKey' keeps every
  * instance sharing a single compiled program.
  */
 export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMaterialBundle {
@@ -1134,7 +1134,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uBounceColor: { value: new THREE.Color(options.bounceColor ?? 0x6d5b46) },
     uBounceStrength: { value: options.bounceStrength ?? 0.42 },
 
-    // Measured against `refs/curated/fft/press-311722-…-mediakit-03`: the
+    // Measured against 'refs/curated/fft/press-311722-…-mediakit-03': the
     // squire's boots read luma ~70 against a torso at ~150, i.e. the lower
     // eighth of the figure sits a full stop under the rest of it. That in-art
     // fall-off is what reads as grounding at every camera angle — unlike the
@@ -1177,8 +1177,8 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
   material.name = 'UnitSprite';
   // ── why this line exists ───────────────────────────────────────────────────
   // three derives the shadow pass's cull side from the *object* material:
-  // `side = material.shadowSide ?? shadowSide[material.side]`, and
-  // `shadowSide[FrontSide]` is BackSide. That is right for closed solids (it
+  // 'side = material.shadowSide ?? shadowSide[material.side]', and
+  // 'shadowSide[FrontSide]' is BackSide. That is right for closed solids (it
   // hides acne inside the mesh) and catastrophic for a single-sided billboard:
   // the quad turns to face the camera, so whenever the key light is on the
   // camera's side of the unit the light sees the quad's *front*, back-face
@@ -1247,7 +1247,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
 
 /**
  * Force every sprite program to recompile. Only useful for hot-reloading shader
- * source during development; `programCacheSalt` is otherwise constant so all
+ * source during development; 'programCacheSalt' is otherwise constant so all
  * sprite instances share one program.
  */
 export function invalidateSpritePrograms(): void {
@@ -1264,7 +1264,7 @@ export function invalidateSpritePrograms(): void {
  * ─────────────────────────────────────────────────────────────────────────────
  * MEASURED, ROUND 3
  * ─────────────────────────────────────────────────────────────────────────────
- * Dumping `battle_knight_m_battle_pal1..5` byte-for-byte, the eight `.act` slots
+ * Dumping 'battle_knight_m_battle_pal1..5' byte-for-byte, the eight '.act' slots
  * of a generic class are not eight recolours of the whole figure — they are the
  * same figure with **one or two colour ramps swapped**:
  *
@@ -1273,18 +1273,18 @@ export function invalidateSpritePrograms(): void {
  *   knight_m idx 11-15 (skin, leather, gold trim): near-identical in every slot.
  *
  * The previous scorer averaged the hue of *every* entry that differed from
- * `pal1` by more than ~1/25 of the range. On the shipped files that filter keeps
+ * 'pal1' by more than ~1/25 of the range. On the shipped files that filter keeps
  * 10-14 of the 15 entries, because the toolkit nudges the skin and leather ramps
  * a few units between slots too — so the score was dominated by skin, every slot
- * measured 4-55 degrees, and **`ally` resolved to an orange slot on 6 of the 8
+ * measured 4-55 degrees, and **'ally' resolved to an orange slot on 6 of the 8
  * families sampled**. An ally and an enemy standing side by side were the same
  * colour, which is a gameplay-legibility bug, not just a look one.
  *
  * The ramp is instead identified by *variance across the slot set*: an index
  * whose colour is nearly constant in all eight palettes is skin or steel; an
  * index that swings from navy to scarlet is the team ramp. That is a property of
- * the data rather than of any one sheet's layout, so it works on `siro_w` (whose
- * ramp is indices 7-9) exactly as well as on `knight_m` (indices 3-6).
+ * the data rather than of any one sheet's layout, so it works on 'siro_w' (whose
+ * ramp is indices 7-9) exactly as well as on 'knight_m' (indices 3-6).
  */
 function teamRampMask(palettes: readonly Uint8Array[]): Float64Array {
   const variance = new Float64Array(16);
@@ -1328,8 +1328,8 @@ function teamRampMask(palettes: readonly Uint8Array[]): Float64Array {
 }
 
 /**
- * Palette slots are not laid out consistently across sheets: `knight_m` slot 1 is
- * teal and slot 2 is red, while `siro_w` puts blue at slot 1 and green at slot 3.
+ * Palette slots are not laid out consistently across sheets: 'knight_m' slot 1 is
+ * teal and slot 2 is red, while 'siro_w' puts blue at slot 1 and green at slot 3.
  * So rather than hard-coding "enemy = slot 1" we score the *actual colours* of
  * each slot's team ramp against a target hue and pick the closest non-empty one.
  * Data driven, and it degrades gracefully on story characters that only ship one
@@ -1340,7 +1340,7 @@ export function pickPaletteSlot(
   targetHueDegrees: number,
   taken?: ReadonlySet<number>,
   /**
-   * Optional thumb on the scale for one slot. `player` uses this to prefer the
+   * Optional thumb on the scale for one slot. 'player' uses this to prefer the
    * sheet's baked palette (slot 0) — the colours the character actually ships
    * in — without being *forced* onto it when that palette is nowhere near the
    * team hue. Scores are normalised weighted cosines in [-1, 1], so a bonus of
@@ -1350,11 +1350,11 @@ export function pickPaletteSlot(
 ): number {
   const mask = teamRampMask(palettes);
 
-  // How much *ramp chroma* each slot carries at all. `isPaletteEmpty` only
+  // How much *ramp chroma* each slot carries at all. 'isPaletteEmpty' only
   // rejects an all-zero table, and the shipped set contains slots that are
-  // almost — but not quite — that: `battle_yumi_m_battle_pal8` and
-  // `battle_thief_w_battle_pal7` have a black team ramp with a couple of stray
-  // non-zero bytes elsewhere. Both were being handed to `ally` once the good
+  // almost — but not quite — that: 'battle_yumi_m_battle_pal8' and
+  // 'battle_thief_w_battle_pal7' have a black team ramp with a couple of stray
+  // non-zero bytes elsewhere. Both were being handed to 'ally' once the good
   // slots were taken, which would render that unit's garment solid black. A slot
   // has to carry a real ramp before it can represent a team.
   const chroma = new Float64Array(palettes.length);
@@ -1368,9 +1368,9 @@ export function pickPaletteSlot(
   const floor = peakChroma * 0.3;
 
   // …and how much *light* it carries. Chroma alone is not enough: measured on
-  // the shipped set, `battle_san_m_battle_pal8` scores past the chroma floor on
+  // the shipped set, 'battle_san_m_battle_pal8' scores past the chroma floor on
   // a couple of faint off-black entries while every strong ramp index in it is
-  // literally 0x000000, so `ally` on an Arithmetician resolved to a slot that
+  // literally 0x000000, so 'ally' on an Arithmetician resolved to a slot that
   // renders the garment as a hole. A team colour has to be a colour you can
   // see, so the slot also has to reach a fraction of the brightest ramp on the
   // sheet before it is allowed to represent a team.
@@ -1434,9 +1434,9 @@ function rampChroma(palette: Uint8Array, mask: Float64Array): number {
 }
 
 /**
- * Score how strongly a palette's team ramp leans toward `targetHue`.
+ * Score how strongly a palette's team ramp leans toward 'targetHue'.
  *
- * `mask` weights each of the 16 indices by how much that index varies across the
+ * 'mask' weights each of the 16 indices by how much that index varies across the
  * sheet's whole slot set — see {@link teamRampMask}. Skin, hair and steel are
  * shared between team variants and score ~0, so they can no longer wash every
  * slot toward the same warm average.

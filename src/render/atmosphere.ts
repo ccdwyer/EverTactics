@@ -5,31 +5,31 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT LIVES HERE
  * ─────────────────────────────────────────────────────────────────────────────
- *  • `MoteField`  — GPU-animated dust and embers. Both reference frames have
+ *  • 'MoteField'  — GPU-animated dust and embers. Both reference frames have
  *    them and they are a surprisingly large part of why those frames read as a
  *    *place* rather than a render: air with something in it has volume.
- *  • `HazeBanks`  — a handful of large, soft, camera-facing quads sitting at
+ *  • 'HazeBanks'  — a handful of large, soft, camera-facing quads sitting at
  *    authored depths. They are what separates the board from the surround and
  *    the surround from the sky, and a ground bank at the board's base is what
  *    stops the diorama terminating on a hard silhouette.
- *  • `WorldEnvironment` — measures the board, solves the framing, and keeps the
+ *  • 'WorldEnvironment' — measures the board, solves the framing, and keeps the
  *    sky, the surround and the air agreeing with each other every frame.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * HOW IT INSTALLS
  * ─────────────────────────────────────────────────────────────────────────────
- * `Stage` constructs one of these and updates it in `present()`. Nothing else
- * has to call anything: the palette is *read back* from `scene.background`,
- * `scene.fog` and the key `DirectionalLight` that `lighting.ts` owns, and the
- * board bounds are measured from whatever `terrain.ts` added to the scene. That
+ * 'Stage' constructs one of these and updates it in 'present()'. Nothing else
+ * has to call anything: the palette is *read back* from 'scene.background',
+ * 'scene.fog' and the key 'DirectionalLight' that 'lighting.ts' owns, and the
+ * board bounds are measured from whatever 'terrain.ts' added to the scene. That
  * keeps the module boundary to "the scene is the contract" and lets the other
  * fixers change lighting presets and map geometry without touching this file.
  *
- * Escape hatches for the other agents are on `Stage`:
- *   `stage.environment`            — the live instance
- *   `stage.environment.enabled`    — kill switch
- *   `stage.environment.setBoardBounds(box)` — skip the measurement heuristic
- *   `stage.environment.refresh()`  — re-read palette + relayout now
+ * Escape hatches for the other agents are on 'Stage':
+ *   'stage.environment'            — the live instance
+ *   'stage.environment.enabled'    — kill switch
+ *   'stage.environment.setBoardBounds(box)' — skip the measurement heuristic
+ *   'stage.environment.refresh()'  — re-read palette + relayout now
  */
 
 import {
@@ -145,7 +145,7 @@ export interface MoteFieldOptions {
 }
 
 /**
- * One `Points` draw call of GPU-animated air. Positions are baked once, in the
+ * One 'Points' draw call of GPU-animated air. Positions are baked once, in the
  * yaw-local frame of the surround, and animated entirely in the vertex shader.
  */
 export class MoteField {
@@ -193,7 +193,7 @@ export class MoteField {
     this.setPalette(palette);
   }
 
-  /** Rebuild the volume. `box` is in the surround's yaw-local frame. */
+  /** Rebuild the volume. 'box' is in the surround's yaw-local frame. */
   layout(minX: number, maxX: number, minY: number, maxY: number, minZ: number, maxZ: number): void {
     const total = this.opts.dust + this.opts.embers;
     const pos = new Float32Array(total * 3);
@@ -405,7 +405,7 @@ export class HazeBanks extends Group {
     this.applyPalette();
   }
 
-  /** Keep the quads square to the camera. `pitch` in radians. */
+  /** Keep the quads square to the camera. 'pitch' in radians. */
   setPitch(pitch: number): void {
     for (const mesh of this.meshes) mesh.rotation.x = -pitch;
   }
@@ -471,14 +471,14 @@ const TMP_C = new Vector3();
  * Everything behind, below and around the board.
  *
  * The awkward part of this job is that nothing tells us how the shot is framed:
- * `Stage` only holds a `StageCamera`, and the board is added to the scene long
- * after `Stage` is constructed. So the environment *measures*:
+ * 'Stage' only holds a 'StageCamera', and the board is added to the scene long
+ * after 'Stage' is constructed. So the environment *measures*:
  *
- *   1. board bounds  — from the `terrain:*` group if present, else the scene
+ *   1. board bounds  — from the 'terrain:*' group if present, else the scene
  *   2. framing       — by projecting two probe points and reading back NDC,
  *                      which works for both an orthographic and a perspective
  *                      rig without caring which one is installed
- *   3. palette       — from `scene.background`, `scene.fog` and the key light
+ *   3. palette       — from 'scene.background', 'scene.fog' and the key light
  *
  * and relayouts when any of those move materially.
  */
@@ -521,7 +521,7 @@ export class WorldEnvironment {
     };
     this.enabled = this.options.enabled;
 
-    // A neutral starting palette; `refresh()` replaces it as soon as the
+    // A neutral starting palette; 'refresh()' replaces it as soon as the
     // lighting rig has published its preset.
     this.palette = {
       zenith: new Color().setHex(0x0d1526, 'srgb'),
@@ -579,15 +579,15 @@ export class WorldEnvironment {
   /**
    * Overall brightness of the surround, independent of the board.
    *
-   * `BackdropOptions.exposure` was always documented as "overall gain, matched
+   * 'BackdropOptions.exposure' was always documented as "overall gain, matched
    * to the map's exposure" — but nothing ever matched it, so the surround sat at
    * a fixed gain of 1 while post exposure moved underneath it. Round 6 halved
    * post exposure to put the board in the reference night band and the surround
-   * went with it: measured on `battle-open`, the connected-component void jumped
+   * went with it: measured on 'battle-open', the connected-component void jumped
    * 0.114 -> 0.246 (reference band 0.087–0.180, hard fail above 0.25) and
    * background detail fell 13.58 -> 7.31. The distant town, its lit windows and
    * the silhouette layer were all still being drawn; they had simply been
-   * crushed below the black point. `Game.applyPostProfile` now drives this from
+   * crushed below the black point. 'Game.applyPostProfile' now drives this from
    * the scenario exposure so the surround holds its final luminance whatever
    * absolute exposure the composition picks.
    */
@@ -611,7 +611,7 @@ export class WorldEnvironment {
   update(camera: Camera, elapsed: number): void {
     if (!this.enabled || !this.scene) return;
 
-    // Re-measure occasionally rather than every frame: `Box3.setFromObject`
+    // Re-measure occasionally rather than every frame: 'Box3.setFromObject'
     // walks the graph, and the board only changes when a scenario loads.
     this.framesSinceMeasure += 1;
     if (this.framesSinceMeasure > (this.haveBounds ? 90 : 5)) {
@@ -691,7 +691,7 @@ export class WorldEnvironment {
     this.haveBounds = true;
 
     // The footprint walk is O(terrain vertices) plus a 128x128 morphology and
-    // distance transform. `measure()` runs on a 90-frame heartbeat whether or
+    // distance transform. 'measure()' runs on a 90-frame heartbeat whether or
     // not anything moved, so rebuilding unconditionally would burn that every
     // second and a half for the entire battle. The board only changes when a
     // scenario loads, and the bounds change with it.
@@ -752,8 +752,8 @@ export class WorldEnvironment {
     const depthAt = (ndc: number): number =>
       Math.abs(slope) > 1e-5 ? (ndc - y0) / slope : boardRadius * 3;
 
-    // The three numbers that define the usable window. `visibleDepth` is where
-    // the ground plate leaves the top of the frame and `nearDepth` where it
+    // The three numbers that define the usable window. 'visibleDepth' is where
+    // the ground plate leaves the top of the frame and 'nearDepth' where it
     // leaves the bottom; nothing outside that band can ever be seen, which is
     // the constraint an orthographic rig imposes and the one the first pass
     // ignored.
@@ -995,7 +995,7 @@ function angleDelta(a: number, b: number): number {
 /**
  * Visible half-extents at the focus plane, in world units.
  *
- * Handles both camera types because `camera.ts` is owned by another agent this
+ * Handles both camera types because 'camera.ts' is owned by another agent this
  * round and one of the review notes asks them to move to a narrow perspective
  * FOV. If that lands, the environment must not need a matching edit.
  */

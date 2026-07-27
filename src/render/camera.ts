@@ -11,15 +11,15 @@
  * ─────────────────────────────────────────────────────────────────────────────
  *   grid.x  →  world +X   (east)
  *   grid.y  →  world +Z   (south)
- *   height  →  world +Y, in half-tile units (`HEIGHT_UNIT` world units each),
+ *   height  →  world +Y, in half-tile units ('HEIGHT_UNIT' world units each),
  *              matching the FFT convention documented in core/types.ts.
  *
- *   One tile is `TILE_SIZE` (= 1) world unit square and is CENTRED on its integer
+ *   One tile is 'TILE_SIZE' (= 1) world unit square and is CENTRED on its integer
  *   coordinate: tile (x, y) spans world X ∈ [x−0.5, x+0.5] and Z ∈ [y−0.5, y+0.5].
- *   `gridToWorld` returns the centre of the tile's walkable top surface.
+ *   'gridToWorld' returns the centre of the tile's walkable top surface.
  *
- *   `terrain.ts` is the authority on this layout — it is what actually emits the
- *   geometry — and re-exports the same `TILE_SIZE` / `HEIGHT_UNIT` / `gridToWorld`.
+ *   'terrain.ts' is the authority on this layout — it is what actually emits the
+ *   geometry — and re-exports the same 'TILE_SIZE' / 'HEIGHT_UNIT' / 'gridToWorld'.
  *   The definitions here exist so the camera has no dependency on the terrain
  *   module; they must stay numerically identical.
  *
@@ -30,9 +30,9 @@
  * pixels, or when it maps to an integer count but lands on a fractional pixel
  * boundary. Both have to be solved.
  *
- * 1. SCALE. We fix a global density: `TEXELS_PER_UNIT` sprite texels per world
- *    unit. Sprite quads must therefore be sized `texels / TEXELS_PER_UNIT` world
- *    units (see `texelsToWorld`). `pixelScale` is how many *device* pixels we
+ * 1. SCALE. We fix a global density: 'TEXELS_PER_UNIT' sprite texels per world
+ *    unit. Sprite quads must therefore be sized 'texels / TEXELS_PER_UNIT' world
+ *    units (see 'texelsToWorld'). 'pixelScale' is how many *device* pixels we
  *    want each of those texels to cover, and it is an integer at rest.
  *
  *      worldPerDevicePixel  w  = 1 / (TEXELS_PER_UNIT * pixelScale)
@@ -40,7 +40,7 @@
  *      frustumWidth            = drawingBufferWidth  * w
  *
  *    An orthographic frustum of exactly that size makes the world→pixel scale
- *    exactly 1/w, so one texel is exactly `pixelScale` device pixels. Nothing is
+ *    exactly 1/w, so one texel is exactly 'pixelScale' device pixels. Nothing is
  *    resampled, nothing beats.
  *
  * 2. CAMERA PHASE. Correct scale is not enough: if the camera itself moves by
@@ -70,14 +70,14 @@
  *    projects to pixelScale·cos(45°) pixels, not a whole number. Only
  *    displacements along the camera's own right/up axes are whole pixels — which
  *    is precisely what a camera-facing billboard is made of. So a sprite quad is
- *    internally exact once its ANCHOR is snapped, and `snapToPixelGrid()` does
+ *    internally exact once its ANCHOR is snapped, and 'snapToPixelGrid()' does
  *    that: it round-trips a world position through view space, rounding to the
- *    device-pixel lattice. `sprites.ts` / `vfx.ts` must run every billboard
+ *    device-pixel lattice. 'sprites.ts' / 'vfx.ts' must run every billboard
  *    origin through it, every frame. Terrain, being solid geometry rather than
  *    texel art, does not need it — the camera snap is enough.
  *
  * The camera is orthographic, so its distance from the focus point is arbitrary;
- * it only sets the near/far window. `RIG_DISTANCE` is large enough to contain any
+ * it only sets the near/far window. 'RIG_DISTANCE' is large enough to contain any
  * plausible diorama.
  */
 
@@ -122,7 +122,7 @@ export function texelsToWorld(texels: number): number {
 /**
  * Height of the drawn figure *inside* a unit's billboard quad, in sprite texels.
  *
- * The quad itself is 80 texels tall (2.5 world units at `TEXELS_PER_UNIT`), but it is mostly
+ * The quad itself is 80 texels tall (2.5 world units at 'TEXELS_PER_UNIT'), but it is mostly
  * transparent above the head and below the feet — measured on a rendered frame, a standing
  * humanoid occupies about 48 of those texels. Framing maths wants the figure, not the quad.
  */
@@ -147,15 +147,15 @@ export const REFERENCE_CHARACTER_FRAME_FRACTION = 0.115;
  */
 export const MAX_CHARACTER_FRAME_FRACTION = 0.18;
 
-/** Ceiling on `frameField`'s breathing room, as a fraction of the board's on-screen span. */
+/** Ceiling on 'frameField''s breathing room, as a fraction of the board's on-screen span. */
 export const MAX_FRAME_MARGIN_FRACTION = 0.15;
 
 /**
- * Outward bias on the cover fit in `frameField`. 1.0 rounds to nearest; above 1 prefers the
+ * Outward bias on the cover fit in 'frameField'. 1.0 rounds to nearest; above 1 prefers the
  * zoom step that lets the board run off the frame rather than the one that contains it.
  *
  * Back to neutral in round 3. It was a blunt 6% guess standing in for the real requirement,
- * which is now computed: `frameField` inflates the cover span by the composition offset
+ * which is now computed: 'frameField' inflates the cover span by the composition offset
  * directly, so the outward push is derived from how far off-centre the shot is actually
  * staged rather than from a constant. Leaving both in place stacked to ~16% and tipped a
  * 14-tile board a whole zoom step, which costs far more (a character at 18% of frame height
@@ -164,7 +164,7 @@ export const MAX_FRAME_MARGIN_FRACTION = 0.15;
  *
  * ROUND 4 puts a small bias back, at 1.05, for a reason round 3 could not have had: the
  * derived-from-the-offset scheme means the zoom step the shot takes is a side effect of how
- * far off-centre it is staged, which is an accidental coupling. Measured on `battle-open`,
+ * far off-centre it is staged, which is an accidental coupling. Measured on 'battle-open',
  * a compose offset of 0.06 in y took the step and 0.025 did not, so the vertical placement
  * of the board and the size of the characters were the same knob. 1.05 puts the step on the
  * near side of the rounding at any plausible offset, which frees the offset to be chosen for
@@ -172,8 +172,8 @@ export const MAX_FRAME_MARGIN_FRACTION = 0.15;
  * the result, so this cannot run away.
  *
  * ROUND 5 finished the job round 4 described but could not do: the offset term is gone from
- * the cover fit entirely (see `frameField`), so this constant is now the ONLY outward bias
- * and the coupling it was compensating for no longer exists. Measured on `battle-open` at
+ * the cover fit entirely (see 'frameField'), so this constant is now the ONLY outward bias
+ * and the coupling it was compensating for no longer exists. Measured on 'battle-open' at
  * 1920x1080 the fit lands on 3 device pixels per texel, which puts a character at 13.3% of
  * frame height — inside the 12-17% the references measure.
  */
@@ -216,13 +216,13 @@ export const YAW_ANGLES: readonly number[] = [
  * sits exactly on the vertical centreline, and the picture reads as an asset on a turntable.
  * Round-2 critics named that directly ("the map diamond is centred and square to frame").
  *
- * No shipped frame in `refs/curated/triangle` is on-axis — in `official_005_steam.jpg` the
+ * No shipped frame in 'refs/curated/triangle' is on-axis — in 'official_005_steam.jpg' the
  * near-left and near-right platform edges run at visibly different screen angles, which is
  * only possible off 45°. A few degrees is enough: the isometric read survives (the tile grid
  * is still obviously a grid), but the silhouette stops being mirror-symmetric and the two
  * visible wall faces catch the key at different angles.
  *
- * This is added at `rebuild()` time and reported by {@link IsoCamera.yawRadians}, so
+ * This is added at 'rebuild()' time and reported by {@link IsoCamera.yawRadians}, so
  * billboards and facing selection follow it and nothing needs to know it exists.
  */
 export const DEFAULT_YAW_TRIM_DEGREES = 10;
@@ -232,15 +232,15 @@ export const DEFAULT_YAW_TRIM_DEGREES = 10;
  * height from the centre (+x right, +y up).
  *
  * Dead-centre framing is the other half of the turntable read. The references compose: in
- * `official_005_steam.jpg` the action sits above and left of centre with the board running
- * out of the bottom-right; `official_019_se_screenshot.jpg` puts the ship on the lower-right
+ * 'official_005_steam.jpg' the action sits above and left of centre with the board running
+ * out of the bottom-right; 'official_019_se_screenshot.jpg' puts the ship on the lower-right
  * third with open water as deliberate negative space on the upper left.
  *
  * We bias the subject up and slightly left: up because the HUD owns the bottom band and the
  * board must not sit under it, left because the turn-order rail is anchored top-centre/right
  * and an off-centre subject sets up a diagonal against it.
  *
- * ROUND 4 — the y term was `-0.035`, which is DOWN. The comment above said "up", the value
+ * ROUND 4 — the y term was '-0.035', which is DOWN. The comment above said "up", the value
  * said down, and the rendered frame agreed with the value: the board sat low, its bottom two
  * rows disappeared behind the unit card and the command menu (a listed fail condition — "any
  * UI panel sitting over the playable board and occluding units"), and the top sixth of the
@@ -268,7 +268,7 @@ export const DEFAULT_YAW_TRIM_DEGREES = 10;
  *
  * [-0.075, +0.02] lands the focus point at UV (0.425, 0.52). The x term is the one doing the
  * work: it puts the party cluster and the brazier in the left third, which is where
- * `official_005_steam.jpg` puts its own action, and swings the diamond's long axis into a
+ * 'official_005_steam.jpg' puts its own action, and swings the diamond's long axis into a
  * lower-left-to-upper-right diagonal instead of sitting square in the frame. The board then
  * runs out of the right edge and the negative space collects as one wedge in the bottom
  * right, under the command menu, rather than as a ring of background all the way round.
@@ -278,7 +278,7 @@ export const DEFAULT_YAW_TRIM_DEGREES = 10;
  * bottom third, which is both the darkest and the most defocused part of the picture, and
  * mean frame luma fell from 68 to 57 for it.
  *
- * Round 5 also removed the cover fit's dependence on this value — see `frameField`. Pushing
+ * Round 5 also removed the cover fit's dependence on this value — see 'frameField'. Pushing
  * the subject to a third used to zoom the shot in by a whole step as a side effect, which
  * cropped units at three frame edges.
  */
@@ -290,7 +290,7 @@ export type YawIndex = 0 | 1 | 2 | 3;
  * How far back the ortho camera sits from its focus point. For an orthographic
  * projection this does not affect framing at all — only the near/far window and,
  * importantly, anything measured in camera distance (scene fog, depth writes).
- * `lighting.ts` uses it as the fog reference plane.
+ * 'lighting.ts' uses it as the fog reference plane.
  */
 export const RIG_DISTANCE = 160;
 
@@ -529,7 +529,7 @@ export class IsoCamera {
    * Effective yaw — the snapped slot plus the off-axis composition trim.
    *
    * Billboards and facing selection must use this, not the raw slot, or every sprite would
-   * be rotated `yawTrim` away from camera-facing and would shear as the rig turns.
+   * be rotated 'yawTrim' away from camera-facing and would shear as the rig turns.
    */
   get yawRadians(): number {
     return this.yaw + this.yawTrim;
@@ -541,9 +541,9 @@ export class IsoCamera {
 
   /**
    * Where the focus point sits on screen, as a signed fraction of the frame from its centre
-   * (+x right, +y up). `[0, 0]` is dead centre; see {@link DEFAULT_COMPOSE_OFFSET}.
+   * (+x right, +y up). '[0, 0]' is dead centre; see {@link DEFAULT_COMPOSE_OFFSET}.
    *
-   * This is applied *after* the look-at, so it survives every `focus`/`focusTile` call and
+   * This is applied *after* the look-at, so it survives every 'focus'/'focusTile' call and
    * composes the shot without lying about what the rig is looking at — picking, projection
    * and the follow damper all still agree.
    */
@@ -687,8 +687,8 @@ export class IsoCamera {
       // OFF all four edges.
       //
       // The zoom ladder is coarse (whole device pixels per texel), so the lever that
-      // actually mattered was not the rounding here — it was `fitWholeField` forcing the
-      // floor down to `zoomLevels[0]`. Measured on rendered frames: for `battle-open` the
+      // actually mattered was not the rounding here — it was 'fitWholeField' forcing the
+      // floor down to 'zoomLevels[0]'. Measured on rendered frames: for 'battle-open' the
       // cover fit wants 3.03 px/texel; 3 gives a board that over-covers the short axis and
       // falls a percent short on the long one, which is the reference framing, while
       // ceiling to 4 is a close-up with units cropped by the frame top.
@@ -697,9 +697,9 @@ export class IsoCamera {
       // still takes it. The character-size ceiling caps the result (FFT's own ~17% of frame
       // height is the outer edge of shipped practice), so this cannot run away.
       //
-      // ROUND 5 — the composition offset used to inflate this fit by `1 + 2|o|` per axis, on
+      // ROUND 5 — the composition offset used to inflate this fit by '1 + 2|o|' per axis, on
       // the reasoning that sliding the subject off centre means the board has to reach
-      // `0.5 + |o|` of the way to the far edge or the side it was slid away from becomes void.
+      // '0.5 + |o|' of the way to the far edge or the side it was slid away from becomes void.
       // The geometry is right; the conclusion no longer is, for two reasons.
       //
       // First, it re-created precisely the coupling round 4 complained about and could not
@@ -728,7 +728,7 @@ export class IsoCamera {
 
   // ── rotation ──────────────────────────────────────────────────────────────
 
-  /** Rotate one 90° snap. `direction` +1 turns the world clockwise on screen. */
+  /** Rotate one 90° snap. 'direction' +1 turns the world clockwise on screen. */
   rotate(direction: 1 | -1, options: RotateOptions = {}): Promise<void> {
     const next = (((this.yawSlot + direction) % 4) + 4) % 4;
     return this.setYawIndex(next as YawIndex, options);
@@ -1072,9 +1072,9 @@ export class IsoCamera {
    *
    * Billboards must call this on their anchor every frame (the lattice moves
    * with the camera). Depth along the view axis is untouched, so sorting is
-   * unaffected. With `TEXELS_PER_UNIT` texels per unit and an even texel size,
+   * unaffected. With 'TEXELS_PER_UNIT' texels per unit and an even texel size,
    * a quad centred on the returned point has all four edges on pixel
-   * boundaries; for an odd texel width pass `halfPixelX`/`halfPixelY` to bias
+   * boundaries; for an odd texel width pass 'halfPixelX'/'halfPixelY' to bias
    * the lattice by half a pixel so the quad's edges — not its centre — align.
    */
   snapToPixelGrid(
@@ -1134,11 +1134,11 @@ export class IsoCamera {
    * Pick a battlefield tile under the cursor without needing the terrain meshes.
    *
    * Terrain is a heightfield of solid columns: tile (x, y) occupies the square
-   * [x−½, x+½] × [y−½, y+½] and is solid from `floorY` up to its walkable
+   * [x−½, x+½] × [y−½, y+½] and is solid from 'floorY' up to its walkable
    * surface, which for a sloped tile varies across the square. So this marches
    * the pick ray forward in sub-tile steps, testing "is this sample inside a
    * column?" at each one, then bisects the first inside/outside straddle to land
-   * on the surface. That reproduces `terrain.ts`'s geometry — ramps included —
+   * on the surface. That reproduces 'terrain.ts''s geometry — ramps included —
    * which a flat per-tile box test does not: on an incline a flat box picks the
    * neighbouring tile along the whole uphill edge.
    *
@@ -1146,13 +1146,13 @@ export class IsoCamera {
    * correctly occludes what is behind it and clicking a visible side face selects
    * the block that owns it.
    *
-   * `floorY` must reach at least as low as the bottom of the skirt `terrain.ts`
+   * 'floorY' must reach at least as low as the bottom of the skirt 'terrain.ts'
    * generates (2.5 world units below the lowest tile) or clicks on the skirt
-   * return `undefined`. The default is deliberately generous.
+   * return 'undefined'. The default is deliberately generous.
    *
    * Sub-tile bevels are not modelled — expect the chamfer-width band at a tile
    * border (~1/16 tile) to resolve to whichever tile owns the majority of the
-   * pixel. Use `raycast()` against the terrain mesh if you need the exact
+   * pixel. Use 'raycast()' against the terrain mesh if you need the exact
    * surface point rather than the tile identity.
    */
   screenToTile(
@@ -1207,7 +1207,7 @@ export class IsoCamera {
     return undefined;
   }
 
-  /** True when the point `t` along the ray is inside a terrain column. */
+  /** True when the point 't' along the ray is inside a terrain column. */
   private sampleSolid(
     field: Battlefield,
     origin: Vector3,
@@ -1244,15 +1244,15 @@ export class IsoCamera {
 
   private readonly pickRay = new Ray();
 
-  /** The underlying three.js camera, for anything that needs a plain `Camera`. */
+  /** The underlying three.js camera, for anything that needs a plain 'Camera'. */
   get three(): Camera {
     return this.camera;
   }
 }
 
 /**
- * Ray/AABB slab test. Returns `[tEnter, tExit]` along `d` (clamped so tEnter is
- * never negative), or `null` when the ray misses the box entirely.
+ * Ray/AABB slab test. Returns '[tEnter, tExit]' along 'd' (clamped so tEnter is
+ * never negative), or 'null' when the ray misses the box entirely.
  */
 function rayBoxSpan(
   o: Vector3,
@@ -1290,10 +1290,10 @@ function rayBoxSpan(
 }
 
 /**
- * Height offset above `Tile.height`, in half-tiles, at local tile coordinate
+ * Height offset above 'Tile.height', in half-tiles, at local tile coordinate
  * (u, v) — u west→east, v north→south, both 0..1.
  *
- * This MUST match `slopeOffsetHalf` in `terrain.ts`, which is what actually
+ * This MUST match 'slopeOffsetHalf' in 'terrain.ts', which is what actually
  * generates the surface; picking that disagrees with the mesh is worse than no
  * picking at all. An incline spans exactly two half-tiles across the tile, the
  * FFT convention, so ramps stitch to their flat neighbours with no gap.

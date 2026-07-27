@@ -1,7 +1,7 @@
 /**
  * EverTactics — *role* materials.
  *
- * `surfaces.ts` authors one texture per **surface kind** (what the tile is made of).
+ * 'surfaces.ts' authors one texture per **surface kind** (what the tile is made of).
  * This file authors the textures a tile needs because of the **role a particular face
  * plays** in the architecture — which is a different axis entirely, and the one the
  * round-5 critics named:
@@ -12,7 +12,7 @@
  * A real building never uses one stone for everything. A cloister has:
  *
  *   - **paving** underfoot: a few big flags, worn smooth in the middle, grime in the
- *     joints (that is `stoneTexel` in `surfaces.ts`, used at a deliberately large scale),
+ *     joints (that is 'stoneTexel' in 'surfaces.ts', used at a deliberately large scale),
  *   - **coursed rubble or ashlar** in the wall below it: many small stones, weathering
  *     that runs downward,
  *   - and a **dressed coping / kerb** capping every exposed edge: a single-piece stone,
@@ -24,11 +24,12 @@
  * the frame, so the eye reads *edges* — the thing that tells you a mass has shape — rather
  * than reading a continuous field of the same brick.
  *
- * `stairTreadTexel` is the same idea applied to a step: a tread is polished in a band
+ * 'stairTreadTexel' is the same idea applied to a step: a tread is polished in a band
  * where feet land and filthy at its back corners, which no wall texture ever is.
  */
 
 import {
+  blockCrown,
   clamp01,
   fbm,
   fbm2p,
@@ -63,8 +64,8 @@ function mixTo(
  * Squared ashlar: the stone a mason uses when the wall has to carry something.
  *
  * Round 6's judges said the map reads as "the same brick cube … stacked at identical
- * scale across the entire map". Until now the tall retaining walls ran `stoneWallTexel`
- * with a bluish `color` multiplier, which is a *tint*, not a material: same lattice,
+ * scale across the entire map". Until now the tall retaining walls ran 'stoneWallTexel'
+ * with a bluish 'color' multiplier, which is a *tint*, not a material: same lattice,
  * same joint width, same wear, so the eye correctly reported one brick everywhere.
  *
  * This is a separate stone, and every axis that carries identity is different from the
@@ -84,9 +85,15 @@ function mixTo(
  */
 export const ashlarTexel = (u: number, v: number): Texel => {
   // Big squared blocks, courses nearly level: a dressed wall is set out, not piled.
-  const b = masonry(u, v, 4, 3, 941, 0.12, 0.22);
+  // 5 courses x 4 blocks rather than 4 x 3. The module is unchanged (uvScale came down
+  // to compensate); what changes is the *period*. Round 7: "Tiling period is visible. The
+  // same 4-block brick pattern marches along the long walls with a detectable repeat."
+  // Twenty blocks per repeat instead of twelve is a far harder cadence to count, and the
+  // stochastic tiling grid was tightened alongside it so the repeat is also re-seeded
+  // more than once per wall.
+  const b = masonry(u, v, 5, 4, 941, 0.16, 0.30);
 
-  // Narrow bed, deeply recessed. `edge` is in texture units, so these are much tighter
+  // Narrow bed, deeply recessed. 'edge' is in texture units, so these are much tighter
   // thresholds than the rubble's 0.014.
   const jointRaw = 1 - smoothstep(0.0, 0.007, b.edge);
   // The drafted margin: a chiselled flat band round the perimeter of every face.
@@ -111,7 +118,7 @@ export const ashlarTexel = (u: number, v: number): Texel => {
   );
 
   // Cool grey limestone with a faint green cast — deliberately NOT the honey sandstone
-  // of `stoneWallTexel`, so the two never read as one material under a warm key.
+  // of 'stoneWallTexel', so the two never read as one material under a warm key.
   const c = {
     r: lerp(0.214, 0.664, t),
     g: lerp(0.228, 0.686, t),
@@ -148,8 +155,12 @@ export const ashlarTexel = (u: number, v: number): Texel => {
     g: c.g,
     b: c.b,
     // The boss stands proud; the margin is cut back to a flat; the bed is a deep line.
+    // Ashlar's crown is subtler than rubble's — a dressed block is levelled, not
+    // piled — but it is still there, and without it the deep narrow bed reads as a
+    // painted line at any distance past a couple of tiles.
     h:
-      (1 - jointRaw) * (0.46 + bossMask * boss * 0.42 + tool * 0.10) -
+      (1 - jointRaw) * (0.38 + bossMask * boss * 0.40 + tool * 0.10 +
+        blockCrown(b.u, b.v) * 0.26) -
       margin * 0.16 -
       spall * 0.30,
     rough: 0.72 + grime * 0.2 + bossMask * 0.1 - margin * 0.08,
@@ -165,7 +176,7 @@ export const ashlarTexel = (u: number, v: number): Texel => {
  * whole repeat rather than the 8×5 of a wall. The rest of the character comes from
  * wear, not from a pattern — which is exactly why it does not read as "more brick".
  *
- * It is authored a stop and a half brighter than `stoneTexel` so that, under any key
+ * It is authored a stop and a half brighter than 'stoneTexel' so that, under any key
  * direction, it separates from the paving it borders by value rather than only by hue.
  * That is what makes the terrace lips legible when the whole frame is graded to one
  * warm note.
@@ -231,7 +242,8 @@ export const copingTexel = (u: number, v: number): Texel => {
     r: c.r,
     g: c.g,
     b: c.b,
-    h: (1 - jointRaw) * (0.62 + tool * 0.2) - bevel * 0.2 - chip * 0.34,
+    h: (1 - jointRaw) * (0.50 + tool * 0.2 + blockCrown(b.u, b.v) * 0.28) -
+      bevel * 0.2 - chip * 0.34,
     rough: 0.66 - polish * 0.26 + grime * 0.2,
   };
 };
@@ -245,8 +257,8 @@ export const copingTexel = (u: number, v: number): Texel => {
  * slightly dished band down the middle where every foot has landed for a century, and
  * black filth banked up in the two back corners where a broom never reaches.
  *
- * `v` runs along the direction of travel (the terrain builder projects world Z on top
- * faces), so the polished band is a function of `u` alone.
+ * 'v' runs along the direction of travel (the terrain builder projects world Z on top
+ * faces), so the polished band is a function of 'u' alone.
  */
 export const stairTreadTexel = (u: number, v: number): Texel => {
   const b = masonry(u, v, 3, 2, 857, 0.2, 0.36);
@@ -288,7 +300,8 @@ export const stairTreadTexel = (u: number, v: number): Texel => {
     g: c.g,
     b: c.b,
     // The dish: the middle of the tread is genuinely lower than its ends.
-    h: (1 - jointRaw) * (0.56 + grain * 0.22) - band * 0.16 - bevel * 0.2,
+    h: (1 - jointRaw) * (0.46 + grain * 0.20 + blockCrown(b.u, b.v) * 0.24) -
+      band * 0.16 - bevel * 0.2,
     rough: 0.76 - band * 0.34 + grime * 0.16,
   };
 };

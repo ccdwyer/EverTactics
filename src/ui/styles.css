@@ -118,7 +118,15 @@
   /* Left turn-order rail. Sized to the WIDEST chip — the acting one, which runs
      a 60px face against the others' 46 — so nothing pokes out past the plate's
      feathered right edge onto raw board pixels. */
-  --hud-rail: 116px;
+  /* ROUND 7: 116 -> 100. The rail was a landscape strip — a 46px numeral gutter
+     of bare navy sitting beside a 54px face, i.e. 43% of every chip was empty
+     panel. Measured off the shipped Combat Timeline
+     (refs/curated/fft/press-042310-...-mediakit-06.png): the tick numeral is
+     NOT inside a chip. It is a bare team-tinted glyph on the board with the
+     portrait card beside it, so the rail is card-width plus a numeral, not a row
+     of half-filled boxes. 26px numeral + 6px gap + 68px card (the acting one;
+     the rest are 58) = 100. */
+  --hud-rail: 104px;
   /* Acting unit, bottom-left. Round 4 ran 362x389 — a near-square block eating
      36% of the frame height in the corner. Measured off the shipped frame
      (refs/curated/fft/press-042310-...-mediakit-06.png at 1920x1080) the acting
@@ -1044,64 +1052,44 @@
   text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 10px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
 }
-/* A single dark plate behind the whole rail rather than a border per chip: the
-   reference timeline reads as one column of faces, not twelve separate cards.
-   The plate now blurs what is behind it and feathers out to the right, so the
-   faces never sit on raw board pixels but the rail still does not read as a
-   hard-edged box glued to the frame edge. */
+/* ROUND 7 — the rail is a COLUMN OF CARDS, not a panel with faces in it.
+   ---------------------------------------------------------------------------
+   Rounds 2-6 kept escalating the rail's chrome: a blurred plate behind the whole
+   column, a team-tinted fill per chip, a gold hairline per chip, and a numeral
+   gutter inside each of those boxes. Four nested rectangles per entry.
+
+   The shipped Combat Timeline has ONE rectangle per entry — the portrait card —
+   and the tick numeral floats free on the board to its left with nothing behind
+   it at all. That is why it reads as light chrome despite carrying nine faces
+   down a third of the frame height. The plate and the per-chip fill are both
+   gone; what separates the faces from the board now is the card's own dark mat
+   and drop shadow, which is what the reference uses. */
 .et-turnorder__track {
   position: relative;
   display: flex;
   flex-direction: column;
-  /* Stretch, not flex-start: the shipped Combat Timeline is one clean column of
-     equal-width entries. Shrink-to-fit gave each chip the width of its own
-     portrait, so the rail's right edge stepped in and out by a few pixels down
-     its whole length and read as ragged. */
   align-items: stretch;
-  gap: 3px;
-  /* The bottom pad is the runway the plate's 30px feather needs: a percentage
-     fade put half the last chip in the gradient and ghosted a live combatant
-     out of the rail. Fixed padding + a fixed-length mask keeps the dissolve
-     entirely below the final face however many entries the rail is showing. */
-  padding: 5px 5px 26px;
+  gap: 5px;
+  padding: 2px 0 10px;
 }
-/* The plate is a PSEUDO-ELEMENT, not the track itself, and that is load-bearing.
-   The plate wants a `mask-image` so its right edge feathers into the board
-   instead of ending on a hard vertical cut — but a mask clips descendants, and
-   the acting unit's name and job captions are absolutely positioned OUTSIDE the
-   track (they hang over the board to the right). Masking the track erased both.
-   Putting the blur, the fill and the mask on a backdrop layer behind the chips
-   keeps the feathered edge and lets the captions escape. */
+/* What is left of the plate: a soft pool of shade, no edges anywhere.
+   The hard-edged, backdrop-blurred plate was the rail's box; a wide radial that
+   never resolves into a shape does the same separation job (the numerals need
+   SOMETHING under them or they sit on lit stone) without putting a fifth
+   rectangle in the frame. It reaches well past the chips on every side and dies
+   out to nothing, so there is no line for the eye to find. */
 .et-turnorder__track::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: -34px -70px -46px -46px;
   z-index: 0;
-  background:
-    var(--grain),
-    linear-gradient(100deg, rgba(5, 8, 16, 0.9) 0%, rgba(5, 8, 16, 0.72) 76%, rgba(5, 8, 16, 0.36) 100%);
-  background-size: 180px 180px, auto;
-  background-blend-mode: overlay, normal;
-  backdrop-filter: blur(6px) saturate(0.55) brightness(0.74);
-  -webkit-backdrop-filter: blur(6px) saturate(0.55) brightness(0.74);
-  box-shadow:
-    inset 1px 0 0 rgba(201, 162, 39, 0.4),
-    0 16px 34px -18px rgba(0, 0, 0, 0.95);
-  /* Feather BOTH free edges, not just the right one.
-     The plate previously ended on a hard horizontal cut a few pixels under the
-     last chip — a clean rectangle edge sitting in the middle of the board, which
-     is the same defect as the hard right edge this mask was written to fix, only
-     rotated ninety degrees. Two masks composited with mask-composite: intersect
-     let the plate die out downward as well, so the rail reads as a column of
-     faces fading into the map rather than as a plate that stops. */
-  mask-image:
-    linear-gradient(90deg, #000 0%, #000 84%, rgba(0, 0, 0, 0.62) 100%),
-    linear-gradient(180deg, #000 calc(100% - 30px), rgba(0, 0, 0, 0.45) calc(100% - 10px), transparent 100%);
-  -webkit-mask-image:
-    linear-gradient(90deg, #000 0%, #000 84%, rgba(0, 0, 0, 0.62) 100%),
-    linear-gradient(180deg, #000 calc(100% - 30px), rgba(0, 0, 0, 0.45) calc(100% - 10px), transparent 100%);
-  mask-composite: intersect;
-  -webkit-mask-composite: source-in;
+  background: radial-gradient(
+    58% 52% at 34% 50%,
+    rgba(3, 5, 11, 0.62) 0%,
+    rgba(3, 5, 11, 0.42) 44%,
+    rgba(3, 5, 11, 0.16) 72%,
+    transparent 100%
+  );
   pointer-events: none;
 }
 
@@ -1110,60 +1098,72 @@
   position: relative;
   z-index: 1;
   display: grid;
-  /* The tick gutter takes the slack, the faces right-align on one edge — the
-     reference column exactly. A fixed 22px gutter with an `auto` face column put
-     the slack on the OUTBOARD side, where it reads as a missing panel edge. */
-  grid-template-columns: 1fr auto;
+  /* Fixed numeral gutter, card takes what it needs, cards LEFT-align.
+     The old `1fr auto` right-aligned the cards and let the gutter absorb the
+     slack, which meant the acting chip's wider face pushed its numeral 10px
+     left of every other numeral in the column — a wobbling left edge on the one
+     element that is supposed to be a clean vertical run of digits. Now the
+     digits share one column and the acting card is the thing that protrudes,
+     which is the emphasis we actually want. */
+  grid-template-columns: 26px auto;
   align-items: center;
-  gap: 5px;
-  padding: 2px 5px 2px 2px;
+  gap: 6px;
+  padding: 0;
   cursor: pointer;
-  /* Team-coloured PLATE, not just a coloured edge.
-     In refs/curated/fft/press-042310-...-mediakit-06.png every combat-timeline
-     entry sits on a filled plate in its allegiance colour — cool blue for the
-     party, red for hostiles — which is how the rail is readable at a glance from
-     across the room. Round 2 carried a 2px left border only, so twelve chips
-     read as one undifferentiated dark column. The tint is mixed down into the
-     panel navy so the rail still belongs to the same chrome family. */
-  background: linear-gradient(
-    92deg,
-    color-mix(in srgb, var(--team-color) 34%, rgba(10, 15, 29, 0.94)),
-    color-mix(in srgb, var(--team-color) 12%, rgba(6, 9, 18, 0.62)) 78%,
-    rgba(6, 9, 18, 0.4)
-  );
-  border: 1px solid rgba(201, 162, 39, 0.2);
-  border-left: 2px solid var(--team-color);
-  box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.95);
+  /* No fill, no border, no shadow. The chip is a layout box; the CARD inside it
+     is the only thing that draws. See the block note on .et-turnorder__track. */
   transition:
     transform 260ms var(--ease-out-expo),
-    border-color var(--dur) ease,
-    box-shadow var(--dur) ease,
     opacity var(--dur) ease;
 }
 .et-turnchip--player { --team-color: var(--team-player); }
 .et-turnchip--enemy { --team-color: var(--team-enemy); }
 .et-turnchip--ally { --team-color: var(--team-ally); }
 .et-turnchip--neutral { --team-color: var(--team-neutral); }
-.et-turnchip:hover { transform: translateX(4px); border-color: rgba(240, 221, 160, 0.55); }
-/* Same right padding as its neighbours: the faces have to land on ONE vertical
-   edge down the whole rail, and a 2px difference on the acting chip is visible
-   as a step. */
-.et-turnchip.is-current {
-  padding: 3px 5px 3px 3px;
-  border-color: rgba(240, 221, 160, 0.75);
-  background: linear-gradient(90deg, rgba(52, 68, 112, 0.94), rgba(9, 13, 26, 0.7));
-  box-shadow:
-    0 6px 18px -8px rgba(0, 0, 0, 0.95),
-    0 0 20px -6px rgba(240, 221, 160, 0.5);
-  transform: translateX(3px);
-}
+.et-turnchip:hover { transform: translateX(4px); }
 .et-turnchip.is-disabled { opacity: 0.4; filter: grayscale(0.75); }
 .et-turnchip.is-new { animation: et-chip-in 340ms var(--ease-out-expo); }
 @keyframes et-chip-in {
   from { opacity: 0; transform: translateX(-10px) scale(0.94); }
   to { opacity: 1; transform: none; }
 }
-.et-turnchip__frame { position: relative; grid-column: 2; }
+/* THE CARD. One rectangle per entry: a thin team-tinted mat, the face, and the
+   health sliver along the bottom edge, exactly the stack the shipped timeline
+   uses. The mat is what carries allegiance now that the chip has no fill — a
+   2px ring of team colour reads faster at rail scale than a wash behind a face,
+   because it is adjacent to the neutral navy of the mat rather than mixed into
+   it. */
+.et-turnchip__frame {
+  position: relative;
+  grid-column: 2;
+  justify-self: start;
+  padding: 2px 2px 0;
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--team-color) 30%, #0a0f1d),
+    color-mix(in srgb, var(--team-color) 10%, #05070d)
+  );
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.72),
+    0 0 0 1px color-mix(in srgb, var(--team-color) 46%, rgba(6, 9, 15, 0.9)),
+    0 5px 14px -6px rgba(0, 0, 0, 0.95);
+  transition: box-shadow var(--dur) ease;
+}
+.et-turnchip:hover .et-turnchip__frame {
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.72),
+    0 0 0 1px rgba(240, 221, 160, 0.8),
+    0 6px 16px -6px rgba(0, 0, 0, 0.95);
+}
+.et-turnchip.is-current .et-turnchip__frame {
+  padding: 3px 3px 0;
+  background: linear-gradient(165deg, #38487a, #10182c);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.72),
+    0 0 0 1px rgba(240, 221, 160, 0.9),
+    0 0 18px -4px rgba(240, 221, 160, 0.45),
+    0 7px 18px -7px rgba(0, 0, 0, 0.95);
+}
 .et-turnchip__crown {
   position: absolute;
   top: -7px;
@@ -1178,12 +1178,30 @@
    the name only appears for the unit acting now. Twelve names stacked vertically
    was more text than the whole reference HUD carries. */
 .et-turnchip__meta {
+  position: relative;
   grid-column: 1;
   grid-row: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  line-height: 1.1;
+  /* Right-aligned, not centred: a centred column of mixed-width numerals ("9"
+     against "12") wobbles, and the edge the eye follows down the rail is the one
+     nearest the faces. */
+  align-items: flex-end;
+  line-height: 1.05;
+}
+/* Every numeral carries its own shadow, because it is standing on the map.
+   Shot against `battle-open` the ticks over the lit stone terrace at the rail's
+   mid-point lost against the highlight — text-shadow alone spreads too evenly to
+   beat a bright background. A tight elliptical pool under the glyph darkens the
+   terrain itself, which is what an outline cannot do. It has no edge at any
+   opacity, so it does not put another shape in the frame. */
+.et-turnchip__meta::before {
+  content: '';
+  position: absolute;
+  inset: -6px -8px -6px -12px;
+  z-index: -1;
+  background: radial-gradient(58% 54% at 62% 46%, rgba(3, 5, 11, 0.82), rgba(3, 5, 11, 0.4) 58%, transparent 100%);
+  pointer-events: none;
 }
 /* The name sits outside the chip, over the board, so it carries its own plate —
    a bare glyph on terrain is the kind of thing that reads fine in a mockup and
@@ -1238,26 +1256,41 @@
    "stack of bare numbers" note was partly a hierarchy problem: the numbers were
    small AND unlabelled, so they read as debug output. Bigger + team-tinted +
    a CT caption on the acting chip fixes both halves. */
+/* ROUND 7 — the numeral is now BARE ON THE BOARD, so it needs its own contrast.
+   It has no plate behind it any more, and a thin serif glyph over lit stone is
+   the classic "readable in the mockup, invisible in play" failure. Two stacked
+   shadows do what the shipped game does with an outline: a tight near-black
+   halo that hugs the letterform plus a wide soft one that darkens whatever it
+   is standing on. */
 .et-turnchip__delta {
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1;
-  color: color-mix(in srgb, var(--team-color) 100%, white 46%);
+  color: color-mix(in srgb, var(--team-color) 100%, white 56%);
   font-variant-numeric: lining-nums tabular-nums;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 9px rgba(0, 0, 0, 0.85);
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 1),
+    0 1px 2px rgba(0, 0, 0, 1),
+    0 0 12px rgba(0, 0, 0, 0.9);
 }
-.et-turnchip__delta-unit {
+/* Printed ONCE, under the first queued numeral, and nowhere else.
+   The shipped timeline carries no unit label at all; a "CT" under every digit is
+   eight repetitions of a word the player learns in one glance. Labelling the top
+   of the column keeps the round-4 fix (the numbers are not unexplained debug
+   output) at an eighth of the ink. */
+.et-turnchip__delta-unit { display: none; }
+.et-turnchip.is-current + .et-turnchip .et-turnchip__delta-unit {
   display: block;
-  margin-top: 1px;
+  margin-top: 2px;
   font-family: var(--font-display);
   font-size: 7px;
   font-weight: 700;
   letter-spacing: 0.14em;
   line-height: 1;
   color: var(--gold-dim);
-  opacity: 0.85;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 1);
+  opacity: 0.9;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 1), 0 0 6px rgba(0, 0, 0, 0.9);
 }
 .et-turnchip.is-current .et-turnchip__delta {
   font-size: 10px;
@@ -1268,23 +1301,22 @@
 .et-turnchip.is-current .et-turnchip__delta-unit { display: none; }
 .et-turnchip__note { display: none; }
 
-/* HP sliver, drawn INSIDE the portrait frame along its lower edge rather than
-   as a row beneath the chip. Two reasons: it costs the rail no extra height, and
-   it puts the health read inside the same rectangle as the face, which is what
-   makes "the wounded one is third in the queue" a single glance instead of two.
-   The track is nearly black so a full bar still reads as a bar; the fill takes
-   the chip's own team colour so allegiance and health are one mark. */
+/* HP bar, on the card's bottom EDGE rather than floating inside the picture.
+   Round 6 laid a 3px sliver over the portrait 3px up from its lower border,
+   which put a bright horizontal line across the unit's collar and read as a
+   glitch rather than as a gauge. In the shipped timeline the bar is a fat band
+   (~8px on a 74px card, i.e. one ninth of the card height) welded to the bottom
+   of the frame, outside the image — it is the base the face stands on. At our
+   card size that is 5px, and it is the single loudest allegiance cue in the
+   rail, which is why it takes the flat team colour rather than a tint of it. */
 .et-turnchip__hp {
-  position: absolute;
-  left: 3px;
-  right: 3px;
-  bottom: 3px;
-  height: 3px;
+  position: relative;
+  display: block;
+  height: 5px;
+  margin-top: 2px;
   z-index: 2;
-  background: rgba(3, 5, 11, 0.86);
-  box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.7),
-    0 1px 2px rgba(0, 0, 0, 0.85);
+  background: rgba(3, 5, 11, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.75);
 }
 .et-turnchip__hp-fill {
   height: 100%;
@@ -1344,11 +1376,12 @@
     inset 0 0 18px -8px rgba(0, 0, 0, 0.9),
     0 2px 8px -4px rgba(0, 0, 0, 0.9);
 }
+/* Inside the rail the CARD MAT is the frame, so the portrait drops its own gold
+   rule entirely. Two concentric bevels on a 54px chip is 4px of ornament around
+   a 46px face — the reference chips carry exactly one keyline. */
+.et-turnchip .et-portrait,
 .et-turnchip.is-current .et-portrait {
-  box-shadow:
-    inset 0 0 0 1px rgba(6, 9, 15, 0.95),
-    inset 0 0 0 2px rgba(240, 221, 160, 0.92),
-    0 0 14px -3px rgba(240, 221, 160, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.8);
 }
 /* Every displayed size is a DOWNSCALE of the 128px source (104 / 60 / 46 / 30),
    and nearest-neighbour decimation on a downscale drops pixel rows — it makes

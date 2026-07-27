@@ -2,7 +2,7 @@
  * Procedural colour grading: author a grade as parameters, bake it to a 3D LUT.
  *
  * Why bake instead of evaluating the grade per-pixel? Because the grade then costs exactly
- * one trilinear `texture()` fetch no matter how baroque it gets, it crossfades between two
+ * one trilinear 'texture()' fetch no matter how baroque it gets, it crossfades between two
  * moods for free (two LUTs + a mix), and it is the same artefact a colourist would hand us
  * as a .cube — so a real grade can be dropped in later without touching the shader.
  *
@@ -33,9 +33,9 @@ export interface GradeParams {
   /** ASC-CDL power, per channel. 1 = neutral. >1 lifts midtones. */
   gamma: [number, number, number];
   /**
-   * S-curve strength around `pivot`, in display space. 0 = off.
+   * S-curve strength around 'pivot', in display space. 0 = off.
    *
-   * `pivot` matters more than it looks. The curve pushes everything above the pivot up and
+   * 'pivot' matters more than it looks. The curve pushes everything above the pivot up and
    * everything below it down, so a pivot chosen for a well-exposed image (0.4-0.45) simply
    * crushes a dark one — measured on our own frame, a 0.44 pivot dropped median luminance
    * from 23/255 to 17/255 while the reference frames sit at 66-80. These presets therefore
@@ -53,13 +53,13 @@ export interface GradeParams {
   midTint: [number, number, number];
   highlightTint: [number, number, number];
   /**
-   * A FOURTH tonal family, keyed much tighter than `shadowTint` — only the bottom of the
+   * A FOURTH tonal family, keyed much tighter than 'shadowTint' — only the bottom of the
    * shadow range reaches it.
    *
    * Round-3 critics, repeatedly: "a two-hue lockup (navy + amber) with nothing between",
    * "shadows are pure blue with no colour separation", "LEFT holds deep near-black with a
    * reddish bounce ... three distinguishable value families". Three luminance bands can only
-   * ever produce a three-hue image and, with `midTint` near neutral, in practice a two-hue
+   * ever produce a three-hue image and, with 'midTint' near neutral, in practice a two-hue
    * one. Splitting the shadow end lets the upper shadows stay teal-blue while the deepest
    * values go somewhere else entirely — violet on a night map, warm brown on a torchlit one —
    * which is the tertiary hue the notes keep asking for.
@@ -105,7 +105,7 @@ export interface GradeParams {
    * half of the "this was never graded" tell.
    */
   highlightPoint: [number, number, number];
-  /** How far highlights travel toward `highlightPoint`. 0 = off. */
+  /** How far highlights travel toward 'highlightPoint'. 0 = off. */
   highlightPull: number;
 }
 
@@ -142,8 +142,8 @@ export function grade(partial: Partial<GradeParams>): GradeParams {
  * Per-map moods.
  *
  * These used to be deliberately gentle. That was the wrong call and the reference frames say
- * so: `refs/curated/triangle/official_005_steam.jpg` is amber highlights against near-black
- * warm shadows with no neutral value anywhere in it, and `official_019_se_screenshot.jpg`
+ * so: 'refs/curated/triangle/official_005_steam.jpg' is amber highlights against near-black
+ * warm shadows with no neutral value anywhere in it, and 'official_019_se_screenshot.jpg'
  * runs cream highlights against a deep blue-teal floor. Both are graded far past "tasteful".
  * VISUAL_TARGET.md is explicit: "Neither uses neutral greys. Crush blacks toward the map's
  * cool tone and push highlights warm."
@@ -158,12 +158,12 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
   /**
    * Open plains and sunlit stone. Warm key against genuinely cool shadow.
    *
-   * Round 2 note: this preset used to carry `temperature: 0.2`, a global warm white-balance
+   * Round 2 note: this preset used to carry 'temperature: 0.2', a global warm white-balance
    * shift, on top of a lighting rig that is already a warm key. Rendered, the result was a
    * single amber wash — the critics' "no warm/cool separation, everything one temperature".
    * A grade cannot make a split by pushing the whole image one way; it makes one by pushing
    * the ENDS apart. So the global temperature is near neutral now and the work is done by
-   * `shadowTint` (hard toward blue-teal) against `highlightTint` / `highlightPoint` (hard
+   * 'shadowTint' (hard toward blue-teal) against 'highlightTint' / 'highlightPoint' (hard
    * toward gold), which is what both reference frames measure as.
    */
   'ivalice-noon': grade({
@@ -199,7 +199,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     // ROUND 4, three separate notes: "the blacks are lifted into a flat purple and the
     // midtones are compressed into a narrow band", "the blacks are lifted into blue so there
     // is no true anchor point", "let true blacks reach black (stop lifting shadows into
-    // navy)". Measured on `refs/curated/triangle/official_005_steam.jpg`, the darkest
+    // navy)". Measured on 'refs/curated/triangle/official_005_steam.jpg', the darkest
     // sixteenth of that frame sits at code 6-14 with a warm cast; ours sat at 17-22 blue
     // (0.064 * 255 = 16 before the vignette painted more on top).
     //
@@ -240,7 +240,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
   }),
 
   /**
-   * Stone interiors lit by stained glass — the `battle-open` look.
+   * Stone interiors lit by stained glass — the 'battle-open' look.
    *
    * Modelled on official_019: a cold blue-teal floor with warm practicals cutting through
    * it. The blue is carried by the black point, not by desaturating everything, so the
@@ -403,7 +403,7 @@ function toneMasks(l: number): [number, number, number] {
 }
 
 /**
- * Weight of the fourth, deepest tonal family. Much tighter than `toneMasks`'s shadow term
+ * Weight of the fourth, deepest tonal family. Much tighter than 'toneMasks''s shadow term
  * (exponent 6 vs 2.2), so it lives entirely underneath it rather than fighting it: at
  * l = 0.5 the shadow mask is 0.22 and this is 0.016.
  */
@@ -412,7 +412,7 @@ function deepShadowMask(l: number): number {
 }
 
 /**
- * Sample a six-anchor colour wheel (R, Y, G, C, B, M) at hue `h` ∈ [0,1).
+ * Sample a six-anchor colour wheel (R, Y, G, C, B, M) at hue 'h' ∈ [0,1).
  *
  * Smoothstep between anchors rather than linear: a linear ramp puts a visible crease at each
  * anchor once the table is baked into a 33³ LUT and then trilinearly filtered.
@@ -427,7 +427,7 @@ function sampleWheel(table: readonly number[], h: number): number {
   return a + (b - a) * s;
 }
 
-/** RGB -> HSL. `h` in [0,1), `s`/`l` in [0,1]. */
+/** RGB -> HSL. 'h' in [0,1), 's'/'l' in [0,1]. */
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);

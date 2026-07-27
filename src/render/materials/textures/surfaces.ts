@@ -18,6 +18,7 @@
  */
 
 import {
+  blockCrown,
   clamp01,
   fbm,
   fbm2p,
@@ -49,7 +50,7 @@ export interface Texel {
 
 export type TexelFn = (u: number, v: number) => Texel;
 
-/** Mix a colour triple toward another by `t`, in place on a scratch object. */
+/** Mix a colour triple toward another by 't', in place on a scratch object. */
 function tint(
   c: { r: number; g: number; b: number },
   r: number,
@@ -85,7 +86,7 @@ export const grassTexel: TexelFn = (u, v) => {
 
   // Blades are the dominant feature: fine, directional, and re-oriented per clump.
   const dir = clump.id * Math.PI;
-  // `streak` stretches features along x by making the y lattice `aniso` times finer,
+  // 'streak' stretches features along x by making the y lattice 'aniso' times finer,
   // so the base period has to stay coarse or the blades alias into mush.
   const blades = streak(u, v, 22, 419, dir, 4.2, 3);
   const blades2 = streak(u, v, 44, 423, dir + 1.1, 2.6, 2);
@@ -273,8 +274,11 @@ export const stoneTexel: TexelFn = (u, v) => {
     r: c.r,
     g: c.g,
     b: c.b,
+    // The dome ('blockCrown') is what makes the joint respond to light direction. See
+    // the note on that function: a bare mortar cliff cancels itself out under mipping
+    // and the joint degenerates into a painted line, which is what round 7 measured.
     h:
-      (1 - joint) * (0.52 + grain * 0.26 + b.tone * 0.14) -
+      (1 - joint) * (0.42 + grain * 0.24 + b.tone * 0.13 + blockCrown(b.u, b.v) * 0.25) -
       bevel * 0.22 -
       pitting * 0.10,
     rough: 0.74 - centre * 0.30 + grime * 0.18 + moss * 0.1,
@@ -291,7 +295,7 @@ export const stoneTexel: TexelFn = (u, v) => {
  * streaks below every joint, lichen on the upward-facing ledges. That asymmetry is the
  * single strongest cue that a wall is a wall and not a texture.
  *
- * `v` increases downward on side faces (the terrain builder projects `-y`), so "down"
+ * 'v' increases downward on side faces (the terrain builder projects '-y'), so "down"
  * in texture space is +v.
  */
 export const stoneWallTexel: TexelFn = (u, v) => {
@@ -347,7 +351,7 @@ export const stoneWallTexel: TexelFn = (u, v) => {
     g: c.g,
     b: c.b,
     h:
-      (1 - joint) * (0.50 + tool * 0.28 + b.tone * 0.16) -
+      (1 - joint) * (0.38 + tool * 0.25 + b.tone * 0.15 + blockCrown(b.u, b.v) * 0.27) -
       bevel * 0.26 -
       pitting * 0.12,
     rough: 0.78 + grime * 0.16 + lichen * 0.1 - (1 - joint) * 0.08,
@@ -524,7 +528,7 @@ export const swampTexel: TexelFn = (u, v) => {
 // Wood
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Planking — decks, bridges, floors. `planks` courses across the repeat. */
+/** Planking — decks, bridges, floors. 'planks' courses across the repeat. */
 export function woodTexel(planks: number, seedBase: number, dark: boolean): TexelFn {
   return (u, v) => {
     const idx = Math.floor(v * planks);
@@ -856,9 +860,9 @@ export const rubbleTexel: TexelFn = (u, v) => {
 
 /**
  * A column drum. Vertical flutes plus sparse horizontal drum joints — the two
- * features that make a cylinder read as a carved column instead of a pipe. `u` runs
- * around the shaft and `v` runs down it under the terrain's world-planar projection,
- * so the flutes are authored as a function of `u` alone.
+ * features that make a cylinder read as a carved column instead of a pipe. 'u' runs
+ * around the shaft and 'v' runs down it under the terrain's world-planar projection,
+ * so the flutes are authored as a function of 'u' alone.
  */
 export const pillarTexel: TexelFn = (u, v) => {
   const flutes = 8;

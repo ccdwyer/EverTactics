@@ -7,23 +7,23 @@
  *  1. **View resolution.** FFT sheets only ever draw a unit facing *screen-left*;
  *     the right-facing poses are horizontal mirrors. Combined with a camera that
  *     rotates in 90° steps, the correct pose is a function of
- *     `facing - cameraYaw`, not of `facing` alone. `resolveView` is what makes a
+ *     'facing - cameraYaw', not of 'facing' alone. 'resolveView' is what makes a
  *     unit turn to keep its back to you when you rotate the camera behind it —
  *     the signature detail of the genre, and the thing that looks broken instantly
  *     if you get it wrong.
  *
- *  2. **The clip player.** `SpriteAnimator` runs `AnimName` states with per-frame
+ *  2. **The clip player.** 'SpriteAnimator' runs 'AnimName' states with per-frame
  *     durations, looping, one-shot-with-callback, an impact cue for attacks, and
  *     a *distance-locked* mode where the walk cycle is driven by how far the unit
  *     has actually travelled rather than by wall-clock time. That is the only way
  *     footfalls land on the ground instead of sliding.
  *
  *  3. **Procedural pose.** The shipped sheets only expose the whole-body idle
- *     poses (see `sprites.ts` for the layout analysis); the attack/cast/hurt/KO
+ *     poses (see 'sprites.ts' for the layout analysis); the attack/cast/hurt/KO
  *     frames are packed as body parts that need the SHP/SEQ binaries decoded.
- *     Until that lands, every clip carries a `ProceduralPose` curve — lunge,
+ *     Until that lands, every clip carries a 'ProceduralPose' curve — lunge,
  *     recoil, cast-rise, collapse — which the renderer applies to the quad. When
- *     real frames arrive a clip simply sets `procedural: false` and the curves
+ *     real frames arrive a clip simply sets 'procedural: false' and the curves
  *     stop being evaluated; nothing else changes.
  */
 
@@ -35,7 +35,7 @@ import type { AnimName, Facing, Vec3 } from '@core/types';
 
 /**
  * The five distinct poses an FFT sheet draws. Everything else is a mirror.
- * `side` is the pure profile; the two quarters are the 3/4 views that a 45°
+ * 'side' is the pure profile; the two quarters are the 3/4 views that a 45°
  * isometric camera actually spends all its time looking at.
  */
 export type ViewKey = 'front' | 'frontQuarter' | 'side' | 'backQuarter' | 'back';
@@ -50,8 +50,8 @@ export const VIEW_KEYS: readonly ViewKey[] = [
 
 /**
  * World-space heading of a grid facing, in radians, using the shared convention
- * from `render/camera.ts`: grid +x → world +X (east), grid +y → world +Z (south).
- * The angle is `atan2(dirX, dirZ)`, matching the camera's yaw parameterisation.
+ * from 'render/camera.ts': grid +x → world +X (east), grid +y → world +Z (south).
+ * The angle is 'atan2(dirX, dirZ)', matching the camera's yaw parameterisation.
  */
 export function facingAngle(facing: Facing): number {
   switch (facing) {
@@ -100,15 +100,15 @@ export interface ViewSelection {
 const QUARTER = Math.PI / 8; // 22.5°
 
 /**
- * Pick the drawn pose for a unit facing `facing` seen from a camera at `cameraYaw`.
+ * Pick the drawn pose for a unit facing 'facing' seen from a camera at 'cameraYaw'.
  *
- * `cameraYaw` follows `IsoCamera.yawRadians`: the camera *sits* in the direction
- * `yaw` from its focus point, so a unit whose heading equals the yaw is looking
+ * 'cameraYaw' follows 'IsoCamera.yawRadians': the camera *sits* in the direction
+ * 'yaw' from its focus point, so a unit whose heading equals the yaw is looking
  * straight at the lens.
  *
  * The relative angle is signed: negative means the unit's nose points toward the
- * left of the screen, which is how the art is drawn, so `mirror` is simply
- * `relative > 0`. Continuous in `cameraYaw`, so an eased 90° rotation flips the
+ * left of the screen, which is how the art is drawn, so 'mirror' is simply
+ * 'relative > 0'. Continuous in 'cameraYaw', so an eased 90° rotation flips the
  * pose exactly halfway through instead of popping at the ends.
  */
 export function resolveView(facing: Facing, cameraYaw: number): ViewSelection {
@@ -129,7 +129,7 @@ export function resolveView(facing: Facing, cameraYaw: number): ViewSelection {
 
 /** One drawn frame: a flat cell index into the sheet's frame grid. */
 export interface AnimFrame {
-  /** `row * columns + column` in the sheet's frame grid. */
+  /** 'row * columns + column' in the sheet's frame grid. */
   cell: number;
   /** Flip on top of the view mirror — for poses drawn facing the other way. */
   flip?: boolean;
@@ -157,7 +157,7 @@ export function identityPose(): ProceduralPose {
   return { offsetX: 0, offsetY: 0, rotation: 0, scaleX: 1, scaleY: 1, brightness: 1 };
 }
 
-/** Evaluated at normalised clip time `t ∈ [0, 1]`, writing into `out`. */
+/** Evaluated at normalised clip time 't ∈ [0, 1]', writing into 'out'. */
 export type PoseCurve = (t: number, out: ProceduralPose) => void;
 
 export interface AnimClip {
@@ -169,7 +169,7 @@ export interface AnimClip {
   readonly loop: boolean;
   /**
    * When true the clip does not advance on its own — the caller supplies a phase
-   * from distance travelled. Used by `walk` and `run` so footfalls stay planted.
+   * from distance travelled. Used by 'walk' and 'run' so footfalls stay planted.
    */
   readonly distanceDriven?: boolean;
   /** Fraction of the clip at which an attack connects / a spell releases. */
@@ -203,7 +203,7 @@ export function clipDuration(clip: AnimClip): number {
  * front and pure back), cell 4 carries ~3x the cape pixels of cell 2 so it is the
  * one seen from behind, and cells 0/1/3 all place the cape to the right of the
  * silhouette centre and the face to the left — i.e. every asymmetric pose is
- * drawn facing screen-left, which is why `resolveView` mirrors rather than
+ * drawn facing screen-left, which is why 'resolveView' mirrors rather than
  * indexing more cells.
  */
 export const DEFAULT_VIEW_CELL: Readonly<Record<ViewKey, number>> = {
@@ -240,7 +240,7 @@ function easeOutBack(t: number): number {
  * whole-body idle poses in band 0.
  *
  * Every clip still has real, tuned motion — the movement is authored as pose
- * curves instead of as drawn frames. `anticipate → strike → recover` on the
+ * curves instead of as drawn frames. 'anticipate → strike → recover' on the
  * attack, a rise-and-settle on the cast, a hard recoil on hurt, a topple with a
  * bounce on the KO.
  */
@@ -548,9 +548,9 @@ export interface PlayOptions {
   restart?: boolean;
   /** Fired once when a non-looping clip reaches its end. */
   onComplete?: () => void;
-  /** Fired once at `clip.impactAt` — the moment a blow connects. */
+  /** Fired once at 'clip.impactAt' — the moment a blow connects. */
   onImpact?: () => void;
-  /** Fired at each of `clip.footfalls`, for step dust and sound. */
+  /** Fired at each of 'clip.footfalls', for step dust and sound. */
   onFootfall?: (index: number) => void;
 }
 
@@ -619,7 +619,7 @@ export class SpriteAnimator {
   play(name: AnimName, options: PlayOptions = {}): void {
     const next = this.set[name] ?? this.set.idle;
     if (!options.restart && this.clipName === name && !this.finished) {
-      // Refresh the callbacks so a repeated `play` can still hook completion.
+      // Refresh the callbacks so a repeated 'play' can still hook completion.
       if (options.onComplete) this.onComplete = options.onComplete;
       if (options.onImpact) this.onImpact = options.onImpact;
       if (options.onFootfall) this.onFootfall = options.onFootfall;
@@ -640,9 +640,9 @@ export class SpriteAnimator {
   }
 
   /**
-   * Drive a distance-driven clip. `phase` is the walk cycle position in turns —
+   * Drive a distance-driven clip. 'phase' is the walk cycle position in turns —
    * it may exceed 1 and is wrapped here, so callers can simply accumulate
-   * `distanceTravelled / strideLength`. Pass `null` to release the lock.
+   * 'distanceTravelled / strideLength'. Pass 'null' to release the lock.
    */
   setLocomotion(phase: number | null): void {
     if (phase === null) {
@@ -741,7 +741,7 @@ export class SpriteAnimator {
   }
 }
 
-/** Did the interval `[from, from + delta)` (wrapping at 1) cross `target`? */
+/** Did the interval '[from, from + delta)' (wrapping at 1) cross 'target'? */
 function crossed(from: number, delta: number, target: number): boolean {
   const end = from + delta;
   if (end < 1) return target > from && target <= end;
@@ -785,7 +785,7 @@ export interface PathWalkOptions {
 }
 
 export interface PathWalkSample {
-  /** Fractional grid position. `z` is elevation in half-tile units. */
+  /** Fractional grid position. 'z' is elevation in half-tile units. */
   x: number;
   y: number;
   z: number;
@@ -796,7 +796,7 @@ export interface PathWalkSample {
   airborne: boolean;
   /**
    * Height of the tile the unit's *shadow* belongs on, in half-tile units. During
-   * a hop `z` arcs above this; the contact shadow stays down here.
+   * a hop 'z' arcs above this; the contact shadow stays down here.
    */
   groundZ: number;
   /** Progress along the whole path, 0..1. */
@@ -804,7 +804,7 @@ export interface PathWalkSample {
 }
 
 /**
- * Walks a unit along a `move` path.
+ * Walks a unit along a 'move' path.
  *
  * Height is *not* lerped linearly across a step: FFT units step up onto a block
  * and drop off the far edge, so a step with a height change plays as an arc whose
@@ -929,7 +929,7 @@ export class PathWalker {
     if (magnitude >= this.hopThreshold) {
       // Real hop: clear the taller tile, land flat on the far side.
       // Parabola through (0, a.z) and (1, b.z) whose apex at t = 0.5 clears the
-      // taller of the two tiles by `hopHeight`.
+      // taller of the two tiles by 'hopHeight'.
       const apex = Math.max(a.z, b.z) + this.hopHeight;
       const rise = 4 * apex - 2 * (a.z + b.z);
       this.sample.z = a.z + drop * t + rise * t * (1 - t);

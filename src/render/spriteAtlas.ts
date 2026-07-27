@@ -1,7 +1,7 @@
 /**
  * Sprite atlas — the runtime half of the asset pipeline.
  *
- * Loads `public/assets/manifest.json` (produced by `tools/build-assets.mjs`) and
+ * Loads 'public/assets/manifest.json' (produced by 'tools/build-assets.mjs') and
  * turns the raw FFT HD rips into GPU resources:
  *
  *   - a colour texture per sheet (NearestFilter, no mipmaps, correct alpha),
@@ -11,12 +11,12 @@
  *
  * A sheet on disk is split across two PNG files — the second is the vertical
  * remainder of the same 512x976 image — so loading a sheet means stitching them
- * back together. See `docs/ASSETS.md` for the verified format facts.
+ * back together. See 'docs/ASSETS.md' for the verified format facts.
  *
  * Texture orientation: both textures are uploaded bottom-up (the pipeline flips
- * the rows), which matches THREE's default `flipY` behaviour for image
- * textures. `getFrameUV`/`getPoseUV` therefore return conventional GL UVs where
- * `v0` is the *bottom* edge of the frame — feed them straight into a
+ * the rows), which matches THREE's default 'flipY' behaviour for image
+ * textures. 'getFrameUV'/'getPoseUV' therefore return conventional GL UVs where
+ * 'v0' is the *bottom* edge of the frame — feed them straight into a
  * PlaneGeometry's uv attribute.
  */
 
@@ -36,17 +36,17 @@ import type { Texture } from 'three';
 // Manifest shape (mirrors tools/build-assets.mjs output)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** `[cellIndex, x, y, w, h, pixels]` repeated; x/y are relative to the cell. */
+/** '[cellIndex, x, y, w, h, pixels]' repeated; x/y are relative to the cell. */
 export type CellBoxArray = number[];
 
-/** `[bandIndex, column, x, y, w, h, feetX, feetY]` in sheet pixels. */
+/** '[bandIndex, column, x, y, w, h, feetX, feetY]' in sheet pixels. */
 export type PoseArray = number[];
 
 export interface SheetManifestEntry {
   key: string;
   id: number;
   name: string;
-  /** Primary PNG, relative to the site root (e.g. `assets/sprites/1000_...png`). */
+  /** Primary PNG, relative to the site root (e.g. 'assets/sprites/1000_...png'). */
   url: string;
   /** Primary + optional continuation, in stacking order. */
   files: string[];
@@ -75,9 +75,9 @@ export interface SheetManifestEntry {
   /** Hex string, one nibble per four cells, row-major, bit i = cell i of the group. */
   occupancy: string;
   cellBoxes: CellBoxArray;
-  /** `[y, height]` per run of non-empty scanlines. */
+  /** '[y, height]' per run of non-empty scanlines. */
   contentBands: number[][];
-  /** `[y, height, figureCount]` for the bands that hold whole-body frames. */
+  /** '[y, height, figureCount]' for the bands that hold whole-body frames. */
   poseBands: number[][];
   poses: PoseArray;
 }
@@ -85,7 +85,7 @@ export interface SheetManifestEntry {
 export interface PaletteFamilyEntry {
   /** 8 battle slots; base64 of 48 bytes, or null when the slot file is missing. */
   battle: (string | null)[];
-  /** 8 portrait slots, paired by slot with `battle`. */
+  /** 8 portrait slots, paired by slot with 'battle'. */
   portrait: (string | null)[];
   /** How many battle slots are actually coloured (the rest are unused black). */
   battleUsed: number;
@@ -128,7 +128,7 @@ export interface AssetManifest {
 // Public value types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** GL UV rect. `v0` is the bottom edge, `v1` the top. */
+/** GL UV rect. 'v0' is the bottom edge, 'v1' the top. */
 export interface UVRect {
   u0: number;
   v0: number;
@@ -267,7 +267,7 @@ export class SpriteAtlas {
     this.base = base;
   }
 
-  /** Fetch and parse the manifest. Sheets are loaded lazily by `loadSheet`. */
+  /** Fetch and parse the manifest. Sheets are loaded lazily by 'loadSheet'. */
   static async load(options: { base?: string; manifestUrl?: string } = {}): Promise<SpriteAtlas> {
     const base = options.base ?? defaultBase();
     const url = options.manifestUrl ?? joinUrl(base, 'assets/manifest.json');
@@ -433,7 +433,7 @@ export class SpriteAtlas {
 
   /**
    * UVs for a cell of the documented 64x64 grid, addressed row-major
-   * (`cell = row * columns + column`).
+   * ('cell = row * columns + column').
    */
   getFrameUV(key: string, cell: number): UVRect {
     const meta = this.require(key);
@@ -516,7 +516,7 @@ export class SpriteAtlas {
    * A 16x1 RGBA lookup texture for GPU palette swapping. Texel 0 is fully
    * transparent (FFT's transparent index). Textures are cached and shared.
    *
-   * @param family palette family from `SheetManifestEntry.paletteFamily`
+   * @param family palette family from 'SheetManifestEntry.paletteFamily'
    * @param index  slot 0-7. For generic classes: 0 blue/player, 1 red/enemy,
    *               2 green/ally, 3 yellow, 4 purple. For monsters these are
    *               colour variants; for story characters only slot 0 is used.
@@ -655,7 +655,7 @@ function readPoses(meta: SheetManifestEntry): Pose[] {
  * GLSL for the palette-swap material. Sample the index texture, scale the byte
  * back to 0-15, and look the colour up in the 16x1 LUT.
  *
- * Kept here so `render/sprites.ts` and `render/materials/` share one definition
+ * Kept here so 'render/sprites.ts' and 'render/materials/' share one definition
  * of how a palette swap is performed.
  */
 export const PALETTE_SWAP_GLSL = /* glsl */ `

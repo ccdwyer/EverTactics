@@ -6,17 +6,17 @@
  *   - two scrolling procedural normal maps at different scales/directions for ripples,
  *   - Gerstner-ish vertex displacement that fades to zero at the shoreline so the water
  *     never tears away from the bank,
- *   - a depth-based colour ramp driven by the *baked* water column depth (`aDepth`), so
+ *   - a depth-based colour ramp driven by the *baked* water column depth ('aDepth'), so
  *     shallows read green-teal and channels read deep blue,
  *   - Fresnel-weighted sky reflection plus a sharp sun glint,
  *   - refraction of the terrain below, sampled from a scene colour buffer with the offset
  *     rejected wherever the offset would pull in an above-water pixel (validated against
  *     the scene depth buffer),
- *   - a shoreline foam line from the baked `aShore` distance, animated by the wave phase,
+ *   - a shoreline foam line from the baked 'aShore' distance, animated by the wave phase,
  *     plus soft contact foam wherever geometry intersects the surface (depth buffer).
  *
- * The scene buffers are optional. `render/terrain.ts` captures them itself in
- * `Terrain.prepare()`, and if they are never supplied the shader falls back to a fully
+ * The scene buffers are optional. 'render/terrain.ts' captures them itself in
+ * 'Terrain.prepare()', and if they are never supplied the shader falls back to a fully
  * analytic depth ramp with alpha blending, which still reads correctly.
  */
 
@@ -434,7 +434,7 @@ export class WaterMaterial extends THREE.ShaderMaterial {
     this.name = 'water';
   }
 
-  /** Advance the animation. `dt` in seconds. */
+  /** Advance the animation. 'dt' in seconds. */
   update(dt: number): void {
     this.elapsed += dt;
     this.uniforms.uTime!.value = this.elapsed;
@@ -447,7 +447,7 @@ export class WaterMaterial extends THREE.ShaderMaterial {
 
   /**
    * Supply the opaque scene colour + depth captured *without* the water, enabling real
-   * refraction and contact foam. Pass `null` to fall back to the analytic path.
+   * refraction and contact foam. Pass 'null' to fall back to the analytic path.
    */
   setSceneBuffers(
     color: THREE.Texture | null,

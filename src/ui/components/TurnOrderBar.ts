@@ -9,24 +9,41 @@
 
 import { add, div, el } from '../dom';
 import { icon } from '../icons';
-import { castPortrait, portraitForUnit } from '../portraits';
+import { castRoster } from '../portraits';
 import { portrait } from '../portraits';
 import type { TurnEntryVM } from '../types';
 import { isReducedMotion } from '../anim';
 
 /**
- * The face a rail chip shows. An entry with no portrait still has to look like
- * the unit it labels — never a monster face on a human job — and an auto-cast
- * one is upgraded to the job-correct face when the entry names a job.
+ * The faces the whole rail shows, cast as a GROUP.
+ *
+ * Per-entry casting was blind to its neighbours and collided: two Thieves in the
+ * same eight-chip column landed on the same drawing in two hair colours, which
+ * reads as placeholder data no matter how good the individual face is. The rail
+ * is also the one place in the game where every unit is visible at once, so it
+ * is the place the constraint has to be enforced. See `castRoster`.
+ *
+ * De-duplication is done on the DISTINCT unit set, not on the entry list: a unit
+ * that appears twice in the predicted queue (it acts, then acts again before
+ * someone slow) must show the same face both times.
  */
-function faceFor(entry: TurnEntryVM): string | undefined {
-  if (!entry.portrait) {
-    return portraitForUnit(`${entry.unitId}:${entry.gender ?? ''}`, {
-      job: entry.job,
-      gender: entry.gender,
-    });
+function facesFor(entries: readonly TurnEntryVM[]): (string | undefined)[] {
+  const order: string[] = [];
+  const first = new Map<string, TurnEntryVM>();
+  for (const e of entries) {
+    if (first.has(e.unitId)) continue;
+    first.set(e.unitId, e);
+    order.push(e.unitId);
   }
-  return castPortrait(entry.unitId, entry.portrait, { job: entry.job, gender: entry.gender });
+  const cast = castRoster(
+    order.map((id) => {
+      const e = first.get(id) as TurnEntryVM;
+      return { id: e.unitId, portrait: e.portrait, job: e.job, gender: e.gender };
+    }),
+  );
+  const byUnit = new Map<string, string | undefined>();
+  order.forEach((id, i) => byUnit.set(id, cast[i]));
+  return entries.map((e) => byUnit.get(e.unitId));
 }
 
 export interface TurnOrderCallbacks {
@@ -57,12 +74,13 @@ export class TurnOrderBar {
     }
 
     this.entries = entries;
+    const faces = facesFor(entries);
     const seen = new Set<string>();
     this.track.replaceChildren();
     entries.forEach((entry, i) => {
       const key = `${entry.unitId}:${i}`;
       seen.add(key);
-      const chip = this.buildChip(entry, i);
+      const chip = this.buildChip(entry, i, faces[i]);
       this.track.appendChild(chip);
       this.chips.set(key, chip);
     });
@@ -87,7 +105,7 @@ export class TurnOrderBar {
     }
   }
 
-  private buildChip(entry: TurnEntryVM, index: number): HTMLDivElement {
+  private buildChip(entry: TurnEntryVM, index: number, face: string | undefined): HTMLDivElement {
     const chip = div(`et-turnchip et-turnchip--${entry.team}`);
     if (entry.current) chip.classList.add('is-current');
     if (entry.disabled) chip.classList.add('is-disabled');
@@ -96,7 +114,7 @@ export class TurnOrderBar {
     const frame = div('et-turnchip__frame');
     // Head crop: at rail scale the shoulders are noise and the face is the read.
     frame.appendChild(
-      portrait(faceFor(entry), {
+      portrait(face, {
         size: entry.current ? 'md' : 'sm',
         head: true,
         className: 'et-turnchip__face',

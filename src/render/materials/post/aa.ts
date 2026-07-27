@@ -6,7 +6,7 @@
  * FFT sprite destroys the thing that makes it look like FFT. A blended pixel-art edge is
  * instantly, viscerally wrong.
  *
- * The fix is a mask. `sprites.ts` puts its billboards on a dedicated layer; the PostStack
+ * The fix is a mask. 'sprites.ts' puts its billboards on a dedicated layer; the PostStack
  * renders that layer alone into an alpha mask and this pass dilates it by a texel before
  * using it. Three policies:
  *   exclude    — no AA anywhere a sprite covers. Pixel art stays bit-exact. (default)
@@ -16,7 +16,7 @@
  *
  * The algorithm is FXAA-family: luma edge detect, determine edge orientation, search along
  * the edge for its ends, and blend perpendicular by the subpixel offset. Subpixel aliasing
- * removal is deliberately weak (`uSubpix` default 0.4) because full-strength FXAA softens
+ * removal is deliberately weak ('uSubpix' default 0.4) because full-strength FXAA softens
  * fine terrain detail more than it helps.
  */
 

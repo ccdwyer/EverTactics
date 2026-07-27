@@ -4,13 +4,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * THE PROBLEM THIS SOLVES
  * ─────────────────────────────────────────────────────────────────────────────
- * The board was a rectangular slab floating in `clearColor`. Every critic in the
+ * The board was a rectangular slab floating in 'clearColor'. Every critic in the
  * round-2 A/B named it, most of them first. What the references actually do is
  * *continue the environment past the play area*: houses immediately behind the
  * fence line, a quay running off the left edge, crates and lanterns crowding the
  * margins, haze between the layers. See
- * `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` (village houses start
- * one tile beyond the playable ground) and `official_005_steam.jpg` (ruined
+ * 'refs/curated/triangle/press_002_gematsu_1920x1080.jpg' (village houses start
+ * one tile beyond the playable ground) and 'official_005_steam.jpg' (ruined
  * masonry fills every frame edge).
  *
  * ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@
  * The rig is *orthographic*. That has a consequence people coming from a
  * perspective engine get wrong: there is no convergence, so a silhouette 200
  * units behind the board projects to the same screen position as one 5 units
- * behind it, just shifted up-screen by `depth · sin(pitch)`. With our framing,
+ * behind it, just shifted up-screen by 'depth · sin(pitch)'. With our framing,
  * anything more than ~18 world units behind the board is already off the top of
  * the frame. A "distant skyline" is geometrically impossible here — and looking
  * at the references, neither game has one. They have a *dense near surround*.
@@ -27,7 +27,7 @@
  * So this is authored in a yaw-following local frame:
  *
  *     local +X → screen right
- *     local −Z → away from the camera along the ground   (call it `depth`)
+ *     local −Z → away from the camera along the ground   (call it 'depth')
  *     local +Y → up
  *     screenX  = x
  *     screenY  = y·cos(pitch) + depth·sin(pitch)
@@ -36,13 +36,13 @@
  * yaw slots and the surround always runs off the correct frame edges. That is a
  * matte-painting cheat and it is invisible in a still frame — which is what the
  * blind test looks at. Everything inside is real lit 3D geometry, gets the DoF
- * and grade from `post.ts`, and writes depth normally.
+ * and grade from 'post.ts', and writes depth normally.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * BANDS
  * ─────────────────────────────────────────────────────────────────────────────
- * All four are expressed against the *measured* window — `boardRadius` R and
- * `visibleDepth`, with `run = visibleDepth − R` the usable depth behind the
+ * All four are expressed against the *measured* window — 'boardRadius' R and
+ * 'visibleDepth', with 'run = visibleDepth − R' the usable depth behind the
  * board (about 4.5 units at the shipping framing):
  *
  *   flank   |depth| ≤ 0.95R, |x| past the footprint — the left/right strips
@@ -50,8 +50,8 @@
  *   ridge   depth  R+0.45·run … R+1.25·run — towers whose tops crop at the top edge
  *   fore    depth  0.5·nearDepth … 1.45·nearDepth — foliage framing the bottom corners
  *
- * `fore` exists because both reference frames have a soft, dark foreground
- * element breaking into the bottom of the image, and because `post.ts`'s DoF
+ * 'fore' exists because both reference frames have a soft, dark foreground
+ * element breaking into the bottom of the image, and because 'post.ts''s DoF
  * needs something in the near field to actually blur. It is restricted to
  * organic shapes: buildings there came back from the DoF pass as featureless
  * black rectangles.
@@ -91,12 +91,12 @@ import { GLSL_NOISE, type EnvironmentPalette } from './sky.js';
 
 /**
  * Signed distance field of the board's real XZ silhouette. Built by
- * `buildFootprintField` in `atmosphere.ts`; declared here because
- * `BackdropLayout` is the contract between the two and the dependency already
+ * 'buildFootprintField' in 'atmosphere.ts'; declared here because
+ * 'BackdropLayout' is the contract between the two and the dependency already
  * runs atmosphere → backdrop.
  *
  * Positive outside the board, negative inside, in world units. Sampled from JS
- * for prop placement and from GLSL (via the R8 `encoded` copy) for the ground
+ * for prop placement and from GLSL (via the R8 'encoded' copy) for the ground
  * plate's occlusion, contact and bounce terms.
  */
 export interface BoardFootprint {
@@ -113,13 +113,13 @@ export interface BoardFootprint {
   distance: Float32Array;
   /** Distance the encoded byte texture saturates at, world units. */
   range: number;
-  /** `distance` remapped to 0..255 over [-range, +range], for an R8 texture. */
+  /** 'distance' remapped to 0..255 over [-range, +range], for an R8 texture. */
   encoded: Uint8Array;
 }
 
 /**
  * Everything the surround needs to know about the shot. Computed by
- * `WorldEnvironment` in `atmosphere.ts` from the live camera and the measured
+ * 'WorldEnvironment' in 'atmosphere.ts' from the live camera and the measured
  * board bounds — nothing here is hand-tuned per map.
  */
 export interface BackdropLayout {
@@ -167,7 +167,7 @@ export interface BackdropLayout {
   seed: number;
   /**
    * Signed distance field of the board's REAL silhouette, measured in
-   * `atmosphere.ts`. Everything that needs "how far is this point from the
+   * 'atmosphere.ts'. Everything that needs "how far is this point from the
    * diorama" prefers this and falls back to the AABB rectangle when it is null
    * (a scene with no terrain group, or a measure that found no geometry).
    *
@@ -183,7 +183,7 @@ export interface BackdropLayout {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Bilinear sample of the footprint field. `wx`/`wz` are world-axis offsets from
+ * Bilinear sample of the footprint field. 'wx'/'wz' are world-axis offsets from
  * the board centre. Outside the grid this returns the clamped border value,
  * which is the padding distance — larger than anything that samples it cares
  * about, so callers never need a range check.
@@ -205,8 +205,8 @@ export function sampleFootprint(field: BoardFootprint, wx: number, wz: number): 
 }
 
 /**
- * A 1×1 stand-in so `uFootTex` is always bound. WebGL errors on a sampler with
- * no texture even when the branch reading it is never taken, and `uFootHas`
+ * A 1×1 stand-in so 'uFootTex' is always bound. WebGL errors on a sampler with
+ * no texture even when the branch reading it is never taken, and 'uFootHas'
  * gates that branch at runtime, not at compile time.
  */
 let FALLBACK_FOOT: DataTexture | null = null;
@@ -261,7 +261,7 @@ function gableRoof(width: number, height: number, depth: number): BufferGeometry
   const count = p.length / 3;
   g.setAttribute('position', new BufferAttribute(p, 3));
   g.setAttribute('uv', new BufferAttribute(new Float32Array(count * 2), 2));
-  // Indexed, because `mergeGeometries` refuses a mixed indexed/non-indexed set
+  // Indexed, because 'mergeGeometries' refuses a mixed indexed/non-indexed set
   // and every primitive from three's generators is indexed.
   g.setIndex(Array.from({ length: count }, (_, i) => i));
   g.computeVertexNormals();
@@ -540,7 +540,7 @@ void main() {
  * Lighting here is deliberately *not* three's Lambert. These meshes sit outside
  * the fitted shadow frustum and mostly outside the practicals' falloff, so
  * routing them through the standard pipeline would give a flat ambient wash —
- * the exact fail condition in `VISUAL_TARGET.md`. Instead: a hand-rolled
+ * the exact fail condition in 'VISUAL_TARGET.md'. Instead: a hand-rolled
  * key + sky + bounce in the same colours the rig is using, an explicit haze
  * mix by depth, macro noise so no face is a constant value, and warm window
  * practicals punched through the vertical faces.
@@ -567,6 +567,12 @@ uniform float uWindowGain;
 uniform float uTone;
 uniform float uExposure;
 uniform float uTime;
+
+// Near-field silhouette grade. 0 on every far band, which makes the whole
+// block below a measured no-op there. See the grade block in main().
+uniform vec3  uDeep;
+uniform float uSilhouette;
+uniform float uSilhouetteFloor;
 
 uniform vec3  uWood;
 uniform vec3  uFoliage;
@@ -833,6 +839,55 @@ void main() {
   // little above the plate's so they still read as silhouettes against it.
   float nearAmt = clamp(depth / (uNearDepth * 0.85), 0.0, 1.0);
   col *= mix(1.0, 0.34, nearAmt * nearAmt);
+
+  // ── Near-field silhouette grade ───────────────────────────────────────────
+  //
+  // Measured on the round-7 frozen build, at the shipping camera: the lower
+  // right of the frame (the near prop cluster) rendered at luma 84 against a
+  // board at 77. The clutter BETWEEN the camera and the subject was the
+  // brightest thing in the lower half of the image. Toggling layers at runtime
+  // attributed it: prop bands +35 luma, glow cards +8.5, ground plate +2, over
+  // an environment-off floor of 35.
+  //
+  // Both references do the opposite, and it is not a subtle margin — the
+  // equivalent window measures 2.5/255 in official_009_steam.jpg and 49.8 in
+  // official_033_se_screenshot.jpg, against boards at 62 and 84. Whatever sits
+  // in front of the subject is a silhouette there, never a lit mid-value field.
+  //
+  // Why the existing knobs did not already do this: uTone and the nearAmt
+  // falloff above are both pure VALUE scales, and value alone is what produced
+  // the failure mode the round-6 comments describe — pull it down and the props
+  // desaturate toward a neutral grey card (measured sat 0.086 in the first pass
+  // of this round), because the lighting terms feeding them are a warm sun plus
+  // a cool sky and their average is colourless. Crushing a neutral gives a
+  // darker neutral. The references' foregrounds are dark AND strongly
+  // chromatic — sat 0.70 and 0.95 in those same two windows.
+  //
+  // So this grades in three steps rather than scaling once:
+  //   1. value  — keep pulling down past the generic falloff, toward a floor
+  //                the band authors, so the cluster drops under the board.
+  //   2. chroma — rotate the hue toward the map's own crushed-black tint at
+  //                CONSTANT luminance, so the silhouette read the earlier
+  //                rounds fought for survives untouched while the colour binds
+  //                to the grade instead of drifting to grey.
+  //   3. saturation — extrapolate away from luminance so step 2 can never
+  //                land on a neutral even if uDeep is close to one.
+  //
+  // Guarded on uSilhouette so far bands take the identical code path they took
+  // before; 'veil', the haze mix and the tone scale are all upstream of here.
+  if (uSilhouette > 0.0) {
+    float s = uSilhouette * nearAmt * nearAmt;
+
+    col *= mix(1.0, uSilhouetteFloor, s);
+
+    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+    float lum = dot(col, LUMA);
+    // Unit-luminance shadow hue, so the mix below cannot change value at all.
+    vec3 deepUnit = uDeep / max(dot(uDeep, LUMA), 1e-4);
+    col = mix(col, deepUnit * lum, s * 0.72);
+    col = mix(vec3(lum), col, 1.0 + 0.5 * s);
+  }
+
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
 `;
@@ -1215,7 +1270,7 @@ interface BandSpec {
   count: number;
   depthMin: number;
   depthMax: number;
-  /** Minimum |x|. Used by `fore` to keep the near band out of frame centre. */
+  /** Minimum |x|. Used by 'fore' to keep the near band out of frame centre. */
   lateralMin?: number;
   lateralMax: number;
   scale: number;
@@ -1223,10 +1278,10 @@ interface BandSpec {
   /**
    * Airlight ceiling, in the same linear units the band's albedo is authored in.
    * A fully-hazed surface asymptotes toward twice this. Omitted → no ceiling,
-   * which is what the un-hazed near bands (`nearfield`, `fore`) want.
+   * which is what the un-hazed near bands ('nearfield', 'fore') want.
    *
    * Lower = the band recedes harder. This is the knob that puts the depth
-   * ordering back the right way round; see the `veil` block in `STRUCT_FRAG`.
+   * ordering back the right way round; see the 'veil' block in 'STRUCT_FRAG'.
    */
   hazeCeil?: number;
   /**
@@ -1241,7 +1296,7 @@ interface BandSpec {
   kinds: readonly PropKind[];
   /**
    * If set, placements are generated by walking the board's footprint PERIMETER
-   * and stepping outward by `clearance … ringMax`, instead of by rejection
+   * and stepping outward by 'clearance … ringMax', instead of by rejection
    * sampling the band rectangle.
    *
    * Rejection sampling was tried first and measurably does not work here: the
@@ -1259,11 +1314,23 @@ interface BandSpec {
   tilt?: number;
   /** How far pieces sink into the ground plate; hides their flat undersides. */
   sink?: number;
+  /**
+   * Strength of the near-field silhouette grade, 0…1. See the grade block in
+   * 'STRUCT_FRAG'. Only meaningful on bands that sit between the camera and the
+   * board; it is scaled by the same nearAmt ramp the value falloff uses, so a
+   * band that never gets near the camera is unaffected whatever this says.
+   *
+   * Omit (or 0) on every far band — the shader then takes the pre-round-7 path
+   * exactly.
+   */
+  silhouette?: number;
+  /** Value floor the silhouette grade drives toward at full nearness. */
+  silhouetteFloor?: number;
 }
 
 /**
  * Which albedo/pattern family a prop belongs to: 0 stone, 1 wood, 2 foliage.
- * Consumed as the `aMat` vertex attribute by `STRUCT_FRAG`.
+ * Consumed as the 'aMat' vertex attribute by 'STRUCT_FRAG'.
  */
 const MATERIAL_CLASS: Record<PropKind, number> = {
   house: 0,
@@ -1304,7 +1371,7 @@ export interface BackdropOptions {
 }
 
 /**
- * The surround. One `Group`; `layout()` rebuilds its contents, `update()` keeps
+ * The surround. One 'Group'; 'layout()' rebuilds its contents, 'update()' keeps
  * it aligned to the camera.
  */
 export class Backdrop extends Group {
@@ -1400,7 +1467,7 @@ export class Backdrop extends Group {
       },
       {
         // The ring hugging the board. This is the band that kills the hard
-        // silhouette: `ringMax` confines it to the four world-units immediately
+        // silhouette: 'ringMax' confines it to the four world-units immediately
         // outside the footprint, and at a 30° pitch a knee-high prop there
         // projects straight across the board's lower edge, so the boundary
         // between diorama and surround is broken by objects instead of being a
@@ -1414,7 +1481,7 @@ export class Backdrop extends Group {
         depthMin: -R * 1.6,
         depthMax: R * 1.6,
         lateralMax: halfW * 1.6,
-        // 0.62, down from 0.95. `rock()` and `bush()` are authored at 0.7-2.2
+        // 0.62, down from 0.95. 'rock()' and 'bush()' are authored at 0.7-2.2
         // units *before* the band scale, so at 0.95 a single skirt piece came out
         // up to two and a half world units — two and a half tiles, taller than the
         // masonry courses it is supposed to be piled against. This band's whole
@@ -1440,7 +1507,7 @@ export class Backdrop extends Group {
         clearance: 0.35,
         tilt: 0.16,
         sink: 0.18,
-        // No `rock`. Same reason as `verge`: one large smooth cone is exactly the
+        // No 'rock'. Same reason as 'verge': one large smooth cone is exactly the
         // shape the near-field defocus reduces to a flat value blob, and it is the
         // piece that produced the sage boulder pile. Rubble does the identical
         // silhouette-breaking job as a cluster of small facets, which survives the
@@ -1466,7 +1533,7 @@ export class Backdrop extends Group {
         depthMax: R * 1.9,
         lateralMax: halfW * 1.7,
         // NOT small. Every band's pieces are already pushed 0.28 below the plate
-        // to hide their flat undersides, `sink` adds to that, and a `rubble`
+        // to hide their flat undersides, 'sink' adds to that, and a 'rubble'
         // cluster at scale 0.5 is 0.07-0.37 units tall — so the first version of
         // this band was authored entirely underground and rendered nothing at
         // all. Scale is what makes a piece survive the burial, not what makes it
@@ -1482,13 +1549,13 @@ export class Backdrop extends Group {
         tone: 0.82,
         windows: 0,
         ringMax: 1.7,
-        // 0.02, not 0: `footprintDistance` is unsigned, so a negative clearance
+        // 0.02, not 0: 'footprintDistance' is unsigned, so a negative clearance
         // would disable the rejection test entirely and let a quarter of these
         // spawn *inside* the play space, poking up through courtyard tiles.
         clearance: 0.02,
         tilt: 0.42,
         sink: 0.02,
-        // No `rock` here, deliberately. `rock()` is a six-sided cone squashed at
+        // No 'rock' here, deliberately. 'rock()' is a six-sided cone squashed at
         // 0.7-2.2 units before the band scale, so a verge boulder came out over
         // two tiles across — bigger than the masonry blocks it leans on, smooth
         // enough that the near-field DoF erased what little facet detail it had,
@@ -1526,6 +1593,12 @@ export class Backdrop extends Group {
         clearance: 4.0,
         tilt: 0.14,
         sink: 0.14,
+        // This band spans the whole depth range, so its far pieces must keep
+        // their current read. They do: the grade is gated on nearAmt², which is
+        // 0 for anything at or beyond the board, so only the pieces that
+        // actually crowd the camera are touched.
+        silhouette: 0.7,
+        silhouetteFloor: 0.32,
         kinds: ['bush', 'rubble', 'rock', 'bush', 'crates', 'fence', 'barrel', 'tree', 'cart', 'rubble'],
       },
       {
@@ -1538,7 +1611,7 @@ export class Backdrop extends Group {
         scale: 1.0,
         haze: [R + 0.5, R + run * 1.5, 0.55],
         tone: 0.96,
-        // Looser than `ridge` — this band is one depth step nearer, and the
+        // Looser than 'ridge' — this band is one depth step nearer, and the
         // whole point is that the two now separate by value instead of both
         // sitting at board brightness.
         hazeCeil: 0.15,
@@ -1575,8 +1648,8 @@ export class Backdrop extends Group {
         // The near strip: everything between the board's near corner and the
         // bottom edge of the frame.
         //
-        // `fore` only covers the extreme left and right of that strip
-        // (`lateralMin` holds it out of frame centre) and `verge` stops 1.7
+        // 'fore' only covers the extreme left and right of that strip
+        // ('lateralMin' holds it out of frame centre) and 'verge' stops 1.7
         // units off the wall, so at the shipping 45° yaw the wedge under the
         // board's near corner — about a tenth of the image — had nothing in it
         // but plate, measured at sd 6/255. Both references fill the equivalent
@@ -1604,6 +1677,12 @@ export class Backdrop extends Group {
         clearance: 1.35,
         tilt: 0.22,
         sink: 0.1,
+        // Attributed at runtime: this band plus 'fore' and 'scatter' put +35
+        // luma into the lower-right of the frame, over an environment-off floor
+        // of 35 — i.e. they were doubling the value of the zone in front of the
+        // subject. Graded rather than merely dimmed; see STRUCT_FRAG.
+        silhouette: 0.85,
+        silhouetteFloor: 0.34,
         kinds: ['bush', 'rock', 'rubble', 'crates', 'barrel', 'fence', 'cart', 'bush', 'rock'],
       },
       {
@@ -1634,6 +1713,11 @@ export class Backdrop extends Group {
         // and FFT's foreground terrain both sit under luma 30.
         tone: 0.24,
         windows: 0,
+        // The closest band to camera, and the one the references treat most
+        // severely — Triangle's dock pilings and FFT's foreground terrain are
+        // near-black chromatic masses, not lit props.
+        silhouette: 1.0,
+        silhouetteFloor: 0.26,
         kinds: ['bush', 'bush', 'bush', 'rock', 'rubble'],
       },
     ];
@@ -1971,6 +2055,9 @@ export class Backdrop extends Group {
         uGroundY: { value: groundY },
         uNearDepth: { value: Math.min(-2, layout.nearDepth) },
         uTone: { value: band.tone },
+        uDeep: { value: new Color() },
+        uSilhouette: { value: band.silhouette ?? 0 },
+        uSilhouetteFloor: { value: band.silhouetteFloor ?? 0.34 },
         uWindowGain: { value: (band.windows > 0 ? 1 : 0) * this.opts.windowGain },
         uExposure: { value: this.opts.exposure },
         uTime: { value: 0 },
@@ -2113,7 +2200,7 @@ export class Backdrop extends Group {
     if (this.glowMaterial) this.glowMaterial.uniforms.uTime!.value = elapsed;
     if (this.groundMaterial) {
       (this.groundMaterial.uniforms.uSunLocal!.value as Vector3).copy(this.sunLocal);
-      // Tracked from the LIVE yaw, not the layout's. `relayoutIfNeeded` only
+      // Tracked from the LIVE yaw, not the layout's. 'relayoutIfNeeded' only
       // fires past a 0.05 rad threshold, and during the eased yaw snap the rig
       // spends about a second between slots; a footprint SDF built for the old
       // heading would swing the occlusion bowl off the board for that whole
@@ -2136,16 +2223,16 @@ export class Backdrop extends Group {
   }
 
   /**
-   * Everything here mixes against `palette.horizon`, never against
-   * `palette.sun`. The key colour is a *light* — its channels run to 1.0 — so
+   * Everything here mixes against 'palette.horizon', never against
+   * 'palette.sun'. The key colour is a *light* — its channels run to 1.0 — so
    * lerping a 0.03-linear albedo 30% toward it lands at 0.3 and blows out under
-   * the tonemapper. `horizon` already carries the key's hue at a background
+   * the tonemapper. 'horizon' already carries the key's hue at a background
    * level, which is the value these surfaces want.
    */
   private applyPalette(): void {
     const p = this.palette;
 
-    // Hue and level are set separately, for the same reason `sky.ts` does it:
+    // Hue and level are set separately, for the same reason 'sky.ts' does it:
     // deriving a surface colour by lerping between two *levelled* colours drags
     // it toward whichever one is brighter and the result desaturates. The first
     // version of this produced pale neutral-grey walls and pale neutral-grey
@@ -2162,9 +2249,9 @@ export class Backdrop extends Group {
     // Cool stone, saturated toward the map's own shadow colour.
     //
     // Levels measured, not chosen. Sampling the surround band of
-    // `refs/curated/triangle/official_001_steam.jpg` puts its background
+    // 'refs/curated/triangle/official_001_steam.jpg' puts its background
     // architecture at luma 86–165/255; the previous levels here (0.052 / 0.034)
-    // rendered ours at luma 21–33, which is why `tools/metrics.mjs` scored a
+    // rendered ours at luma 21–33, which is why 'tools/metrics.mjs' scored a
     // third of the frame as void: near-black textured geometry is
     // indistinguishable from no geometry at all, and the corner-match test
     // counts it as background. Raising the albedo is not "brightening the
@@ -2195,13 +2282,16 @@ export class Backdrop extends Group {
       (m.uniforms.uSunColor!.value as Color).copy(sunLight);
       (m.uniforms.uSkyColor!.value as Color).copy(sky);
       (m.uniforms.uWindowColor!.value as Color).copy(window);
+      // Hue only — the shader normalises it to unit luminance, so the level
+      // carried here is irrelevant and must not leak into the grade's value.
+      (m.uniforms.uDeep!.value as Color).copy(deepTint);
     }
     if (this.glowMaterial) {
       // Hearth-orange core, tallow-pale skirt. These are the only pixels the
       // environment is allowed to push over the bloom threshold.
       //
       // These levels are the third attempt and the only ones that are not a
-      // disaster. `p.sun` is a LIGHT colour — its channels run to 1.0 — so an
+      // disaster. 'p.sun' is a LIGHT colour — its channels run to 1.0 — so an
       // additive card at 0.55 of it is half of full scale per lamp, and with a
       // hundred lamps in the surround overlapping under the bokeh the first
       // version rendered the entire lower half of the frame as flat orange.

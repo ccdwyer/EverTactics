@@ -207,11 +207,155 @@ export function castPortrait(
   assigned: string | undefined,
   opts: { job?: string; gender?: PortraitGender | string } = {},
 ): string | undefined {
+  // The group cast wins over any per-unit answer — see the note on CAST.
+  const fixed = CAST.get(id);
+  if (fixed) return fixed;
   const inferred = assigned ? POOL_OF.get(assigned) : undefined;
   if (assigned && !inferred) return assigned;
   if (!opts.job) return assigned;
   const gender = opts.gender ? genderOf(String(opts.gender)) : (inferred ?? genderOf(id));
   return portraitForUnit(id, { job: opts.job, gender });
+}
+
+/** Face numbers a unit of this job+gender could wear, most canonical first. */
+function familyFor(job: string | undefined, gender: PortraitGender): readonly number[] {
+  const fam = job ? JOB_FACE[job.trim().toLowerCase()] : undefined;
+  if (!fam) return [];
+  return gender === 'female' ? fam.female : fam.male;
+}
+
+export interface RosterCastInput {
+  readonly id: string;
+  readonly portrait?: string | undefined;
+  readonly job?: string | undefined;
+  readonly gender?: PortraitGender | string | undefined;
+}
+
+/**
+ * Cast a WHOLE group at once, with no two units wearing the same drawing.
+ *
+ * `castPortrait` is per-unit and therefore blind to its neighbours, and a hash
+ * over a three- or four-face job family collides constantly: measured on the
+ * `battle-open` rail, Nessa (Thief) and Quill (Thief) both landed on face 115
+ * and appeared in the turn column four chips apart as the same woman in two
+ * bandana colours. Two identical drawings inside one eight-chip rail is exactly
+ * the "placeholder data" read the critics filed against the roster strip, and no
+ * amount of per-unit hashing can fix it — the constraint is between units.
+ *
+ * So: one pass, three tiers, deterministic in list order.
+ *   1. an authored (non-pool) portrait is inviolable and claims its face number;
+ *   2. each remaining unit takes the most canonical UNUSED face in its job
+ *      family, so the Black Mage gets the black-mage hat before it gets the
+ *      fourth-choice arcane face;
+ *   3. if a family is exhausted, fall back to the gendered pool scanning from a
+ *      hashed start until an unused drawing turns up.
+ *
+ * Palette plates (`_08`.._12` — the same drawing re-tinted) are only ever used to
+ * separate two units that genuinely had to share a face number.
+ */
+export function castRoster(units: readonly RosterCastInput[]): (string | undefined)[] {
+  const usedFace = new Set<number>();
+  const usedFile = new Set<string>();
+  const out: (string | undefined)[] = new Array(units.length).fill(undefined);
+
+  // Pass 0 — anything already cast keeps its face, INCLUDING units not in this
+  // call. Two reasons, and the first is a bug this function would otherwise have
+  // shipped: the rail is re-cast every time the queue reorders, and the queue
+  // reorders constantly, so "first come, first served over the list" would hand a
+  // unit a different drawing every time a Haste moved it up the column. Faces
+  // must be sticky for the life of the battle. The second is that units off the
+  // current queue (dead, delayed, not yet summoned) still hold their drawing so
+  // nobody inherits it while they are away.
+  for (const [id, file] of CAST) {
+    usedFace.add(fileNumber(file));
+    usedFile.add(file);
+    const i = units.findIndex((u) => u.id === id);
+    if (i >= 0) out[i] = file;
+  }
+
+  // Pass 1 — authored art wins and reserves its drawing.
+  units.forEach((u, i) => {
+    const p = u.portrait;
+    if (out[i] !== undefined || !p || POOL_OF.has(p)) return;
+    out[i] = p;
+    usedFace.add(fileNumber(p));
+    usedFile.add(p);
+  });
+
+  // Pass 2 — everyone else, in list order so the result is stable.
+  units.forEach((u, i) => {
+    if (out[i] !== undefined) return;
+    const inferred = u.portrait ? POOL_OF.get(u.portrait) : undefined;
+    const gender = u.gender ? genderOf(String(u.gender)) : (inferred ?? genderOf(u.id));
+    const n = pickFace(u, gender, usedFace);
+    if (n !== undefined) usedFace.add(n);
+    const file = pickPlate(u.id, n, gender, usedFile);
+    usedFile.add(file);
+    out[i] = file;
+  });
+
+  units.forEach((u, i) => {
+    const f = out[i];
+    if (f !== undefined) CAST.set(u.id, f);
+  });
+  return out;
+}
+
+/**
+ * Faces the group cast has already committed to, unit id -> file.
+ *
+ * The turn rail is the only place that sees every combatant at once, so it is
+ * the only place that can de-duplicate — but the acting-unit band, the inspect
+ * card and the target preview all draw the SAME units independently. Left to
+ * themselves they hash their own answer, and round 7's first pass shipped Aldric
+ * wearing face 100 in the rail and face 124 in the panel eighteen pixels apart.
+ * One shared registry keeps every surface showing one person.
+ */
+const CAST = new Map<string, string>();
+
+/** Drop the group cast — call when the battle roster changes wholesale. */
+export function resetCast(): void {
+  CAST.clear();
+}
+
+/** The face NUMBER this unit should wear, avoiding any already spoken for. */
+function pickFace(
+  u: RosterCastInput,
+  gender: PortraitGender,
+  used: ReadonlySet<number>,
+): number | undefined {
+  if (gender === 'monster') return undefined;
+  const family = familyFor(u.job, gender);
+  for (const n of family) if (!used.has(n)) return n;
+  // Family exhausted (or unknown job): scan the gendered pool from a hashed
+  // start so a jobless unit still lands somewhere stable and unshared.
+  const pool = POOLS[gender].length > 0 ? POOLS[gender] : POOLS.neutral;
+  if (pool.length === 0) return family[0];
+  const start = hash(u.id) % pool.length;
+  for (let k = 0; k < pool.length; k++) {
+    const f = pool[(start + k) % pool.length];
+    const n = f === undefined ? -1 : fileNumber(f);
+    if (n >= 0 && !used.has(n)) return n;
+  }
+  return family[hash(u.id) % Math.max(1, family.length)];
+}
+
+/** A palette plate of face `n`, preferring one no other unit is already wearing. */
+function pickPlate(
+  id: string,
+  n: number | undefined,
+  gender: PortraitGender,
+  usedFile: ReadonlySet<string>,
+): string {
+  if (n === undefined || n < 0) return portraitForId(id, gender);
+  const variants = facesNumbered(n);
+  if (variants.length === 0) return portraitForId(id, gender);
+  const start = hash(`${id}#plate`) % variants.length;
+  for (let k = 0; k < variants.length; k++) {
+    const f = variants[(start + k) % variants.length];
+    if (f !== undefined && !usedFile.has(f)) return f;
+  }
+  return variants[start] ?? portraitForId(id, gender);
 }
 
 /** Every human face on disk, for roster / editor pickers. */

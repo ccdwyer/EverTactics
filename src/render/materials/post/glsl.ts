@@ -1,15 +1,15 @@
 /**
  * Shared GLSL building blocks for the EverTactics post stack.
  *
- * All post materials are plain `THREE.ShaderMaterial`s. three r180 compiles those to
- * `#version 300 es` and injects `#define varying in/out`, `#define texture2D texture`,
- * plus `layout(location=0) out highp vec4 pc_fragColor; #define gl_FragColor pc_fragColor`.
- * So we may write r120-style GLSL *and* still use ESSL3-only features (`sampler3D`,
- * `texture()`, `textureLod()`), which is exactly what the LUT pass needs.
+ * All post materials are plain 'THREE.ShaderMaterial's. three r180 compiles those to
+ * '#version 300 es' and injects '#define varying in/out', '#define texture2D texture',
+ * plus 'layout(location=0) out highp vec4 pc_fragColor; #define gl_FragColor pc_fragColor'.
+ * So we may write r120-style GLSL *and* still use ESSL3-only features ('sampler3D',
+ * 'texture()', 'textureLod()'), which is exactly what the LUT pass needs.
  *
  * Do NOT redeclare these — three's fragment prefix already provides them:
  *   viewMatrix, cameraPosition, isOrthographic
- * Hence our own orthographic flag is called `uOrtho`.
+ * Hence our own orthographic flag is called 'uOrtho'.
  */
 
 /** Fullscreen pass vertex shader. Used with a 2x2 PlaneGeometry. */
@@ -91,8 +91,8 @@ vec3 tonemapACESPreserveHue(vec3 color, float whiteShift) {
 /**
  * Depth sampling + view-space reconstruction.
  *
- * Requires uniforms: `uDepth` (DepthTexture), `uProjInv` (mat4), `uOrtho` (float 0/1),
- * `uProjScaleY` (float: 0.5 * projectionMatrix[1][1] * viewportHeightPx).
+ * Requires uniforms: 'uDepth' (DepthTexture), 'uProjInv' (mat4), 'uOrtho' (float 0/1),
+ * 'uProjScaleY' (float: 0.5 * projectionMatrix[1][1] * viewportHeightPx).
  *
  * The inverse-projection reconstruction is correct for both the tilted-orthographic rig
  * and the "perspective cheat" camera, so the whole stack has a single code path.
@@ -168,7 +168,7 @@ float ign(vec2 p) {
  * the half-res gather and the full-res blend agree exactly.
  *
  * The tilt term is a band PLUS a radial corner term. That second half is measured, not
- * invented: in `refs/curated/triangle/official_005_steam.jpg` and `official_019_se_screenshot.jpg`
+ * invented: in 'refs/curated/triangle/official_005_steam.jpg' and 'official_019_se_screenshot.jpg'
  * the left and right edges at mid-height are soft as well as the top and bottom, so the
  * in-focus region is a lens-shaped island, not an infinite horizontal stripe. A pure band
  * leaves the frame corners sharp and the miniature illusion collapses there.
@@ -190,6 +190,15 @@ uniform float uTiltRadialStart; // normalised radius (1.0 = frame corner) where 
 uniform vec2  uCoCAspect;       // vec2(width/height, 1.0)
 uniform float uFocusAuto;       // 1 = read the focal plane off the depth buffer at uTiltCenter
 uniform float uFarClamp;        // ceiling on POSITIVE (far-field) CoC, 0..1
+uniform float uNearRangeScale;  // multiplier on uFocusRange for the NEAR half only
+
+/**
+ * Memo for {@link focalDistance}. The probe is five dependent depth taps and the composite
+ * asks for it up to four times per fragment (three chromatic-aberration taps plus the aerial
+ * term), so caching it is worth more than it costs. GLSL ES initialises non-const globals
+ * per invocation, so this is per-fragment state, not shared.
+ */
+float gFocus = -1.0;
 
 /**
  * View-space distance of the focal plane.
@@ -207,7 +216,8 @@ uniform float uFarClamp;        // ceiling on POSITIVE (far-field) CoC, 0..1
  * authored value.
  */
 float focalDistance() {
-  if (uFocusAuto < 0.5) return uFocusDist;
+  if (gFocus > 0.0) return gFocus;
+  if (uFocusAuto < 0.5) { gFocus = uFocusDist; return gFocus; }
 
   // Five taps, not one. A single tap at the composition centre is one gap between two blocks
   // away from reading the backdrop and snapping the focal plane forty tiles back — the whole
@@ -232,8 +242,9 @@ float focalDistance() {
     sum += viewDist(viewPosFromDepth(uv, d));
     hits += 1.0;
   }
-  if (hits < 0.5) return uFocusDist;
-  return sum / hits;
+  if (hits < 0.5) { gFocus = uFocusDist; return gFocus; }
+  gFocus = sum / hits;
+  return gFocus;
 }
 
 /** Signed CoC in [-1,1]: negative = in front of focus (near field), positive = behind. */
@@ -245,8 +256,24 @@ float computeCoC(vec2 uv, float d) {
     vec3 vp = viewPosFromDepth(uv, d);
     float dist = isBackground(d) ? focus + uFocusRange * 8.0 : viewDist(vp);
     float signedDelta = dist - focus;
-    float dead = max(abs(signedDelta) - uFocusRange, 0.0);
-    coc += (1.0 - uTiltMix) * sign(signedDelta) * (dead / max(uFocusRange, 1e-3)) * uCoCScale;
+    // ROUND 7 — the sharp zone is ASYMMETRIC, and the CoC debug view is why.
+    //
+    // '?postdebug=coc' on the round-6 frame: the near half (green) reached most of the way up
+    // the picture, so the front rank of the board, the fountain plinth and the tiles under
+    // the party cluster were all defocused, while the far half (red) behaved. That is the
+    // listed fail condition "depth of field or vignette obscuring tiles the player must
+    // count", and it is also what makes a frame read as blurred-by-position: a viewer sees
+    // the bottom of the picture go soft and has no way to know it went soft because it is
+    // NEAR rather than because it is LOW.
+    //
+    // Every reference frame keeps far more foreground sharp than background: in
+    // 'refs/curated/triangle/official_009_steam.jpg' only the last ~12% of frame height and
+    // the cliff face below the board are soft, while the whole far half of the board falls
+    // off. A wider sharp zone in front of the focal plane than behind it is exactly what a
+    // real lens does anyway — the hyperfocal split is roughly 1:2 — so this is not a cheat.
+    float range = uFocusRange * (signedDelta < 0.0 ? max(uNearRangeScale, 1e-3) : 1.0);
+    float dead = max(abs(signedDelta) - range, 0.0);
+    coc += (1.0 - uTiltMix) * sign(signedDelta) * (dead / max(range, 1e-3)) * uCoCScale;
   }
 
   if (uTiltMix > 0.0) {

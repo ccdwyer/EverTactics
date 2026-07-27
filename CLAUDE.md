@@ -44,3 +44,11 @@ npm run verify:quick    # typecheck + tests only (~30 s)
 File ownership is the only thing preventing lost work. Give every agent an explicit owned-file
 list and tell it to *report*, not edit, anything outside it. Transient `tsc` errors during a round
 are normal — agents mid-write — so re-check before treating one as a regression.
+
+## The one mistake that keeps recurring
+
+**Never put a backtick in a comment inside a shader file.** Shader source lives in template
+literals; a backtick in a comment closes the string, and `tsc` then reports a cascade of errors
+pointing at identifiers that were never code. This has happened four separate times in
+`src/render/**`, to four different authors. `tests/shader-source.test.ts` now catches it and names
+the line. Use single quotes in shader-file comments.

@@ -6,13 +6,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Round-2 blind A/B: critics identified our frame as the prototype in 6/6 pairs,
  * and the single most-cited tell was the *void*. Roughly half of a 1920×1080
- * frame was `renderer.clearColor` — one flat near-black navy — with the diorama
+ * frame was 'renderer.clearColor' — one flat near-black navy — with the diorama
  * sitting in the middle of it terminating on a hard antialiased silhouette.
  *
  * Neither reference game ever does that. Open
- * `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` or
- * `official_005_steam.jpg`: the world runs off all four frame edges. Even
- * `official_009_steam.jpg`, which is the darkest frame in the corpus, has the
+ * 'refs/curated/triangle/press_002_gematsu_1920x1080.jpg' or
+ * 'official_005_steam.jpg': the world runs off all four frame edges. Even
+ * 'official_009_steam.jpg', which is the darkest frame in the corpus, has the
  * mine dissolving into a warm glow rather than cutting against a flat colour.
  *
  * So: a graded sky, drawn behind everything, tuned from the map's own lighting
@@ -26,18 +26,18 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * COLOUR SPACE
  * ─────────────────────────────────────────────────────────────────────────────
- * `stage.ts` composes into a linear-working-space HDR target and lets
- * `post.ts` tone map at the end. Everything here therefore emits **linear**
- * values. `Color` uniforms are already in working space once built with
- * `setHex(hex, 'srgb')`, so the shader just mixes them and writes them out.
+ * 'stage.ts' composes into a linear-working-space HDR target and lets
+ * 'post.ts' tone map at the end. Everything here therefore emits **linear**
+ * values. 'Color' uniforms are already in working space once built with
+ * 'setHex(hex, 'srgb')', so the shader just mixes them and writes them out.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * DEPTH
  * ─────────────────────────────────────────────────────────────────────────────
- * The quad is emitted directly in clip space with `depthTest`/`depthWrite` off
- * and `renderOrder = -10000`, so it is always the first thing in the frame and
+ * The quad is emitted directly in clip space with 'depthTest'/'depthWrite' off
+ * and 'renderOrder = -10000', so it is always the first thing in the frame and
  * never fights the scene. It leaves depth at the far plane, which means
- * `post.ts`'s DoF treats sky pixels as maximally distant — correct, and it
+ * 'post.ts''s DoF treats sky pixels as maximally distant — correct, and it
  * softens the cloud banding for free.
  */
 
@@ -60,8 +60,8 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Hash / value-noise / fbm, shared by `sky.ts`, `backdrop.ts` and
- * `atmosphere.ts` so every layer of the environment breaks up with the *same*
+ * Hash / value-noise / fbm, shared by 'sky.ts', 'backdrop.ts' and
+ * 'atmosphere.ts' so every layer of the environment breaks up with the *same*
  * noise basis. Mismatched noise between a haze plane and the silhouettes in
  * front of it is one of those things nobody can name but everybody sees.
  */
@@ -114,8 +114,8 @@ float etFbm(vec2 p, int octaves) {
  * The one palette every environment layer shares.
  *
  * It is *derived from the scene* rather than configured, which is the whole
- * coordination trick: `lighting.ts` owns `scene.background`, `scene.fog` and the
- * key `DirectionalLight`, and those three things already encode the map's mood.
+ * coordination trick: 'lighting.ts' owns 'scene.background', 'scene.fog' and the
+ * key 'DirectionalLight', and those three things already encode the map's mood.
  * Reading them back means the sky, the backdrop and the motes re-tune themselves
  * whenever the lighting fixer changes a preset, with no shared config file and
  * no cross-module call.
@@ -142,7 +142,7 @@ export interface EnvironmentPalette {
   /**
    * False when the scene has no lighting rig yet, or none at all.
    *
-   * The diagnostic scenes (`ui-only`, `sprites-only`) run without one. With the
+   * The diagnostic scenes ('ui-only', 'sprites-only') run without one. With the
    * warm fallback key they were getting a full sepia sky complete with a sun
    * bloom, which is noise in a frame whose whole job is to isolate one
    * subsystem. When this is false the sky drops to a flat cool wash.
@@ -160,10 +160,10 @@ export interface PaletteTuning {
   /**
    * Chroma floor applied to the cool bands (haze / zenith / ground) after the
    * tint mixing, 0…1. This is what keeps the aerial perspective a *colour*
-   * rather than a grey; see `saturateTo`. 0 restores the pre-round-6 behaviour.
+   * rather than a grey; see 'saturateTo'. 0 restores the pre-round-6 behaviour.
    */
   coolSaturation?: number;
-  /** Chroma floor for the warm horizon band. Held under `coolSaturation` so the
+  /** Chroma floor for the warm horizon band. Held under 'coolSaturation' so the
    * split reads as "cool air, warm light" rather than as two equal poster tones. */
   warmSaturation?: number;
 }
@@ -172,7 +172,7 @@ export interface PaletteTuning {
  * Linear luminance targets for the environment, measured against the board.
  *
  * These are the numbers that took three render iterations to land, so they are
- * worth writing down. `post.ts` multiplies by the preset exposure (1.5–1.75 on
+ * worth writing down. 'post.ts' multiplies by the preset exposure (1.5–1.75 on
  * the dawn maps) and then runs ACES, which has a knee well under 1.0 — so a
  * "reasonable-looking" linear 0.3 background comes out of the tonemapper as
  * cream-coloured blowout, and the board disappears into it. The lit board sits
@@ -191,7 +191,7 @@ function tintOf(c: Color, out = new Color()): Color {
   return out.setRGB(c.r / m, c.g / m, c.b / m);
 }
 
-/** Max-channel saturation of a tint, i.e. `(max − min) / max`. */
+/** Max-channel saturation of a tint, i.e. '(max − min) / max'. */
 function chromaOf(c: Color): number {
   const mx = Math.max(c.r, c.g, c.b);
   if (mx < 1e-5) return 0;
@@ -199,23 +199,23 @@ function chromaOf(c: Color): number {
 }
 
 /**
- * Push a tint away from the achromatic axis until it reaches `target` chroma,
+ * Push a tint away from the achromatic axis until it reaches 'target' chroma,
  * preserving hue. Never *desaturates* — a preset that already commits harder
  * than the floor keeps its own colour.
  *
  * ── Why this exists ─────────────────────────────────────────────────────────
- * `tintOf` normalises by the max channel, which fixes brightness and does
+ * 'tintOf' normalises by the max channel, which fixes brightness and does
  * nothing at all to saturation. That is fine on its own, but every band below
  * is built by *mixing* two tints, and the cool fog and the warm key sit on
- * opposite sides of the colour wheel — so the mix lands near grey and `tintOf`
+ * opposite sides of the colour wheel — so the mix lands near grey and 'tintOf'
  * faithfully preserves the grey.
  *
  * Measured on the round-6 frame, that is exactly what shipped: the derived haze
- * came out `#303132` at chroma 0.075 — achromatic to three significant figures —
- * and haze is what *all* distant geometry is mixed toward in `STRUCT_FRAG`. So
- * the entire surround was fading into neutral grey, against a `scene.background`
- * that was a committed `#0a1424` at chroma 0.828. That is the "no neutral greys"
- * and "crush blacks toward the map's cool tone" rule in `VISUAL_TARGET.md`
+ * came out '#303132' at chroma 0.075 — achromatic to three significant figures —
+ * and haze is what *all* distant geometry is mixed toward in 'STRUCT_FRAG'. So
+ * the entire surround was fading into neutral grey, against a 'scene.background'
+ * that was a committed '#0a1424' at chroma 0.828. That is the "no neutral greys"
+ * and "crush blacks toward the map's cool tone" rule in 'VISUAL_TARGET.md'
  * broken by arithmetic rather than by intent, and it measured as a far-field
  * saturation of 0.44–0.57 against 0.61–0.80 across the Triangle references.
  *
@@ -230,7 +230,7 @@ function saturateTo(c: Color, target: number, out = new Color()): Color {
   const mn = Math.min(out.r, out.g, out.b);
   const have = (mx - mn) / mx;
   if (have >= target || target <= 0) return out;
-  // Scale the distance of each channel below the max. `have → target` is exact:
+  // Scale the distance of each channel below the max. 'have → target' is exact:
   // the new min becomes mx * (1 − target), and hue (the ordering and the ratios
   // between the two non-max channels) is preserved because every channel is
   // moved by the same factor of its own deficit.
@@ -260,10 +260,10 @@ function firstKeyLight(scene: Scene): DirectionalLight | null {
 }
 
 /**
- * Build the shared palette by reading back what `lighting.ts` put on the scene.
+ * Build the shared palette by reading back what 'lighting.ts' put on the scene.
  *
  * The lift factors here are the one place with real authored judgement in this
- * file. Preset fog/background colours are *very* dark — `dawn` is `0x13253e`,
+ * file. Preset fog/background colours are *very* dark — 'dawn' is '0x13253e',
  * which lands at about 0.02 linear. Rendered at that value the sky is still a
  * void; it is just a slightly different void. The reference frames put their
  * backgrounds roughly one and a half stops under the lit board, not eight, so
@@ -292,8 +292,8 @@ export function deriveEnvironmentPalette(scene: Scene, tuning: PaletteTuning = {
   else sun.copy(DEFAULT_SUN);
   const sunIntensity = key ? key.intensity : 3;
 
-  // Key travel direction. three's DirectionalLight shines from `position`
-  // toward `target`, so the direction light *travels* is target − position.
+  // Key travel direction. three's DirectionalLight shines from 'position'
+  // toward 'target', so the direction light *travels* is target − position.
   const sunDirection = new Vector3(0, -1, 0);
   if (key) {
     key.updateWorldMatrix(true, false);
@@ -308,7 +308,7 @@ export function deriveEnvironmentPalette(scene: Scene, tuning: PaletteTuning = {
   // ── hue first, brightness second ────────────────────────────────────────
   //
   // Mixing a preset's fog colour toward the raw key colour does not do what it
-  // looks like it does: a key of `0xffae55` is 1.0 in the red channel, so a 14%
+  // looks like it does: a key of '0xffae55' is 1.0 in the red channel, so a 14%
   // mix into a 0.02-linear fog adds 0.14 of full-scale red and the "subtle
   // warm tint" arrives as a cream wash. Normalise both to hue, mix the hues,
   // then set the level explicitly.
@@ -323,8 +323,8 @@ export function deriveEnvironmentPalette(scene: Scene, tuning: PaletteTuning = {
   // chroma floor is applied *after*, so the result is a saturated version of the
   // mixed hue rather than an unmixed one.
   //
-  // The cool bands are anchored back toward `deepTint` before saturating. The
-  // preset's `scene.background` is the one colour on the scene that was authored
+  // The cool bands are anchored back toward 'deepTint' before saturating. The
+  // preset's 'scene.background' is the one colour on the scene that was authored
   // as "this map's tone" — deriving the air from it is what makes the surround
   // belong to the same map as the crushed blacks, instead of being a grey the
   // fog colour happened to average to.

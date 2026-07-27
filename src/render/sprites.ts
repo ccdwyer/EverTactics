@@ -4,11 +4,11 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * SHEET LAYOUT (measured from the shipped assets, not assumed)
  * ─────────────────────────────────────────────────────────────────────────────
- * Every human sheet in `public/assets/sprites/` is 512 texels wide and packs its
+ * Every human sheet in 'public/assets/sprites/' is 512 texels wide and packs its
  * frames into 64-texel columns. The *first band* — 8 columns x 80 texels — holds
  * the whole-body standing poses; everything below it is the original SHP body-part
  * atlas (heads, limbs, cape segments) that the FFT engine reassembles per frame
- * from the `*_shp.bin` / `*_seq.bin` data in `assets-src/unit/`.
+ * from the '*_shp.bin' / '*_seq.bin' data in 'assets-src/unit/'.
  *
  * Verified on 1000_Knight_Male_hd:
  *   - a fully transparent scanline band sits at y = 80..87, and again around 160,
@@ -21,14 +21,14 @@
  * The same band structure holds across the human sheets sampled (knight, monk,
  * black mage). **Monster sheets have no whole-body band at all** — a chocobo sheet
  * is parts from the first row down — so monsters need the SHP/SEQ decode before
- * they can be posed. `SpriteSheetOverrides` exists so the asset pipeline can drop
+ * they can be posed. 'SpriteSheetOverrides' exists so the asset pipeline can drop
  * real layouts and clips in without touching this file.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * CRISPNESS
  * ─────────────────────────────────────────────────────────────────────────────
- * `camera.ts` sizes the orthographic frustum so one world unit is exactly
- * `TEXELS_PER_UNIT * pixelScale` device pixels, and phase-locks the world origin
+ * 'camera.ts' sizes the orthographic frustum so one world unit is exactly
+ * 'TEXELS_PER_UNIT * pixelScale' device pixels, and phase-locks the world origin
  * onto a whole device pixel. That is necessary but not sufficient for sprites: a
  * billboard's origin is an arbitrary world point, and once the camera yaw is 45°
  * an on-lattice world position no longer projects to an on-lattice screen
@@ -44,11 +44,11 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * DEPTH
  * ─────────────────────────────────────────────────────────────────────────────
- * Sprites are **opaque**: alpha cut-out by `discard`, full depth write, no
+ * Sprites are **opaque**: alpha cut-out by 'discard', full depth write, no
  * blending, no manual sort order. That is the only arrangement in which a unit
  * behind a cliff is correctly occluded, two units correctly occlude each other,
  * and nothing pops when the camera turns. The alpha cut-out is repeated in a
- * matching `MeshDepthMaterial` so the unit casts its real silhouette into the
+ * matching 'MeshDepthMaterial' so the unit casts its real silhouette into the
  * shadow map rather than a rectangle.
  *
  * ─────────────────────────────────────────────────────────────────────────────
@@ -56,24 +56,24 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Four separate things have to agree before a billboard reads as standing *in*
  * the scene rather than in front of it, and all four live here or in
- * `materials/sprite.ts`:
+ * 'materials/sprite.ts':
  *
- *  1. **Position.** `terrain.ts` centres tile (x, y) on world (x, y) — the top
+ *  1. **Position.** 'terrain.ts' centres tile (x, y) on world (x, y) — the top
  *     face spans ±TILE_SIZE/2 about the *integer* coordinate. Anchoring a unit
  *     at (x + 0.5, y + 0.5) puts it on the corner where four tiles meet, which
  *     is what every unit was doing.
- *  2. **A real cast shadow.** Two parts. `shadowSide` in `materials/sprite.ts`
+ *  2. **A real cast shadow.** Two parts. 'shadowSide' in 'materials/sprite.ts'
  *     gets the billboard's own silhouette into the shadow map at all — three
- *     renders the shadow pass back-faces-only for a `FrontSide` material, which
+ *     renders the shadow pass back-faces-only for a 'FrontSide' material, which
  *     silently discards a camera-facing quad whenever the light is on the
- *     camera's side. And `GROUND_CASTER_RADIUS` below adds the part a vertical
+ *     camera's side. And 'GROUND_CASTER_RADIUS' below adds the part a vertical
  *     card physically cannot throw: a shadow on the ground the unit is standing
  *     on. That is the round-6 change and it is the one that moved the axis.
  *  3. **Contact darkening** — a tight multiply patch on the tile, covering the
  *     hairline the shadow map cannot resolve at the feet.
  *  4. **Exposure parity.** A billboard presents a near-perfect normal to any
  *     light it faces and therefore over-collects direct light compared with the
- *     terrain around it; `uDirectGain` discounts that back down.
+ *     terrain around it; 'uDirectGain' discounts that back down.
  */
 
 import * as THREE from 'three';
@@ -125,7 +125,7 @@ const SPRITES_DIR = 'assets/sprites';
 const PALETTES_DIR = 'assets/palettes';
 
 /**
- * Default asset root. Vite rewrites `import.meta.env.BASE_URL` at build time, so
+ * Default asset root. Vite rewrites 'import.meta.env.BASE_URL' at build time, so
  * this stays correct when the game is deployed under a sub-path.
  */
 function defaultBaseUrl(): string {
@@ -134,13 +134,13 @@ function defaultBaseUrl(): string {
 }
 
 /**
- * Logical sprite key → numeric sheet id, packed as `key:id` pairs.
+ * Logical sprite key → numeric sheet id, packed as 'key:id' pairs.
  *
- * Generated by walking `public/assets/sprites/`, lower-casing the descriptive
+ * Generated by walking 'public/assets/sprites/', lower-casing the descriptive
  * part of each filename and preferring the generic-class block (ids ≥ 980) when a
- * name appears more than once — so `knight_male` resolves to the job sprite at
+ * name appears more than once — so 'knight_male' resolves to the job sprite at
  * 1000 rather than to one of the story-event duplicates. The filename rebuilds
- * exactly as `${id}_${TitleCase(key)}_hd.png` for all 290 entries.
+ * exactly as '${id}_${TitleCase(key)}_hd.png' for all 290 entries.
  */
 const SHEET_ID_TABLE =
   '10yo_female:956 10yo_male:954 20yo_female:960 20yo_male:958 40yo_female:964 40yo_male:962 ' +
@@ -194,13 +194,13 @@ const SHEET_ID_TABLE =
   'zalbaag:844 zalbaag_zombie:912 zalmour:860 zelera:932';
 
 /**
- * Sheet id → `.act` palette family, packed as `family=id,id,…`.
+ * Sheet id → '.act' palette family, packed as 'family=id,id,…'.
  *
  * **Derived, not guessed.** For every sheet the baked PLTE was compared byte-for-byte
- * against every `battle_*_battle_pal*.act`; 416 of the 457 sheets match exactly one
- * family's `pal1`, which is the mapping below. (The 41 unmatched sheets are the
+ * against every 'battle_*_battle_pal*.act'; 416 of the 457 sheets match exactly one
+ * family's 'pal1', which is the mapping below. (The 41 unmatched sheets are the
  * War-of-the-Lions additions — Dark Knight, Onion Knight, Balthier, Luso and the
- * Aliste/Bremondt set — for which no `.act` family ships. They render from their
+ * Aliste/Bremondt set — for which no '.act' family ships. They render from their
  * baked palette, so their team colour falls back to slot 0.)
  */
 const PALETTE_FAMILY_TABLE =
@@ -274,13 +274,13 @@ function titleCase(key: string): string {
 export interface ResolvedSheetAssets {
   /** URL of the indexed PNG. */
   url: string;
-  /** URLs of the 8 battle `.act` palettes, in slot order. Empty when unavailable. */
+  /** URLs of the 8 battle '.act' palettes, in slot order. Empty when unavailable. */
   paletteUrls: string[];
 }
 
 /**
- * Turn a logical sprite key (`Unit.sprite.sheet`, e.g. `knight_male`) into asset
- * URLs. Also accepts a raw sheet filename stem (`1000_Knight_Male_hd`), which is
+ * Turn a logical sprite key ('Unit.sprite.sheet', e.g. 'knight_male') into asset
+ * URLs. Also accepts a raw sheet filename stem ('1000_Knight_Male_hd'), which is
  * what the asset pipeline's manifest is expected to emit.
  */
 export function resolveSheetAssets(key: string, baseUrl = defaultBaseUrl()): ResolvedSheetAssets {
@@ -347,7 +347,7 @@ export interface SheetLayout {
    * An FFT cell is 64x80 but a standing figure only fills the lower ~40 texels
    * of it; the rest is headroom for jump and cast poses. Anything that hangs
    * *above* the unit — the turn chevron, the status strip, floating combat text —
-   * has to anchor to this and not to `frameHeight`, or it hovers half a tile
+   * has to anchor to this and not to 'frameHeight', or it hovers half a tile
    * above the head over an apparently empty square. Empty cells store 0.
    */
   headTopY: readonly number[];
@@ -358,7 +358,7 @@ export interface SheetLayout {
    * ─────────────────────────────────────────────────────────────────────────
    * ROUND 5. This is the anchor the in-art contact darkening was missing.
    * ─────────────────────────────────────────────────────────────────────────
-   * `groundOffset` is a *sheet-wide* figure: it is the lowest opaque row found
+   * 'groundOffset' is a *sheet-wide* figure: it is the lowest opaque row found
    * anywhere in the pose band, so a single crouch or death pose that reaches the
    * cell's bottom row pins it to 0 for the whole sheet. Measured on the shipped
    * art it is 0 on knight_m, siro_w and mina_m alike — while the individual
@@ -437,8 +437,8 @@ export class SpriteSheet {
   /**
    * The palette slot that best represents a team's colour on this sheet.
    *
-   * Slot ordering is not consistent between sheets — `knight_m` puts red at slot
-   * 2 and teal at slot 1, `kuro_m` puts magenta at slot 4 — so the choice is made
+   * Slot ordering is not consistent between sheets — 'knight_m' puts red at slot
+   * 2 and teal at slot 1, 'kuro_m' puts magenta at slot 4 — so the choice is made
    * by scoring the actual colours against a target hue, ignoring the entries that
    * are identical to the baked palette (skin, hair, steel) because those are
    * shared across every variant and would flatten the scores.
@@ -458,7 +458,7 @@ export class SpriteSheet {
    * ROUND 4: slot 0 is *preferred* for the player, no longer forced.
    * ─────────────────────────────────────────────────────────────────────────
    * The previous rule pinned the player to slot 0 on the grounds that the
-   * toolkit's `battle_pal1` is the blue player palette. Dumping the team ramp
+   * toolkit's 'battle_pal1' is the blue player palette. Dumping the team ramp
    * of every generic family and reading its dominant hue, that is simply not
    * true of most of them:
    *
@@ -675,7 +675,7 @@ const WHITE = new THREE.Color(0xffffff);
  * Round 6: 0.012 → 0.03. Rendering the decal in a signal colour and sweeping the
  * lift, 0.012 lost the whole quad to the depth test on most units and 0.05 still
  * lost it on some; the terrain around a unit is rarely a clean plane at exactly
- * `cell.z * HEIGHT_UNIT`. 0.03 is about a third of a device pixel of parallax at
+ * 'cell.z * HEIGHT_UNIT'. 0.03 is about a third of a device pixel of parallax at
  * this camera — invisible as detachment — and clears the joins that were eating
  * the mark. It is not a fix on its own; see {@link GROUND_CASTER_RADIUS}.
  */
@@ -685,17 +685,17 @@ const CONTACT_SHADOW_LIFT = 0.03;
  * ─────────────────────────────────────────────────────────────────────────────
  * THE GROUNDED SHADOW — and why the shadow map alone cannot deliver it
  * ─────────────────────────────────────────────────────────────────────────────
- * Measured, not assumed. With the sprites' `customDepthMaterial` in place the
+ * Measured, not assumed. With the sprites' 'customDepthMaterial' in place the
  * units *do* write their real alpha-cut silhouettes into the key's shadow map —
  * 29 880 texels across twelve units, against 81 363 for the same quads with
  * three's default (rectangular) depth material, i.e. the cut-out is working and
  * roughly a third of each quad is opaque. So the map is not the problem.
  *
- * The problem is geometry. `battle-open` keys at 54° elevation, and a *vertical
- * card* under a steep key throws its shadow only `height / tan(54°)` ≈ 0.73
+ * The problem is geometry. 'battle-open' keys at 54° elevation, and a *vertical
+ * card* under a steep key throws its shadow only 'height / tan(54°)' ≈ 0.73
  * body-heights along the ground — and the map's key azimuth puts that direction
  * up-screen, which is exactly where the billboard itself is. Rendering the
- * frame twice, once with `mesh.castShadow` on and once off, and differencing
+ * frame twice, once with 'mesh.castShadow' on and once off, and differencing
  * the two, the *entire* delta lands on the sprites themselves (self-shadowing);
  * essentially nothing reaches the terrain, because the unit is standing on its
  * own shadow. That is a property of billboards under a steep key, not a bug to
@@ -708,14 +708,14 @@ const CONTACT_SHADOW_LIFT = 0.03;
  * Sprite grounding scored 2.5/10, the worst axis in the blind test, and three
  * judges named it unprompted. Two measurements explain why.
  *
- * **1. What the reference actually draws.** `refs/curated/fft/press-311722-…-03`,
+ * **1. What the reference actually draws.** 'refs/curated/fft/press-311722-…-03',
  * the blue-clad unit standing on the carpet: clean carpet reads luma 129, and
  * the ground immediately at her boots reads **64** — a 2.0x darkening. The mark
  * is *small*: about 1.2 boot-widths across and half a boot-height deep, and it
  * has died out entirely within half a tile. It is not a pool. It is a dense,
  * tight smudge welded to the silhouette.
  *
- * **2. What we were drawing.** Rendering `battle-open` twice, once with the
+ * **2. What we were drawing.** Rendering 'battle-open' twice, once with the
  * decal's fragment forced to white, and differencing: the decal's contribution
  * that cleared a 6/765 threshold was a ~40x50px wedge lying *beside* each unit,
  * with visible straight edges where the gaussian was still non-zero at the quad
@@ -724,7 +724,7 @@ const CONTACT_SHADOW_LIFT = 0.03;
  * narrow, dark, soft one.
  *
  * The cause is orientation. The decal was rotated to the **key light's** azimuth
- * so its dense core sat wherever the light pointed — on `battle-open` that is
+ * so its dense core sat wherever the light pointed — on 'battle-open' that is
  * azimuth 138°, i.e. up-screen, into the pixels the billboard already covers.
  * A shadow you cannot see cannot ground anything.
  *
@@ -734,14 +734,14 @@ const CONTACT_SHADOW_LIFT = 0.03;
  * ground in front of the boots (visible) or behind them (hidden behind the
  * body). Three lobes are composited in that frame:
  *
- *   • `contact` — tight, dense, biased ~0.1 tile **toward the camera** so its
+ *   • 'contact' — tight, dense, biased ~0.1 tile **toward the camera** so its
  *     core lands on ground the lens can actually see. This is the reference's
  *     2x smudge and it is what does the grounding.
- *   • `pool`    — a broad, weak radial term that sinks the *occupied tile*
+ *   • 'pool'    — a broad, weak radial term that sinks the *occupied tile*
  *     relative to its neighbours. The critics asked for this by name ("no
  *     darkening of the tile they occupy"); it is deliberately faint because at
  *     any real density a tile-wide multiply reads as haze, not as shade.
- *   • `tail`    — the directional term, running along the key's ground azimuth
+ *   • 'tail'    — the directional term, running along the key's ground azimuth
  *     so a unit's shadow points where the terrain's own shadows point. Short and
  *     dense, per the reference: the darkening dies inside one body-width.
  *
@@ -763,31 +763,31 @@ const CONTACT_SHADOW_LIFT = 0.03;
  * depth-fails, and worse, the polygon offset lets slivers of it punch *through*
  * the block in front, which showed up as red bands painted up a vertical wall
  * face. A decal that cannot leave its own tile can do neither. The cast shadow
- * that used to be this quad's `tail` lobe now comes out of the shadow map (see
+ * that used to be this quad's 'tail' lobe now comes out of the shadow map (see
  * {@link GROUND_CASTER_RADIUS}), where terrain occludes it correctly for free.
  */
-const SHADOW_SIZE = TILE_SIZE * 1.1;
+const SHADOW_SIZE = TILE_SIZE * 1.6;
 
 /**
  * Peak darkening at the contact core, as a fraction. The reference measures a
  * 2.0x drop (129 → 64) on lit ground; bloom and the DOF resolve downstream lift
  * a soft mark back up, so the source has to be a little past the target.
  */
-const SHADOW_DENSITY = 0.82;
+const SHADOW_DENSITY = 0.74;
 
 /**
  * Procedural grounding decal.
  *
- * Local space, after the mesh is yawed to the camera: `q.x` is the ground axis
- * across the screen, `q.y` is the ground axis *away* from the lens — so `q.y < 0`
- * is the visible strip in front of the boots and `q.y > 0` is the ground the
+ * Local space, after the mesh is yawed to the camera: 'q.x' is the ground axis
+ * across the screen, 'q.y' is the ground axis *away* from the lens — so 'q.y < 0'
+ * is the visible strip in front of the boots and 'q.y > 0' is the ground the
  * billboard is standing in front of. Distances are in world units (tiles).
  *
- * `MeshBasicMaterial.opacity` cannot fade a multiply decal: with
- * `premultipliedAlpha` the shader pre-multiplies RGB by alpha, so lowering
+ * 'MeshBasicMaterial.opacity' cannot fade a multiply decal: with
+ * 'premultipliedAlpha' the shader pre-multiplies RGB by alpha, so lowering
  * opacity makes the shadow *darker*, and without it alpha is discarded by
- * `blendFunc(ZERO, SRC_COLOR)` and opacity does nothing at all. Hence
- * `uStrength`, which lerps the computed darkening back toward white and is what
+ * 'blendFunc(ZERO, SRC_COLOR)' and opacity does nothing at all. Hence
+ * 'uStrength', which lerps the computed darkening back toward white and is what
  * lets the shadow soften as a unit hops rather than flying with it.
  */
 function createShadowDecalMaterial(): THREE.ShaderMaterial {
@@ -798,6 +798,36 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
       uHalfSize: { value: SHADOW_SIZE / 2 },
       /** Key light's ground travel direction, expressed in the decal's local frame. */
       uTailDir: { value: new THREE.Vector2(0, 1) },
+      /**
+       * (cos, sin) of the camera yaw — the decal is yawed to the lens, so this is
+       * what rotates a local offset back into world XZ. See {@link uTileHalf}.
+       */
+      uYaw: { value: new THREE.Vector2(1, 0) },
+      /**
+       * Half-extent of the unit's own tile, in the decal's **local** units.
+       *
+       * ─────────────────────────────────────────────────────────────────────
+       * ROUND 7 — the artefact that made this whole axis unfixable
+       * ─────────────────────────────────────────────────────────────────────
+       * Shooting the decal's 'occ' term as red across the whole board, every
+       * unit's mark landed as a large blob sitting most of a body-height *below*
+       * its feet, on terrain a level or two down. The cause is that the decal is
+       * a horizontal plane and this map is not: a quad reaching past the edge of
+       * the 1-tile block a unit stands on does not stop — it carries on through
+       * open air and the depth test happily lands it on whatever surface is
+       * behind, which from a 30 degrees camera is lower terrain further back. So
+       * the "contact shadow" was drawing a detached hard-edged patch a tile away
+       * from the unit, which is worse than drawing nothing.
+       *
+       * The fix is to window the decal to the footprint of the tile the unit
+       * actually occupies. Nothing outside that square can be the unit's own
+       * ground, and everything inside it is guaranteed to be one planar face at
+       * exactly the elevation the quad is pinned to. Reach onto *neighbouring*
+       * geometry is not lost — it comes out of the shadow map instead (see
+       * {@link GROUND_CASTER_RADIUS}), where terrain occludes and receives it
+       * correctly for free.
+       */
+      uTileHalf: { value: TILE_SIZE / 2 },
       /** How far the cast tail reaches, in world units. cot(elevation) driven. */
       uTailLength: { value: 0.7 },
       uDensity: { value: SHADOW_DENSITY },
@@ -815,6 +845,8 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
       uniform vec2  uTailDir;
       uniform float uTailLength;
       uniform float uDensity;
+      uniform vec2  uYaw;
+      uniform float uTileHalf;
       varying vec2 vUvDecal;
 
       void main() {
@@ -824,35 +856,60 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         vec2 q = (vUvDecal - 0.5) * (2.0 * uHalfSize);
 
         // ── contact ────────────────────────────────────────────────────────────
-        // Two tiers, because one gaussian cannot be both "welded to the boots"
-        // and "visible past them".
+        // ROUND 7 — the lobes were an order of magnitude too small to be seen.
         //
-        // Sized off refs/curated/fft/press-311722-...-03. Measured there, the mark
-        // under the blue-clad unit is about 0.6 of a boot-height deep and 1.3
-        // boot-widths across, and — this is the part the first pass got wrong —
-        // its *darkest point is the boot line itself*, not a point below it. A
-        // lobe centred forward of the feet reads as a detached blob and makes the
-        // unit look like it is hovering over its own shadow, which is worse than
-        // having none. So the core peaks at q.y = 0 and is heavily biased forward
-        // by an asymmetric squash instead: ground behind the feet falls off three
-        // times faster than ground in front, which spends the density on the
-        // strip the lens can see without ever pulling the peak off the boots.
-        float behind = step(0.0, q.y);
-        float ySquash = mix(1.0, 3.0, behind);
-        vec2 c = vec2(q.x / 0.24, q.y * ySquash / 0.125);
+        // The round-5/6 shape (sigma 0.125 tiles in the depth axis) was chosen
+        // from a reading of the reference in *tile* units and never converted to
+        // screen. Do the conversion: the camera pitches 30 degrees, so a ground
+        // offset d toward the lens moves d * sin(30) = 0.5 d up the screen, and
+        // one world unit is TEXELS_PER_UNIT * pixelScale ≈ 56 device pixels in
+        // this frame. A 0.125-tile lobe is therefore **three and a half device
+        // pixels** of visible ground. It was not subtle, it was absent — which is
+        // exactly what the debug pass showed when the decal's fragment was forced
+        // to a signal colour: the only red that cleared the depth test was a few
+        // stray corners, never a mark under a unit.
+        //
+        // Re-measured on refs/curated/fft/press-311722-…-mediakit-03, this time in
+        // device pixels off the actual frame, sampling bands below the blonde
+        // unit's boot line:
+        //
+        //     clean carpet, ~30px below the boots   luma 128.1
+        //     0-14px below the boot line            luma  88.3   (1.45x)
+        //     the boot line itself                  luma  63.3   (2.02x)
+        //
+        // and the same unit's ground on the second figure reads 90.2 at the feet
+        // against 151.0 out on open floor (1.67x). So the mark is ~30 px deep at
+        // the reference's sprite scale, whose figures are about twice ours on
+        // screen — i.e. **0.45 to 0.55 tiles of ground reach toward the lens**,
+        // peaking at roughly a 2x multiply at the boots themselves.
+        //
+        // fwd is that axis: positive is the strip of ground between the boots
+        // and the lens, which is the only ground a vertical billboard does not
+        // already cover. The core is centred a hair into it and given a forward
+        // sigma more than twice its backward one, so the peak still sits on the
+        // boot line (a lobe centred well forward reads as a detached blob) while
+        // the density is spent where it can be seen.
+        float fwd = -q.y;
+        float yc = fwd - 0.06;
+        float coreSy = yc > 0.0 ? 0.30 : 0.13;
+        vec2 c = vec2(q.x / 0.32, yc / coreSy);
         float core = exp(-dot(c, c));
 
-        vec2 k = vec2(q.x / 0.37, q.y * ySquash / 0.225);
-        float skirt = exp(-dot(k, k)) * 0.70;
+        // Skirt: the 1.45x band. Wider and weaker, carrying the mark out to the
+        // half-tile the reference measures before it dies.
+        float skirtSy = yc > 0.0 ? 0.52 : 0.24;
+        vec2 k = vec2(q.x / 0.50, yc / skirtSy);
+        float skirt = exp(-dot(k, k)) * 0.46;
         float contact = max(core, skirt);
 
         // ── tile pool ──────────────────────────────────────────────────────────
         // Broad and weak: sinks the occupied tile below its neighbours without
         // laying haze over the terrain. The critics asked for this by name — "no
         // darkening of the tile they occupy" — but at any real density a
-        // tile-wide multiply reads as fog, so it stays under a quarter.
-        vec2 p = vec2(q.x / 0.44, q.y * mix(1.0, 1.7, behind) / 0.40);
-        float pool = exp(-dot(p, p) * 0.9) * 0.20;
+        // tile-wide multiply reads as fog, so it stays around a quarter. Now
+        // genuinely a tile wide, because the quad finally is.
+        vec2 p = vec2(q.x / 0.56, q.y * mix(1.0, 1.25, step(0.0, q.y)) / 0.56);
+        float pool = exp(-dot(p, p) * 0.9) * 0.26;
 
         // ── directional cast ───────────────────────────────────────────────────
         // Projects onto the key's ground heading.
@@ -871,7 +928,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         float t = clamp(along / max(uTailLength, 1e-3), 0.0, 1.0);
         float halfWidth = 0.19 + 0.10 * t;
         float lobe = exp(-(across / halfWidth) * (across / halfWidth));
-        float tail = lobe * pow(1.0 - t, 2.4) * step(-0.02, along) * 0.20;
+        float tail = lobe * pow(1.0 - t, 2.4) * step(-0.02, along) * 0.26;
 
         float occ = max(contact, max(pool, tail));
 
@@ -879,7 +936,18 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // non-zero at the edge cuts off on a straight line, which is exactly the
         // artefact the round-4 A/B exposed: the decal read as a rectangle.
         vec2 e = abs(vUvDecal - 0.5) * 2.0;
-        occ *= (1.0 - smoothstep(0.72, 1.0, max(e.x, e.y)));
+        occ *= (1.0 - smoothstep(0.78, 1.0, max(e.x, e.y)));
+
+        // Clamp to the occupied tile. Local +X maps to world (cos, -sin) and
+        // local +Z to world (sin, cos), and q.y is -localZ, so this is the
+        // offset from the tile centre in world XZ. See uTileHalf for why a
+        // horizontal decal on a stepped map must not leave its own tile.
+        vec2 w = vec2(
+          q.x * uYaw.x - q.y * uYaw.y,
+          -q.x * uYaw.y - q.y * uYaw.x
+        );
+        vec2 tile = abs(w) / max(uTileHalf, 1e-3);
+        occ *= (1.0 - smoothstep(0.80, 1.0, tile.x)) * (1.0 - smoothstep(0.80, 1.0, tile.y));
 
         occ = clamp(occ, 0.0, 1.0) * uDensity * clamp(uStrength, 0.0, 1.0);
 
@@ -898,8 +966,14 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
     depthWrite: false,
     depthTest: true,
     polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
+    // Round 7: −2/−2 → −1/−1. The quad is now 1.6 tiles across, so it routinely
+    // reaches the foot of the wall the unit is standing against; at −2 the offset
+    // was large enough to let slivers punch *through* that wall and paint a dark
+    // band up its face. One unit of offset plus CONTACT_SHADOW_LIFT is enough to
+    // clear the coplanar case, and everything past the tile edge now correctly
+    // depth-fails instead of bleeding.
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
     toneMapped: false,
   });
   material.name = 'UnitGroundShadow';
@@ -912,7 +986,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
  * ─────────────────────────────────────────────────────────────────────────────
  * Sprite grounding scored 2.7/10 and three judges named it unprompted. Rendering
  * the decal's fragment in a signal colour and shooting the frame, the reason is
- * not subtlety, it is **occlusion**: `battle-open` puts almost every unit against
+ * not subtlety, it is **occlusion**: 'battle-open' puts almost every unit against
  * a parapet or in a slot, and a 1.5-tile horizontal quad pinned at the unit's own
  * elevation spends most of its area *inside* the block in front of the unit. At
  * the shipped 0.012 lift essentially none of the decal survived the depth test on
@@ -920,29 +994,29 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
  * appear. A decal fights the terrain for the same pixels and loses.
  *
  * A shadow map does not. So the grounding is now carried by an actual caster: an
- * invisible horizontal disc at the unit's feet, `castShadow = true`, written into
+ * invisible horizontal disc at the unit's feet, 'castShadow = true', written into
  * the key's shadow map alongside the terrain. Whatever surface is genuinely under
  * and around the unit — its own tile, the step below it, the wall it stands
  * against — receives a soft, terrain-conforming darkening whose azimuth is the
  * key's by construction, because it is the same map every other shadow in the
  * frame comes out of. No z-fighting, no lift, nothing to occlude.
  *
- * Sizing, measured off `refs/curated/fft/press-311722-…-mediakit-03`: the mark
+ * Sizing, measured off 'refs/curated/fft/press-311722-…-mediakit-03': the mark
  * under the blonde unit on the carpet is about 1.3 body-widths across and dies
- * out within roughly a tile. `key.shadow` runs 2048 texels over the map bounds —
+ * out within roughly a tile. 'key.shadow' runs 2048 texels over the map bounds —
  * about 85 shadow texels per tile on this map — so a 0.8-tile disc is ~68 texels
  * wide in the map and the PCF kernel softens rather than pixelates it.
  *
  * The disc sits a little above the surface so the receiver's normal bias
- * (`texelWorld * 1.6`, ~0.019 world units here) cannot swallow it; under the
- * map's 54° key that lift displaces the shadow by `lift / tan(54°)` ≈ 0.04 tiles,
+ * ('texelWorld * 1.6', ~0.019 world units here) cannot swallow it; under the
+ * map's 54° key that lift displaces the shadow by 'lift / tan(54°)' ≈ 0.04 tiles,
  * which is below one device pixel and reads as welded rather than detached.
  *
- * It is invisible to the colour pass (`colorWrite: false`, no depth write) and
- * double-sided in the shadow pass — three culls back faces for a `FrontSide`
+ * It is invisible to the colour pass ('colorWrite: false', no depth write) and
+ * double-sided in the shadow pass — three culls back faces for a 'FrontSide'
  * material when rendering shadows, and an up-facing disc under an overhead key
  * presents its *front*, so a single-sided one would be thrown away exactly like
- * the billboards were before `material.shadowSide` was set on them.
+ * the billboards were before 'material.shadowSide' was set on them.
  *
  * **A flat disc, deliberately — a body-shaped proxy was tried and rejected.** The
  * obvious "better" version of this is a squashed ellipsoid at knee height, which
@@ -950,10 +1024,10 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
  * is worse: the proxy occupies the same space as the billboard, the billboard is
  * a shadow *receiver*, and every unit ended up standing inside its own shadow —
  * the whole cast lost its internal modelling and the units went flat and dark,
- * which is the exact defect `uSkyOcclusion` and the bounce term exist to avoid.
+ * which is the exact defect 'uSkyOcclusion' and the bounce term exist to avoid.
  * The disc sits below the art, so it can only darken the lowest texel or two.
  * Reach onto neighbouring geometry is bought instead by elongating the disc down
- * the key's ground azimuth (see `update`), which costs nothing on the sprite.
+ * the key's ground azimuth (see 'update'), which costs nothing on the sprite.
  */
 const GROUND_CASTER_RADIUS = TILE_SIZE * 0.36;
 const GROUND_CASTER_LIFT = 0.055;
@@ -1029,7 +1103,7 @@ function getSelectionRingTexture(): THREE.CanvasTexture {
  * against transparent *black* — the marker rendered as a gold chevron sitting on
  * a dark rectangular plate, which is exactly the "cheap overlay" tell the rest of
  * this file exists to avoid. At the marker's real size, 13 texels, there is no
- * reason to filter at all: draw it at 1:1 and let `NearestFilter` scale it.
+ * reason to filter at all: draw it at 1:1 and let 'NearestFilter' scale it.
  */
 const TURN_MARKER_ROWS = [
   '##.........##',
@@ -1161,7 +1235,7 @@ const GLYPH_H = 7;
 const GLYPH_GAP = 1;
 
 interface LabelStyle {
-  /** Fill colour, `#rrggbb`. */
+  /** Fill colour, '#rrggbb'. */
   color: string;
   /** Outline colour. A hard 1-texel outline keeps numbers legible over anything. */
   outline: string;
@@ -1747,9 +1821,9 @@ export interface UnitSpriteOptions {
 export interface SpriteViewContext {
   /** The three.js camera actually used for rendering. */
   camera: THREE.Camera;
-  /** World units covered by one device pixel — from `IsoCamera.worldPerDevicePixel`. */
+  /** World units covered by one device pixel — from 'IsoCamera.worldPerDevicePixel'. */
   worldPerDevicePixel: number;
-  /** Current camera yaw in radians — from `IsoCamera.yawRadians`. */
+  /** Current camera yaw in radians — from 'IsoCamera.yawRadians'. */
   yawRadians: number;
 }
 
@@ -1787,7 +1861,7 @@ export class UnitSprite {
    * body-height throws along it. The decal is yawed to the camera rather than to
    * the light (see {@link createShadowDecalMaterial}), so the direction has to be
    * rotated into the decal's frame every time the camera moves — which is what
-   * `update` does with `shadowGroundDir`.
+   * 'update' does with 'shadowGroundDir'.
    */
   private readonly shadowGroundDir = new THREE.Vector2(0, 1);
   private shadowStretch = 1;
@@ -1796,14 +1870,14 @@ export class UnitSprite {
   private readonly statusStrip: THREE.Group;
   private readonly statusIcons: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>[] = [];
 
-  /** Fractional grid position. `z` is elevation in half-tile units. */
+  /** Fractional grid position. 'z' is elevation in half-tile units. */
   readonly cell = { x: 0, y: 0, z: 0 };
   facing: Facing = 'S';
   team: Team = 'player';
 
   private readonly options: Required<UnitSpriteOptions>;
   private readonly frameRect = new THREE.Vector4();
-  /** Flat cell index currently displayed — indexes `layout.footCenterX`. */
+  /** Flat cell index currently displayed — indexes 'layout.footCenterX'. */
   private frameCell = 0;
 
   private walker: PathWalker | null = null;
@@ -1863,7 +1937,7 @@ export class UnitSprite {
     this.animator = new SpriteAnimator(sheet.animations);
 
     if (this.options.contactShadow) {
-      // A flat square centred on the feet. `rotateX(-90°)` sends the plane's +Y
+      // A flat square centred on the feet. 'rotateX(-90°)' sends the plane's +Y
       // to world −Z, so once the mesh is yawed to the camera the quad's local −Z
       // (UV v = 1) points *away* from the lens and its +Z points at it — which is
       // the frame the shader reasons in. Nothing is baked into the geometry any
@@ -1923,7 +1997,7 @@ export class UnitSprite {
       );
       // Depth test ON, compare function ALWAYS, depth write ON.
       //
-      // ROUND 5 RECONCILE. This was `depthTest: false, depthWrite: false`, and
+      // ROUND 5 RECONCILE. This was 'depthTest: false, depthWrite: false', and
       // that left the depth buffer under the marker holding the BACKDROP — forty
       // units away. The DoF prepass reads that buffer, so the acting-unit
       // indicator, the one glyph in the frame that must never be ambiguous, was
@@ -1933,12 +2007,12 @@ export class UnitSprite {
       // confirmed those pixels sat at the far ceiling.
       //
       // Setting depthWrite alone does nothing: GL only writes depth when the
-      // depth TEST is enabled, so `depthTest: false` silently disabled the write
+      // depth TEST is enabled, so 'depthTest: false' silently disabled the write
       // as well. AlwaysDepth is the combination that expresses the actual intent
       // — never be occluded (the test always passes, so terrain in front of the
       // unit cannot hide the indicator) while still stamping the marker's own
       // near depth, so post-processing treats it as what it is: geometry at the
-      // unit's distance. `alphaTest` keeps the write on opaque texels only, so
+      // unit's distance. 'alphaTest' keeps the write on opaque texels only, so
       // the quad's transparent corners do not punch a hole in the depth buffer.
       const material = new THREE.MeshBasicMaterial({
         map,
@@ -2005,7 +2079,7 @@ export class UnitSprite {
    * Point the impostor shading and the warm rim at the scene's key light.
    *
    * The cool counter-rim is derived rather than passed: the lighting rig always
-   * places its back light at roughly `keyAzimuth + 150°` and a shallower
+   * places its back light at roughly 'keyAzimuth + 150°' and a shallower
    * elevation, so mirroring the key through the vertical axis and flattening it
    * lands within a few degrees of the real fill without adding a second call
    * every caller would have to remember to make.
@@ -2028,8 +2102,8 @@ export class UnitSprite {
 
     // Aim the grounded shadow down the same ray. Only the *heading* is stored
     // here, in world XZ: the decal is yawed to the camera, so the direction has
-    // to be rotated into the decal's frame in `update`, where the camera yaw is
-    // known. `stretch` is cot(elevation) — the ground distance one unit of height
+    // to be rotated into the decal's frame in 'update', where the camera yaw is
+    // known. 'stretch' is cot(elevation) — the ground distance one unit of height
     // throws — clamped so a near-overhead key still leaves a readable contact
     // patch and a raking one does not draw a shadow across four tiles.
     const groundLength = Math.hypot(key.x, key.z);
@@ -2067,7 +2141,7 @@ export class UnitSprite {
     this.bundle.uniforms.uLightInfluence.value = value;
   }
 
-  /** Damage/heal flash. `duration` in seconds. */
+  /** Damage/heal flash. 'duration' in seconds. */
   flash(color: THREE.ColorRepresentation = 0xffffff, duration = 0.16): void {
     this.bundle.uniforms.uFlashColor.value.set(color);
     this.flashDuration = Math.max(0.01, duration);
@@ -2097,11 +2171,11 @@ export class UnitSprite {
   }
 
   /**
-   * Walk the unit along a `move` path.
+   * Walk the unit along a 'move' path.
    *
    * The walk cycle is advanced by distance travelled, not by elapsed time, so the
    * feet stay planted whatever the speed; the hop arc over a height change is
-   * handled by `PathWalker`, and the sprite plays `jump`/`land` around it.
+   * handled by 'PathWalker', and the sprite plays 'jump'/'land' around it.
    */
   walkPath(
     path: readonly Vec3[],
@@ -2353,10 +2427,10 @@ export class UnitSprite {
 
     // 5 — world placement, then the view-space pixel snap.
     const camera = view.camera;
-    // `terrain.ts` centres tile (x, y) on world (x, y) — the top face spans
+    // 'terrain.ts' centres tile (x, y) on world (x, y) — the top face spans
     // ±TILE_SIZE/2 about the integer coordinate. Anchoring at (x + 0.5) put every
     // unit on the corner where four tiles meet, which is why nothing looked
-    // planted. Anchor on the tile centre, exactly like `tileWorldPosition`.
+    // planted. Anchor on the tile centre, exactly like 'tileWorldPosition'.
     const world = this.scratchWorld.set(
       this.cell.x * TILE_SIZE,
       this.groundY(),
@@ -2383,7 +2457,7 @@ export class UnitSprite {
     this.mesh.rotation.set(0, view.yawRadians, pose.rotation, 'YXZ');
     this.mesh.scale.set(pose.scaleX, pose.scaleY, 1);
 
-    // 6 — ground decals live in world space at the tile surface. `object` is a
+    // 6 — ground decals live in world space at the tile surface. 'object' is a
     //     plain world-space container: everything under it is positioned in world
     //     coordinates, so the layer group must stay at the origin.
     const groundX = this.cell.x * TILE_SIZE;
@@ -2408,7 +2482,7 @@ export class UnitSprite {
       // Yaw the decal to the **camera**, not to the light. Its local +Z then
       // points at the lens, so the shader can place the dense contact core on the
       // strip of ground the camera can actually see rather than on the strip the
-      // billboard is standing in front of. See `createShadowDecalMaterial`.
+      // billboard is standing in front of. See 'createShadowDecalMaterial'.
       this.contactShadow.rotation.set(0, view.yawRadians, 0, 'YXZ');
       // Scaling the mesh grows the whole footprint in world space while the
       // shader keeps working in fixed local units, which is exactly the hop
@@ -2425,6 +2499,13 @@ export class UnitSprite {
       const tail = this.contactShadow.material.uniforms['uTailDir']!.value as THREE.Vector2;
       tail.set(dx * cos - dz * sin, -(dx * sin + dz * cos));
       if (tail.lengthSq() > 1e-8) tail.normalize();
+
+      // The tile clamp works in the decal's local frame, so it needs the yaw to
+      // rotate back to world XZ, and the tile half-extent expressed *before* the
+      // hop scale — the shader's coordinates are pre-scale, the world footprint
+      // is not.
+      (this.contactShadow.material.uniforms['uYaw']!.value as THREE.Vector2).set(cos, sin);
+      this.contactShadow.material.uniforms['uTileHalf']!.value = TILE_SIZE / 2 / spread;
 
       // A body on the floor no longer has a standing silhouette to throw, so the
       // KO case collapses the directional tail and keeps only the contact patch.
@@ -2447,10 +2528,19 @@ export class UnitSprite {
       // that way, so the mark leans where every terrace and parapet shadow in
       // the frame leans. A perfectly round blob under a 54° key is what reads as
       // a decal; the asymmetry is what says "cast by this light".
-      const elongate = 1 + (this.ko ? 0.1 : this.shadowStretch * 0.75);
+      // Round 7. The disc *is* the cast shadow — it sits within a shadow-map
+      // texel or two of the ground, so whatever footprint it occupies is where
+      // the darkening lands. Leaning it only 0.06 tiles (radius x 0.4 x 0.42, as
+      // it was) therefore kept the entire mark inside the unit's own footprint,
+      // where the billboard covers it. Elongating harder and pushing the ellipse
+      // most of a tile down the key's ground heading is what actually gets a
+      // shadow onto the *adjacent* block the critics asked for — and because it
+      // comes out of the same map as the terrain's own shadows, it climbs steps
+      // and stops at ledges for free.
+      const elongate = 1 + (this.ko ? 0.1 : 0.55 + this.shadowStretch * 1.1);
       const dx = this.shadowGroundDir.x;
       const dz = this.shadowGroundDir.y;
-      const lean = radius * (elongate - 1) * 0.42;
+      const lean = radius * elongate * (this.ko ? 0.15 : 0.62);
       this.groundCaster.position.set(
         groundX + dx * lean,
         shadowY + GROUND_CASTER_LIFT,
@@ -2555,7 +2645,7 @@ export class UnitSprite {
     // Hand the material *this pose's* art extent so its vertical ramps — the
     // contact darkening at the boots, the ground bounce into the legs, the sky
     // gradient down the body — key off the figure instead of off the 80-texel
-    // cell it floats inside. See `SpriteUniforms.uFootBaseTexels`: this is the
+    // cell it floats inside. See 'SpriteUniforms.uFootBaseTexels': this is the
     // fix that puts the contact pinch on the boots rather than on the empty
     // texels underneath them.
     const layout = this.sheet.layout;
@@ -2608,8 +2698,8 @@ export interface SpriteLayerOptions {
 /**
  * Owns every unit sprite plus the shared sheet cache.
  *
- * `update` must run **after** the camera has been updated for the frame and
- * before the render call: the pixel snap reads `camera.matrixWorldInverse`, and a
+ * 'update' must run **after** the camera has been updated for the frame and
+ * before the render call: the pixel snap reads 'camera.matrixWorldInverse', and a
  * stale matrix would put every sprite half a pixel out.
  */
 export class SpriteLayer {
@@ -2649,7 +2739,7 @@ export class SpriteLayer {
           if (palette) palettes.push(palette);
         }
       }
-      // Always keep the baked palette as slot 0 so a sheet with no `.act` family
+      // Always keep the baked palette as slot 0 so a sheet with no '.act' family
       // still renders in its shipped colours.
       if (palettes.length === 0) palettes.push(image.palette);
       return new SpriteSheet(key, image, palettes, this.options.overrides?.[key]);
