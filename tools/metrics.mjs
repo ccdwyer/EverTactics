@@ -82,17 +82,61 @@ async function measure(path) {
     const n = W * H;
 
     // ── Background fraction ────────────────────────────────────────────────
-    // A void reads as a large region matching the frame's extreme corners.
-    // Sample all four corners, then count pixels close to any of them.
+    // The void is EDGE-CONNECTED emptiness, not "every pixel that happens to
+    // match the corner colour".
+    //
+    // The first version counted the latter, and it was wrong in a way that got
+    // worse as the frame improved: under a committed navy/amber grade it also
+    // counted the shadow-side faces of terrain blocks inside the diorama, the
+    // dark parts of sprites, and the UI panels. Adding scenery pushed the number
+    // UP (0.246 -> 0.319) while the actual void shrank, so the gate was measuring
+    // "how much of the frame shares the sky's hue" — a grading property.
+    //
+    // Flood-filling inward from the frame edge fixes that: interior shadow can
+    // never be reached, because it is enclosed by pixels that do not match.
     const corners = [at(2, 2), at(W - 3, 2), at(2, H - 3), at(W - 3, H - 3)];
-    let bg = 0;
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const [r, g, b] = at(x, y);
-        for (const [cr, cg, cb] of corners) {
-          if (Math.abs(r - cr) + Math.abs(g - cg) + Math.abs(b - cb) < 24) { bg++; break; }
-        }
+    const matchesCorner = (x, y) => {
+      const [r, g, b] = at(x, y);
+      for (const [cr, cg, cb] of corners) {
+        if (Math.abs(r - cr) + Math.abs(g - cg) + Math.abs(b - cb) < 24) return true;
       }
+      return false;
+    };
+
+    // Kept for the diagnostic block below, which still wants the loose mask.
+    let looseMatch = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) if (matchesCorner(x, y)) looseMatch++;
+    }
+
+    const isVoid = new Uint8Array(W * H);
+    const stack = [];
+    for (let x = 0; x < W; x++) {
+      for (const y of [0, H - 1]) {
+        const i = y * W + x;
+        if (!isVoid[i] && matchesCorner(x, y)) { isVoid[i] = 1; stack.push(i); }
+      }
+    }
+    for (let y = 0; y < H; y++) {
+      for (const x of [0, W - 1]) {
+        const i = y * W + x;
+        if (!isVoid[i] && matchesCorner(x, y)) { isVoid[i] = 1; stack.push(i); }
+      }
+    }
+    let bg = 0;
+    while (stack.length) {
+      const i = stack.pop();
+      bg++;
+      const x = i % W, y = (i / W) | 0;
+      const push = (nx, ny) => {
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) return;
+        const j = ny * W + nx;
+        if (isVoid[j]) return;
+        if (!matchesCorner(nx, ny)) return;
+        isVoid[j] = 1;
+        stack.push(j);
+      };
+      push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
     }
 
     // ── Luminance spread ───────────────────────────────────────────────────
@@ -172,6 +216,7 @@ async function measure(path) {
 
     return {
       backgroundFraction: bg / n,
+      colourMatchFraction: looseMatch / n,
       backgroundStdDev: Math.sqrt(bgVar),
       backgroundDetail: bgGradN ? bgGrad / bgGradN : 0,
       meanLuma: mean,
