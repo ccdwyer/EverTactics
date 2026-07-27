@@ -66,11 +66,32 @@ its own art. A judge who knows the genre recognises Ivalice character art regard
 is lit or grounded — the same class of recognition cue as the character names and HUD vocabulary
 that forced the crop in round 5, and equally immune to shader work.
 
-The honest next experiment is a **sprite-free comparison** (terrain-only scenes both sides). If
-judges cannot separate our diorama rendering from theirs with units excluded, the rendering has
-arrived and the residual is an art-asset difference, not a quality gap. Running more rounds against
-the sprite-inclusive test without checking this risks optimising against a metric that has stopped
-measuring anything.
+### That plateau hypothesis was WRONG — tested and refuted
+A sprite-free comparison was run: our `terrain-only` render against environment-dominant shipped
+frames. If the residual had been sprite recognition, environments alone would have been hard to
+separate. **They were not.** The judge separated all four instantly, at 95-99 confidence, and
+produced a long list of concrete environment defects (flat ambient with no cavity darkening, no
+bounce from the brazier, a fixed-radius PCF penumbra that never hardens at contact, one roughness
+value scene-wide, masonry joints painted into albedo rather than normal-mapped, visible tiling
+period, no aerial perspective, DOF as a two-layer threshold rather than a ramp, duotone palette
+with no tertiary hue, no focal hierarchy, unreadable scale).
+
+So the environment rendering is genuinely still distinguishable. There is real work left and it is
+enumerated. Do not attribute the gap to the sprites.
+
+**Two flaws in that experiment, both mine, worth not repeating:**
+1. I used ONE `terrain-only.png` against four references, so the same prototype frame appeared in
+   all four pairs and the per-pair shuffle was trivially defeated by cross-referencing. The judge
+   caught this and said so rather than pretending to four independent reads. Use a different
+   scene/angle per pair.
+2. One reference was a dialogue box ~85% occluded by UI — worthless for an environment test.
+
+### The reference corpus is NOT all Triangle Strategy
+`refs/curated/triangle/` is mislabelled. The judge identified `official_029_se_screenshot.png` as
+Vanillaware's **Unicorn Overlord**, and visual audit confirms it. A few others look like they may
+also not be Triangle. The set is better described as **shipped commercial SRPG frames, mostly
+Triangle Strategy**. The blind test is still valid — it asks "shipped game or prototype?" — but do
+not describe results as "vs Triangle Strategy" without checking the specific file.
 
 Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
 
