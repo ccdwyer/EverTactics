@@ -1200,11 +1200,36 @@ const VFX_KEY_SET = new Set(VFX_KEYS);
  * elemental burst rather than rendering nothing — `vfx.play` does the same for
  * an unknown key, but resolving here keeps the element correct.
  */
+/**
+ * Element name -> effect archetype.
+ *
+ * The VFX system registers 16 archetypes; the ability table authors 340
+ * path-style keys ("black/fire"), so almost every ability resolves by fallback.
+ * That is the intended design — what was broken is that the element step tested
+ * `VFX_KEY_SET.has('fire')` while the registry holds `'fire-burst'`, so the test
+ * could never pass and EVERY elemental spell fell through to the formula switch
+ * and played a generic `impact-flash`. Fire, Blizzard and Thunder were visually
+ * identical.
+ */
+const ELEMENT_VFX: Readonly<Record<string, string>> = {
+  fire: 'fire-burst',
+  ice: 'ice-shard',
+  lightning: 'lightning-bolt',
+  wind: 'wind-vortex',
+  earth: 'earth-spike',
+  water: 'water-surge',
+  holy: 'holy-pillar',
+  dark: 'dark-tendril',
+};
+
 function resolveVfxKey(ability: Ability): string {
   if (VFX_KEY_SET.has(ability.vfx)) return ability.vfx;
   const tail = ability.vfx.split('/').pop() ?? '';
   if (VFX_KEY_SET.has(tail)) return tail;
-  if (ability.element !== 'none' && VFX_KEY_SET.has(ability.element)) return ability.element;
+  if (ability.element !== 'none') {
+    const byElement = ELEMENT_VFX[ability.element];
+    if (byElement !== undefined && VFX_KEY_SET.has(byElement)) return byElement;
+  }
   switch (ability.formula) {
     case 'heal':
       return 'heal-sparkle';
