@@ -342,7 +342,36 @@ legal (reachable, no unreachable spawn tiles). Run \`npx vitest run\` after any 
   {
     label: 'fix-lighting-vfx',
     own: 'src/render/lighting.ts, src/render/vfx.ts',
-    focus: `A SPRITE-FREE BLIND TEST JUST TOOK YOUR RENDERING APART. Units were removed entirely so
+    focus: `MEASURED IN ROUND 9: OUR FRAME IS A WARM DIORAMA INSIDE A COLD SHELL. Per-zone mean
+red-minus-blue, ours against three references:
+
+                  cornerTL cornerBR nearBand farBand centre
+      ours          -12.2    -20.8    -17.2   -12.0   +16.1
+      press_002     +24.9    +63.8    +49.8   +53.2   +80.3
+      official_033  +32.0    +13.4    +27.0   +31.6   +44.4
+      official_009  +20.1     +2.7     +6.3   +18.5    +6.9
+
+EVERY zone of EVERY reference is warm-positive. Ours is warm only in the centre and cold in all six
+surrounding zones, and the boundary lands exactly on the board silhouette — which is a large part
+of why the board still reads as a cut-out pasted onto a background.
+
+The environment agent traced the cause to its own layer and partly fixed it (the palette derived
+only from the strongest DirectionalLight, a cold moon, and never looked at the practicals, which is
+where all the frame's warmth actually comes from). It reported explicitly that it could not finish
+the job from that module: "the cool fills outweigh the fire in the current rig, and I deliberately
+did not override that from this module. Closing it fully needs a lighting.ts decision about the
+map's mood."
+
+That decision is yours. The rig's cool fill terms are currently louder than the map's own fire.
+Reference night frames are warm-dominant everywhere, not just near their light sources. Re-balance
+so the surround is warm-positive too, and verify by re-measuring the zone table rather than by eye.
+
+Do NOT do this with a global warm grade over the image — critics have named that failure twice
+("a duotone grade applied over the image rather than materials responding to two light sources").
+It has to come from the lights.
+
+Secondary, if the zone table is fixed and verified:
+A SPRITE-FREE BLIND TEST ALSO TOOK YOUR RENDERING APART. Units were removed entirely so
 only the environment was judged; the judge separated all four pairs at 95-99 confidence. These are
 its exact words about lighting. Fix these, in this order, and do not spread effort elsewhere:
 
