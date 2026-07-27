@@ -60,7 +60,38 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 9 | 5/12 baseline, 9/12 after | 11/12 and 10/12 | first n=12 round |
 | 10 | 6/12 baseline, 10/12 after | 9/12 and **8/12** | **the loop has stopped paying** |
 
-### FINAL MEASUREMENT — replicated across two independent draws (n=36 total)
+### DECISIVE TEST — we are NOT indistinguishable. The 30% figure was an artefact.
+
+The identification protocol ("which of these is the shipped game?") returned ~30% across 36 pairs,
+i.e. judges systematically picked OUR frame as shipped. I flagged the caveat that this might be the
+"more striking = shipped" heuristic rather than parity, then reported the number as a headline
+anyway. A discrimination test settles it, and the caveat was right.
+
+Drop the prototype framing. Ask only: **same game, or two different games?**
+
+    condition                                    called "different game"
+    control-same   two Triangle Strategy frames        1 / 4   (25%)
+    control-diff   Triangle vs Unicorn Overlord        3 / 4   (75%)
+    test           OURS vs Triangle Strategy           5 / 6   (83%)
+
+**Our frame is called a different game MORE often than two genuinely different shipped titles are.**
+It does not sit inside the between-shipped-titles noise; it sits outside it. A real, legible
+rendering gap remains, and the earlier below-chance identification was judges rewarding impact, not
+failing to discriminate.
+
+The judges' reasons on the test arm are consistent and specific: lighting model ("Left runs a
+genuine two-source model"), cast-shadow behaviour, texel density and material vocabulary, and
+sprite-to-geometry authorship standards. Those are the same defects the sprite-free test named
+rounds ago. They are real and they are not closed.
+
+Caveat on n: 4/4/6 is small. The direction is unambiguous — 83% vs a 25% same-game floor — but the
+exact percentages are not precise. Re-run with more pairs before quoting them.
+
+**What IS established, and it is not nothing:** blind judges prefer this frame to shipped
+commercial SRPG frames (34/36 across two draws, p < 0.001) and read it as more coherent (31/36).
+Preferred is not the same as indistinguishable, and only the first was ever demonstrated.
+
+### The identification measurements, kept for the record (n=36 total)
 
                         seed 7 (n=18)   seed 12 (n=18)
     identified correctly     5               6         pooled 11/36, P(<=11|chance) = 0.014
