@@ -201,6 +201,17 @@ const CONSUMABLES: readonly Item[] = [
     description: 'One feather, one breath, one more chance. Never more than that.' },
 ];
 
+/**
+ * The consumables, in shop order.
+ *
+ * These are the ids the party carries a *stock* of — `core/inventory.ts` owns
+ * the counts and the starting pile, and derives membership from the Item
+ * skillset rather than from this list, so a consumable added here without a
+ * matching ability is inert in battle (as it always was) rather than silently
+ * infinite.
+ */
+export const CONSUMABLE_ITEMS: readonly Item[] = CONSUMABLES;
+
 export const ITEMS: readonly Item[] = [...WEAPONS, ...ARMOUR, ...CONSUMABLES];
 
 export const ITEMS_BY_ID: ReadonlyMap<string, Item> = new Map(ITEMS.map((i) => [i.id, i]));

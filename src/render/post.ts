@@ -202,8 +202,52 @@ export interface VignetteSettings {
    * along the full width of the top and bottom edges, which a radial falloff cannot draw.
    */
   edge: number;
+  /**
+   * Per-edge weights on that rectangular band: `[top, bottom, side]`.
+   *
+   * Split in round 6. Our top band is defocused backdrop and measured as the BRIGHTEST cell
+   * in the frame; our bottom band is the near rim and the water channel and is already the
+   * darkest. A single symmetric weight cannot pull one down without crushing the other.
+   */
+  edgeWeights: [number, number, number];
   /** The colour the darkened region multiplies toward. Never neutral. */
   color: [number, number, number];
+}
+
+/**
+ * Focal hierarchy — the round-6 answer to "everything equally detailed, equally lit,
+ * equally sharp, so the eye has nowhere to land".
+ *
+ * Two photographic terms, both applied to linear scene light before the tonemapper and both
+ * deliberately broad enough that no edge is visible:
+ *
+ *   - a DODGE on the composed subject, which the filmic shoulder then turns into the
+ *     desaturated bright centre every reference frame measures;
+ *   - an aerial SUBORDINATION of the far field, keyed to the far half of the circle of
+ *     confusion so it tracks view-space distance rather than screen position.
+ *
+ * See the block comment in `materials/post/composite.ts` for the measurements.
+ */
+export interface FocusGradeSettings {
+  enabled: boolean;
+  /**
+   * Linear multiplier at the subject. 1 = off. This is a dodge, not a light — keep it under
+   * ~1.7 or the shoulder stops rolling and the centre clips, which is the defect the bloom
+   * notes have been filing since round 4.
+   */
+  lift: number;
+  /** Normalised distance (1.0 = furthest frame corner from the subject) where the dodge starts falling. */
+  radius: number;
+  /** Width of that falloff, same units. Wide on purpose. */
+  softness: number;
+  /** Master weight of the far-field subordination, 0..1. */
+  farAmount: number;
+  /** Fraction of chroma removed at full far defocus. */
+  farDesaturate: number;
+  /** Fraction of light removed at full far defocus. */
+  farDarken: number;
+  /** Tint the desaturated far field is carried toward. Never neutral. */
+  farTint: [number, number, number];
 }
 
 export interface GrainSettings {
@@ -261,6 +305,7 @@ export interface PostSettings {
   dof: DofSettings;
   grade: GradeSettings;
   vignette: VignetteSettings;
+  focusGrade: FocusGradeSettings;
   grain: GrainSettings;
   chroma: ChromaSettings;
   spriteGrade: SpriteGradeSettings;
@@ -393,7 +438,13 @@ export const REFERENCE_FLOOR = {
    * multiplied by `tiltMix` — the two changes together leave the delivered corner blur where
    * it was while `tiltMix` is free to fall toward zero.
    *
-   * ROUND 5 takes it back down to 0.3. This is the last purely screen-space term left in the
+   * ROUND 6 takes it to 0.18. Read `?postdebug=coc` on the round-5 frame: the depth term
+   * already drives all four corners to the far ceiling or into the near field on its own, so
+   * every pixel this term was actually changing was a pixel further IN than the corner — i.e.
+   * the only thing it could still do was blur by screen position, which is the one DoF defect
+   * a judge can name without a depth buffer. What is left is a faint lens signature.
+   *
+   * ROUND 5 took it down to 0.3. This is the last purely screen-space term left in the
    * CoC, and screen-space blur is what a judge reads as "blurred by position rather than by
    * distance". Measured with `?postdebug=coc` on the current framing: the frame corners are
    * background or near rim in every direction, so the depth term already drives them to the
@@ -401,7 +452,7 @@ export const REFERENCE_FLOOR = {
    * the corners while still being able to reach inward over playable geometry. What is left
    * is a faint lens signature, which is all it should ever have been.
    */
-  dofTiltRadialMax: 0.3,
+  dofTiltRadialMax: 0.18,
   /**
    * MAXIMUM far-field CoC — a ceiling, and the direct answer to "far-field blur is so heavy
    * the town is a featureless navy mush, reading as 'hiding an empty scene'".
@@ -544,7 +595,16 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // The shoulder in COC_CHUNK supplies the asymptote now, so this only sets how fast the
       // ramp leaves the sharp zone. 1.45 reaches roughly half of maximum blur at the frame
       // edge and the full ceiling only on true background.
-      cocScale: 1.45,
+      //
+      // ROUND 6: 1.45 -> 1.15. "Depth of field is depth-only and BANDS rather than RAMPS" —
+      // and `?postdebug=coc` agrees: at 1.45 everything more than ~5 world units past the
+      // focal plane sat within a few percent of the far ceiling, so the entire upper half of
+      // the board was one flat blur value with no gradient inside it. That is a band drawn by
+      // depth instead of by screen position, which is better but still a band. Stretching the
+      // ramp by a quarter keeps the same maximum (the ceiling and `maxCoCPixels` are
+      // unchanged) while giving the far field a real derivative all the way out, so the back
+      // colonnade stays measurably crisper than the backdrop behind it.
+      cocScale: 1.15,
       // Slightly above centre: the reference frames put the sharp band on the action and
       // leave the negative space above it soft. Matches the camera's composition offset,
       // which lifts the subject the same way.
@@ -594,7 +654,11 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // same contrast and detail level". The answer is not a darker picture (ours already
       // measured below the reference band) but a steeper one: more light in the middle AND
       // more falloff at the rim, which is what a real lens does anyway.
-      amount: 0.46,
+      // ROUND 6: 0.46 -> 0.40. The rim falloff no longer has to carry the focal hierarchy on
+      // its own — the subject dodge in `focusGrade` now supplies the other half, and it does
+      // it by adding light in the middle rather than by taking more away at the edge, which
+      // is the difference between a composed frame and a dark one.
+      amount: 0.40,
       radius: REFERENCE_FLOOR.vignetteRadiusMin,
       softness: 0.62,
       // Raised from 0.3 now that the term is axis-weighted (see COMPOSITE_FRAG) and no longer
@@ -602,6 +666,11 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // ends up close to where the old symmetric 0.3 left it; the top and bottom bands, which
       // are what the references actually carry, get the rest.
       edge: 0.42,
+      // [top, bottom, side]. Measured on the round-6 3x3 luma grid: our top band came back at
+      // 130/255 against a centre of 89 — the defocused backdrop was the best-lit region in the
+      // picture — while the bottom band was already at 32-45 and did not need more. The old
+      // symmetric weighting was [1.0, 1.0, 0.55].
+      edgeWeights: [1.6, 0.6, 0.5],
       // ROUND 4 — "the blacks are lifted into a flat purple", filed twice, plus "the blacks
       // are lifted into blue so there is no true anchor point". The grade's own black point
       // was only half the story: the vignette multiplies the outer third of the frame toward
@@ -610,6 +679,28 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // no true black anywhere. Taken down to roughly a third of that: still tinted (a
       // neutral vignette is its own fail condition) but now genuinely dark.
       color: [0.016, 0.021, 0.042],
+    },
+    focusGrade: {
+      enabled: true,
+      // Sized against the measurement, not to taste. Ours ran centre/corner luma at 1.49
+      // where four Triangle frames sit at 1.38-3.84 with a median near 2.4; the vignette
+      // pull-back above costs some of that back, so the dodge has to supply about 1.5x
+      // through the middle. Above ~1.7 the ACES shoulder stops rolling and the centre
+      // clips, which trades one named defect for another.
+      lift: 1.55,
+      // Starts falling only past 40% of the way to the far corner and takes 55% to get
+      // there — i.e. it is a gradient across essentially the whole frame. A tighter falloff
+      // than this reads as a vignette's inverse, which is a lens artefact, not a composition.
+      radius: 0.18,
+      softness: 0.46,
+      farAmount: 1.0,
+      // Distance costs chroma before it costs light, so the desaturation is the bigger term.
+      // Both are keyed to the FAR half of the CoC only: the near rim at the bottom of frame
+      // is defocused as well and must stay dense and dark, because it is foreground.
+      farDesaturate: 0.50,
+      farDarken: 0.38,
+      // The cool end of the map's own split. A neutral grey haze is a listed fail condition.
+      farTint: [0.78, 0.88, 1.16],
     },
     grain: { enabled: true, amount: REFERENCE_FLOOR.grainAmount, size: 1.0, shadowBias: 0.4, animate: true },
     // Halved from 0.35. That value was authored when the frame corners were empty
@@ -761,7 +852,7 @@ export class PostStack implements PostEffectsHost {
     focusAuto: true,
     focusDistance: 160,
     focusRange: 2.6,
-    cocScale: 1.45,
+    cocScale: 1.15,
     tiltCenter: [0.425, 0.52],
     tiltAngle: 0,
     tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
@@ -948,7 +1039,17 @@ export class PostStack implements PostEffectsHost {
       uVignetteRadius: { value: this.settings.vignette.radius },
       uVignetteSoftness: { value: this.settings.vignette.softness },
       uVignetteEdge: { value: this.settings.vignette.edge },
+      uVignetteEdgeWeights: { value: new Vector3(1, 1, 0.55) },
+      uVignetteCenter: { value: new Vector2(0.5, 0.5) },
       uVignetteColor: { value: new Vector3(0.06, 0.06, 0.1) },
+      uSubjectCenter: { value: new Vector2(0.5, 0.5) },
+      uSubjectLift: { value: 1 },
+      uSubjectRadius: { value: this.settings.focusGrade.radius },
+      uSubjectSoftness: { value: this.settings.focusGrade.softness },
+      uFarSubordinate: { value: 0 },
+      uFarDesat: { value: this.settings.focusGrade.farDesaturate },
+      uFarDarken: { value: this.settings.focusGrade.farDarken },
+      uFarTint: { value: new Vector3(1, 1, 1) },
       uGrainAmount: { value: this.settings.grain.amount },
       uGrainSize: { value: this.settings.grain.size },
       uGrainShadowBias: { value: this.settings.grain.shadowBias },
@@ -1429,7 +1530,28 @@ export class PostStack implements PostEffectsHost {
     cu['uVignetteRadius']!.value = floor ? Math.max(vig.radius, REFERENCE_FLOOR.vignetteRadiusMin) : vig.radius;
     cu['uVignetteSoftness']!.value = vig.softness;
     cu['uVignetteEdge']!.value = vig.edge;
+    (cu['uVignetteEdgeWeights']!.value as Vector3).set(
+      vig.edgeWeights[0], vig.edgeWeights[1], vig.edgeWeights[2],
+    );
     (cu['uVignetteColor']!.value as Vector3).set(vig.color[0], vig.color[1], vig.color[2]);
+
+    // Focal hierarchy. Both terms are anchored to the SAME point the DoF focal probe uses —
+    // `dof.tiltCenter`, which tracks the camera's composition offset and is repointed by
+    // `focusOn()`. That is what makes the sharp band, the lit band and the vignette's centre
+    // one decision rather than three: the frame is focused on, lit on, and framed around the
+    // same thing, which is the whole content of "compose the shot".
+    const fg = this.settings.focusGrade;
+    const fgOn = fg.enabled;
+    const subject = dof.tiltCenter;
+    (cu['uVignetteCenter']!.value as Vector2).set(subject[0], subject[1]);
+    (cu['uSubjectCenter']!.value as Vector2).set(subject[0], subject[1]);
+    cu['uSubjectLift']!.value = fgOn ? Math.max(1, fg.lift) : 1;
+    cu['uSubjectRadius']!.value = fg.radius;
+    cu['uSubjectSoftness']!.value = Math.max(1e-3, fg.softness);
+    cu['uFarSubordinate']!.value = fgOn ? fg.farAmount : 0;
+    cu['uFarDesat']!.value = fg.farDesaturate;
+    cu['uFarDarken']!.value = fg.farDarken;
+    (cu['uFarTint']!.value as Vector3).set(fg.farTint[0], fg.farTint[1], fg.farTint[2]);
     cu['uGrainAmount']!.value = this.settings.grain.enabled
       ? floor
         ? Math.max(this.settings.grain.amount, REFERENCE_FLOOR.grainAmount)

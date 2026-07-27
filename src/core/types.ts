@@ -432,6 +432,13 @@ export interface BattleState {
   rngState: number;
   log: BattleLogEntry[];
   objective: Objective;
+  /**
+   * Consumable stock, one shared pile per side (FFT's party inventory).
+   * Plain data so it clones and replays with the rest of the state; read and
+   * written through `core/inventory.ts`, which installs the default pile on
+   * first use so a battle built without one is still valid.
+   */
+  inventories?: Map<Team, Map<ItemId, number>>;
 }
 
 export interface Objective {

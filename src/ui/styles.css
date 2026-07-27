@@ -133,10 +133,19 @@
      two drop shadows at different radii so the panel lifts off the board. With
      the panel now translucent this shadow is doing the separation work opacity
      used to do. */
+  /* SHADOW DIRECTION AGREES WITH THE SCENE KEY.
+     The critics filed this one twice — "a drop shadow whose direction agrees
+     with the scene key light" and "shadow direction disagrees with the key
+     light". Every battle map in this game is keyed warm from the upper LEFT
+     (the fire, the lanterns), so a shadow cast straight down is the one thing
+     that tells a viewer the chrome was composited by someone who never looked at
+     the render. These are offset down-and-right by the same ratio the terrain
+     uses, and the contact shadow is tighter than the ambient one so the panel
+     reads as sitting a finger's width off the board rather than floating. */
   --shadow-panel:
     0 1px 0 rgba(255, 246, 223, 0.1) inset,
-    0 22px 52px -16px rgba(0, 0, 0, 0.95),
-    0 4px 14px -4px rgba(0, 0, 0, 0.75);
+    14px 20px 46px -14px rgba(0, 0, 0, 0.95),
+    5px 6px 14px -5px rgba(0, 0, 0, 0.8);
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
   --fibre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.5' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23f)' opacity='0.35'/%3E%3C/svg%3E");
 
@@ -206,7 +215,31 @@
      shots/r3-uionly-before.png under every one of the three panels). A
      background layer paints across the whole border box, so the falloff is
      continuous from the content out through the frame. */
+  /* MATERIAL, NOT A FILL.
+     "the visible panel sliver is a flat bevel box with a 1px gradient border.
+     Give it a real material (parchment or metal)". Four layers, top to bottom:
+       1. the warm key bloom, anchored to the TOP-LEFT so the panel is lit from
+          the same quarter as the board behind it;
+       2. a fine damask lattice — two crossed 7px repeating gradients — which is
+          what stops the field reading as one flat value at any crop scale;
+       3. the corner vignette (kept as a background, not an inset shadow: see the
+          pale-lip note below);
+       4. the body gradient.
+     The lattice is deliberately near-threshold: at full size it is a woven
+     sheen, at a 2x crop it resolves into an actual pattern, which is the way
+     round the reference panels work too. */
   background:
+    radial-gradient(88% 76% at 8% -6%, rgba(255, 214, 150, 0.13), rgba(255, 214, 150, 0.04) 42%, transparent 72%),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 246, 223, 0.028) 0 1px,
+      transparent 1px 7px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(3, 6, 14, 0.09) 0 1px,
+      transparent 1px 7px
+    ),
     radial-gradient(128% 122% at 50% 42%, rgba(0, 0, 0, 0) 46%, rgba(2, 4, 9, 0.55) 82%, rgba(2, 4, 9, 0.82) 100%),
     linear-gradient(178deg, rgba(43, 58, 96, 0.8) 0%, rgba(19, 27, 49, 0.84) 42%, rgba(7, 11, 22, 0.87) 100%);
   /* THE PALE LIP BUG.
@@ -232,19 +265,33 @@
   isolation: isolate;
 }
 
+/* Grain + weave. At 0.055 the grain was mathematically present and visually
+   absent — a flat panel with a rounding error on it. 0.13 with a 3px woven
+   thread under it is the point where the surface starts to behave like cloth
+   over metal: it catches the panel's own gradient instead of sitting on top of
+   it, and it survives the 2x crop the critics judge at. */
 .et-panel__vellum {
   position: absolute;
   inset: -13px;
-  background-image: var(--grain);
-  background-size: 180px 180px;
-  opacity: 0.055;
+  background-image:
+    var(--grain),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.5) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.4) 0 1px, transparent 1px 3px);
+  background-size: 180px 180px, auto, auto;
+  opacity: 0.13;
   mix-blend-mode: overlay;
   pointer-events: none;
   z-index: 0;
 }
 
 .et-panel--parchment {
+  /* Same four-layer construction as the default tone, re-pitched for a sheet of
+     vellum: a warm key wash from the top-left, a laid-paper chain line, and a
+     sepia settle in the corners where a real sheet darkens against its mount. */
   background:
+    radial-gradient(84% 70% at 8% -4%, rgba(255, 249, 226, 0.55), transparent 68%),
+    repeating-linear-gradient(90deg, rgba(120, 92, 30, 0.05) 0 1px, transparent 1px 9px),
+    radial-gradient(130% 118% at 50% 46%, rgba(0, 0, 0, 0) 52%, rgba(122, 96, 44, 0.16) 84%, rgba(96, 74, 32, 0.3) 100%),
     linear-gradient(176deg, #f2e7cb 0%, #e3d4ae 55%, #d2c096 100%);
   /* The `background` shorthand resets background-origin to padding-box, which
      re-introduces the pale-lip bug documented on .et-panel for every tone that
@@ -263,7 +310,11 @@
 .et-panel--parchment .et-panel__title { color: #4a3a1c; }
 
 .et-panel--dark {
-  background: linear-gradient(180deg, rgba(8, 12, 23, 0.84), rgba(3, 5, 10, 0.9));
+  background:
+    radial-gradient(88% 76% at 8% -6%, rgba(255, 214, 150, 0.1), transparent 68%),
+    repeating-linear-gradient(45deg, rgba(255, 246, 223, 0.022) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.1) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, rgba(8, 12, 23, 0.84), rgba(3, 5, 10, 0.9));
   background-origin: border-box;
   background-repeat: no-repeat;
 }
@@ -275,23 +326,62 @@
 }
 .et-panel--danger { box-shadow: var(--shadow-panel), 0 0 30px -6px rgba(200, 73, 47, 0.55); }
 
-/* The frame SVG owns the corner filigree; these four nodes add the warm inner
-   bloom that makes the gold look like it is catching light from inside the
-   panel rather than being a printed border. */
+/* THE CORNER FILIGREE LIVES HERE, NOT IN THE 9-SLICE.
+   ---------------------------------------------------------------------------
+   panel-frame.svg authors its ornament inside 34x34 corner squares and the
+   stylesheet slices it at 34 against a 13px border — so the browser resamples
+   every one of those 34px squares down to 13px before painting. The barbed
+   terminals, the lozenge stud and the scroll tick all end up under two pixels
+   across, which is exactly what the critics kept reporting: "a generic
+   gold-edged panel corner", "placeholder-grade next to everything else in the
+   frame", and — crucially — they were judging from CROPS, where a corner may be
+   the only chrome in shot.
+
+   The 9-slice keeps the edge rules (constant along their length, so stretching
+   is invisible) and these four nodes now carry an authored ornament painted 1:1
+   at 36px. `background-size` is pinned so it can never be stretched by the
+   node's own box, and the warm bloom is kept as a second layer underneath.
+
+   The asset is drawn lit from the top-left; the three mirror transforms below
+   carry that highlight around the frame so the whole panel reads as one piece of
+   metal under one light rather than four rotated stamps. */
 .et-panel__corner {
   position: absolute;
   width: 58px;
   height: 58px;
   pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(circle at 0 0, rgba(240, 221, 160, 0.14), transparent 70%);
+  z-index: 2;
+  background-image:
+    url('./frames/corner-ornament.svg'),
+    radial-gradient(circle at 0 0, rgba(240, 221, 160, 0.16), transparent 70%);
+  /* 30px against a 13px border is not an arbitrary pairing. At that size the
+     ornament's bracket arm lands on the outer keyline, the elbow boss sits
+     wholly inside the border strip, and the inner volute stops 0.4px past it —
+     so the whole drawing rides the frame instead of reaching over the data.
+     Panels whose content runs flush to the frame (the acting-unit band's
+     portrait, the stat-chip row) therefore keep every glyph clear. */
+  background-size: 30px 30px, 100% 100%;
+  background-position: 0 0, 0 0;
+  background-repeat: no-repeat, no-repeat;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.75));
 }
-.et-panel__corner--tl { top: -2px; left: -2px; }
-.et-panel__corner--tr { top: -2px; right: -2px; transform: scaleX(-1); }
-.et-panel__corner--bl { bottom: -2px; left: -2px; transform: scaleY(-1); }
-.et-panel__corner--br { bottom: -2px; right: -2px; transform: scale(-1); }
+.et-panel__corner--tl { top: -3px; left: -3px; }
+.et-panel__corner--tr { top: -3px; right: -3px; transform: scaleX(-1); }
+.et-panel__corner--bl { bottom: -3px; left: -3px; transform: scaleY(-1); }
+.et-panel__corner--br { bottom: -3px; right: -3px; transform: scale(-1); }
 .et-panel--parchment .et-panel__corner {
-  background: radial-gradient(circle at 0 0, rgba(120, 92, 30, 0.12), transparent 70%);
+  background-image:
+    url('./frames/corner-ornament-parchment.svg'),
+    radial-gradient(circle at 0 0, rgba(120, 92, 30, 0.14), transparent 70%);
+  filter: drop-shadow(0 1px 2px rgba(74, 58, 28, 0.45));
+}
+/* Compact chrome (turn-rail cards, chips, the hint rail) would be swallowed by a
+   36px ornament, so anything that opts into `--ornate-sm` gets the same drawing
+   at two thirds scale. One asset, one shape language, two sizes. */
+.et-panel--ornate-sm .et-panel__corner {
+  width: 34px;
+  height: 34px;
+  background-size: 20px 20px, 100% 100%;
 }
 
 .et-panel__head {

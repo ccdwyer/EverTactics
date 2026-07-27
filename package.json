@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "assets": "node tools/build-assets.mjs",
-    "shot": "node tools/shoot.mjs"
+    "shot": "node tools/shoot.mjs",
+    "verify": "node tools/verify.mjs",
+    "verify:quick": "node tools/verify.mjs --quick",
+    "play": "node tools/play.mjs",
+    "metrics": "node tools/metrics.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

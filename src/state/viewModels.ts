@@ -19,6 +19,7 @@ import { CT_THRESHOLD, forecastTurns } from '@core/ct';
 import { computeDamage, resolveHit } from '@core/combat/formulas';
 import { attackDirection, type HitResult } from '@core/combat/hit';
 import { statusDef } from '@core/combat/status';
+import { inventoryOf, isConsumable } from '@core/inventory';
 import { getJob } from '@core/jobs';
 import { createRng } from '@core/rng';
 import { deriveStats, isKO, jobProgress, weaponOf } from '@core/unit';
@@ -215,6 +216,11 @@ export function commandItemsFor(state: BattleState, unit: Unit): CommandItemVM[]
   if (unit.secondaryAction && unit.secondaryAction !== primary) sets.push(unit.secondaryAction);
 
   for (const setId of sets) {
+    if (setId === 'item') {
+      const row = itemCommandRow(state, unit, `set:${setId}`, setLabel(setId));
+      if (row) items.push(row);
+      continue;
+    }
     const usable = abilityItemsFor(state, unit, setId);
     if (usable.length === 0) continue;
     items.push({
@@ -231,18 +237,8 @@ export function commandItemsFor(state: BattleState, unit: Unit): CommandItemVM[]
   }
 
   if (sets.every((s) => s !== 'item')) {
-    const items_ = abilityItemsFor(state, unit, 'item');
-    if (items_.length > 0) {
-      items.push({
-        id: 'item',
-        label: 'Item',
-        enabled: !unit.turn.acted,
-        opensSubmenu: true,
-        detail: String(items_.length),
-        hint: 'Use a consumable.',
-        icon: 'potion',
-      });
-    }
+    const row = itemCommandRow(state, unit, 'item', 'Item');
+    if (row) items.push(row);
   }
 
   items.push({
@@ -262,6 +258,53 @@ export function commandItemsFor(state: BattleState, unit: Unit): CommandItemVM[]
   });
 
   return items;
+}
+
+/**
+ * The Item row, which is the one command whose availability is a party-wide
+ * resource rather than a property of the unit.
+ *
+ * Returns `undefined` when the unit has no Item command at all. A unit that has
+ * it but whose party is out of everything still gets the row — disabled, with
+ * the empty satchel spelled out — because silently deleting the command reads
+ * as a bug to the player, where "Item — none left" reads as a consequence.
+ */
+function itemCommandRow(
+  state: BattleState,
+  unit: Unit,
+  id: string,
+  label: string,
+): CommandItemVM | undefined {
+  const known = abilitiesAvailable(unit, 'item');
+  if (known.length === 0) return undefined;
+
+  const usable = abilityItemsFor(state, unit, 'item');
+  // Count only what this unit could actually reach for, not the whole pile.
+  const inventory = inventoryOf(state, unit);
+  let held = 0;
+  for (const ability of known) held += inventory.count(ability.id);
+
+  if (usable.length === 0) {
+    return {
+      id,
+      label,
+      enabled: false,
+      detail: '0',
+      hint: 'The party has no consumables left.',
+      icon: 'potion',
+    };
+  }
+  return {
+    id,
+    label,
+    enabled: !unit.turn.acted,
+    opensSubmenu: true,
+    detail: String(held),
+    hint: unit.turn.acted
+      ? 'Already acted this turn.'
+      : `${held} consumable${held === 1 ? '' : 's'} in the party stock.`,
+    icon: 'potion',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,6 +343,15 @@ function shapeLabel(ability: Ability): string {
   return `${shape} ${ability.range.radius}`;
 }
 
+/**
+ * Rows for one skillset.
+ *
+ * Consumables are filtered by party stock, not merely greyed out: an empty
+ * satchel has nothing in it to point at, and FFT lists what you carry rather
+ * than what you could carry. The remaining count rides on the row label
+ * (`Potion ×6`) and again as a stat line in the detail panel. The "nothing left
+ * at all" case is announced by the Item *command* row — see `commandItemsFor`.
+ */
 export function abilityItemsFor(
   state: BattleState,
   unit: Unit,
@@ -307,16 +359,21 @@ export function abilityItemsFor(
 ): AbilityItemVM[] {
   const derived = deriveStats(unit);
   const silenced = unit.statuses.some((s) => s.status === 'silence');
+  const inventory = inventoryOf(state, unit);
   const out: AbilityItemVM[] = [];
 
   for (const ability of abilitiesAvailable(unit, setId)) {
+    const consumable = isConsumable(ability.id);
+    const stock = consumable ? inventory.count(ability.id) : 0;
+    if (consumable && stock <= 0) continue;
+
     let reason: string | undefined;
     if (ability.mp > 0 && silenced) reason = 'Silenced';
     else if (ability.mp > derived.mp) reason = `Needs ${ability.mp} MP`;
 
     out.push({
       id: ability.id,
-      name: ability.name,
+      name: consumable ? `${ability.name} ×${stock}` : ability.name,
       description: ability.description,
       mp: ability.mp,
       ct: ability.ct,
@@ -331,10 +388,10 @@ export function abilityItemsFor(
         { label: 'Accuracy', value: ability.accuracy > 0 ? `${ability.accuracy}%` : 'Always' },
         { label: 'Area', value: shapeLabel(ability) },
         { label: 'Formula', value: ability.formula },
+        ...(consumable ? [{ label: 'In stock', value: String(stock) }] : []),
       ],
     });
   }
-  void state;
   return out;
 }
 

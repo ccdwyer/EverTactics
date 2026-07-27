@@ -52,6 +52,7 @@ import {
   tickCt,
 } from './ct';
 
+import { inventoryOf, isConsumable } from './inventory';
 import { restoreRng } from './rng';
 import { deriveStats, effectiveRange, gainExp, gainJp, getAbility, getItem } from './unit';
 
@@ -978,13 +979,20 @@ export function applyCommand(state: BattleState, cmd: Command): BattleEvent[] {
       const ability = getAbility(cmd.ability);
       if (!ability) fail(`act: unknown ability "${cmd.ability}"`);
       if (ability.slot !== 'action') fail(`act: ${ability.name} is not an action ability`);
+      // The Item skillset is issued as an ordinary `act`, so the stock check has
+      // to live here as well as under `item` below.
+      requireStock(state, unit, ability);
       performAction(state, unit, ability, cmd.target, rng, events);
+      spendStock(state, unit, ability);
       break;
     }
 
     case 'item': {
       if (unit.turn.acted) fail(`${unit.name} has already acted this turn`);
-      performAction(state, unit, itemAbility(cmd.item), cmd.target, rng, events);
+      const ability = itemAbility(cmd.item);
+      requireStock(state, unit, ability);
+      performAction(state, unit, ability, cmd.target, rng, events);
+      spendStock(state, unit, ability);
       break;
     }
 
@@ -1025,6 +1033,24 @@ export function applyCommand(state: BattleState, cmd: Command): BattleEvent[] {
  * models the Item skillset — so Potion, Phoenix Down and the rest share the formula
  * and targeting code with everything else.
  */
+/**
+ * A consumable the party has run out of is an illegal command, exactly like
+ * moving twice: the menu is not supposed to offer it, so reaching here is a bug
+ * and says so. Checked before the action resolves, spent only after it has —
+ * a Potion refused by targeting is not a Potion drunk.
+ */
+function requireStock(state: BattleState, unit: Unit, ability: Ability): void {
+  if (!isConsumable(ability.id)) return;
+  if (!inventoryOf(state, unit).has(ability.id)) {
+    fail(`${unit.name} has no ${ability.name} left`);
+  }
+}
+
+function spendStock(state: BattleState, unit: Unit, ability: Ability): void {
+  if (!isConsumable(ability.id)) return;
+  inventoryOf(state, unit).consume(ability.id);
+}
+
 function itemAbility(item: ItemId): Ability {
   const ability = getAbility(item);
   if (ability) return ability;

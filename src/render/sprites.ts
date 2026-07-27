@@ -844,6 +844,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         float tail = lobe * pow(1.0 - t, 2.4) * step(-0.02, along) * 0.55;
 
         float occ = max(contact, max(pool, tail));
+        occ = 1.0; // DEBUG
 
         // Window to zero at the quad boundary. Without this a lobe that is still
         // non-zero at the edge cuts off on a straight line, which is exactly the
@@ -856,7 +857,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // Occluded ground picks up sky rather than going neutral, but by a hair:
         // this is a multiply and the sRGB encode amplifies the ratio, so a large
         // blue push desaturates warm stone more than it darkens it.
-        vec3 shade = vec3(1.0) - occ * vec3(1.0, 0.985, 0.93);
+        vec3 shade = vec3(1.0) - occ * vec3(0.0, 1.0, 1.0);
         gl_FragColor = vec4(shade, 1.0);
       }
     `,
@@ -866,7 +867,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
     premultipliedAlpha: true,
     transparent: true,
     depthWrite: false,
-    depthTest: true,
+    depthTest: false,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,

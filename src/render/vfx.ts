@@ -59,6 +59,7 @@ import {
 } from 'three';
 
 import type { Element } from '../core/types';
+import { VFX_LIGHT_PREFIX } from './lighting';
 import type { PostEffectsHost } from './post';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1723,7 +1724,13 @@ class VfxLightPool {
   constructor(group: Group, count: number) {
     for (let i = 0; i < count; i++) {
       const light = new PointLight(0xffffff, 0, 10, 2);
-      light.name = `VfxLight${i}`;
+      // Named from the rig's own constant, not from a string literal. `lighting.ts`
+      // scans the scene for this prefix and folds every live spell light into the
+      // scene's bounce/irradiance term, so a detonation warms the shadow side of
+      // the whole diorama for the frames it burns rather than only lighting
+      // whatever happens to fall inside its inverse-square reach. The rig reads
+      // these and never writes them — the envelope below stays authoritative.
+      light.name = `${VFX_LIGHT_PREFIX}${i}`;
       light.castShadow = false;
       group.add(light);
       this.slots.push({

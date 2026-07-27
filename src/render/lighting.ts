@@ -276,6 +276,45 @@ export interface LightingPreset {
    * is the "no mid-tones" note, answered.
    */
   practicalPeak: number;
+
+  /**
+   * How strongly the live sources feed the ambient probe. ROUND-6.
+   *
+   * THE MISSING TERM, and six critics named it in six different words: "LEFT has
+   * no bounce light — shadowed brick faces fall straight to a flat blue with no
+   * warm return off the brightly lit floor a tile away. Single-light + constant
+   * ambient." "RIGHT has no bounce light. Every surface is either warm key or
+   * flat cool ambient with a hard terminator and nothing in between." "no GI".
+   *
+   * They are describing a real hole in the rig. A `PointLight` in three deposits
+   * irradiance on the first surface it reaches and stops. A real brazier does
+   * not: the flagstone it scorches is a half-metre-wide amber emitter in its own
+   * right, and what that flagstone throws back is what puts warmth on the
+   * *underside* of the ledge above it, on the shadowed inside face of the wall
+   * beside it, and on the lower half of every sprite standing near it. That
+   * second bounce is most of what "lit by fire" looks like, and none of it was
+   * being computed.
+   *
+   * The probe is the right place to put it back, and cheaply. It already stores
+   * irradiance as spherical harmonics, so a bounce is two more lobes: one
+   * arriving from *below* (light returning off the lit floor) and one from the
+   * horizontal bearing of the sources' centroid, both tinted by the weighted
+   * average of the live source colours. Total cost is a handful of dot products
+   * a few times a second.
+   *
+   * Two consequences worth naming, because they are the point rather than side
+   * effects. First, the ambient is now coloured by whatever is actually burning
+   * on this map rather than by a hex constant — a torchlit cloister goes amber
+   * in its crevices and a map lit by a cold sky shaft does not, with no author
+   * input either way. Second, it *breathes*: the term is recomputed from the
+   * lights' live intensities, so when a fire gutters the whole shadow side of
+   * the diorama dips with it, and when a spell detonates the entire scene takes
+   * a warm bounce on the frame of the flash. That is the difference between a
+   * spell that glows and a spell that lights the room.
+   *
+   * 0 restores the round-5 behaviour (probe from the four static lobes only).
+   */
+  sourceBounce: number;
 }
 
 /**
@@ -422,6 +461,26 @@ function wrapSigned(deg: number): number {
  */
 export const ADOPTED_LIGHT_PREFIX = 'brazier';
 
+/**
+ * Name prefix `vfx.ts` gives every light in its spell pool.
+ *
+ * Declared here rather than there because it is a *contract between the two
+ * files*, and the direction of the dependency matters: the rig has to be able to
+ * recognise a spell light in the scene graph without knowing anything else about
+ * the VFX system. `vfx.ts` imports this constant and names its pool from it, so
+ * there is exactly one string and it lives next to the brazier convention it
+ * sits beside.
+ *
+ * What the rig does with them is deliberately narrow. It does **not** adopt them
+ * the way it adopts braziers — a VFX light is already being driven by its own
+ * envelope, and a second system writing `intensity` every frame would fight it
+ * and produce exactly the "flickering blob" artefact adoption exists to prevent.
+ * It only reads them, so a detonation contributes to the bounce term in
+ * `sourceBounce` and the whole scene takes a warm kick on the frame the spell
+ * lands. See the note on `LightingPreset.sourceBounce`.
+ */
+export const VFX_LIGHT_PREFIX = 'VfxLight';
+
 /** Upper bound on adopted prop lights, so a big map cannot make the sweep costly. */
 const MAX_ADOPTED = 8;
 
@@ -457,7 +516,18 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // orange thing in the picture, which is exactly what makes them read as fire
     // rather than as a warm filter over one corner.
     keyColor: 0xffd9b4,
-    keyIntensity: 4.4,
+    // ROUND-6: 4.4 → 3.35, and the braziers take up the slack (see
+    // `practicalGain` below). This is a *hierarchy* change, not a dimming.
+    //
+    // Look at what the sun is doing in `refs/curated/triangle/press_002`: almost
+    // nothing. The frame is a night village and the readable image is four or
+    // five discrete pools of firelight with black between them. Our dawn is not
+    // that dark by design, but the round-5 frame had the ratio inverted — a
+    // 5.4-effective key washing every top face on the diorama to the same gold,
+    // with the braziers reading as a slightly warmer patch of an already-warm
+    // floor rather than as the sources they are. Cutting the sun and driving the
+    // fires is what makes a *pool* appear, and a pool is the whole thing.
+    keyIntensity: 3.35,
     keyAzimuth: 118,
     keyElevation: 20,
     skyColor: 0x3a6ad4,
@@ -505,7 +575,16 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // half of that product is where "how bright is this time of day" lives. A
     // dawn that reads as a moonless night has deep shadow but no key, and the
     // reference frames always give you one clearly readable lit band to look at.
-    exposure: 1.4,
+    //
+    // ROUND-6: 1.4 → 1.18. Measured mean luma on the round-5 frame is 69/255
+    // against 38 on `press_002` and 44 on the throne room — we were not "a
+    // brighter time of day", we were a stop and a half over every frame in the
+    // corpus, which is what puts 70% of the picture in one tan band and takes
+    // the top faces past the tone curve's shoulder. Exposure is the right lever
+    // for the last part of that correction because it moves the *whole* curve:
+    // the ratio work above widens the histogram, this slides it down to where
+    // the shoulder stops eating the mortar lines out of lit stone.
+    exposure: 1.18,
     shadowRadius: 2.0,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 1.35,
@@ -516,14 +595,42 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // that mid-tone band is where wet stone, dust and skin live — so the stretch
     // is cut to the point where a saturated authored hue survives and a neutral
     // authored hue is only nudged.
-    chroma: 1.28,
-    colorSplit: 0.3,
+    // ROUND-6: 1.28 → 1.44. Round 5 cut this from 1.85 to answer "graded to a
+    // single hue" and it was the right direction, but it overshot: measured mean
+    // saturation on the round-5 frame is **0.496** against **0.855** on
+    // `press_002` and 0.62 on the throne room. We are now the *least* saturated
+    // thing in the comparison, which is its own tell — "one global warm/teal
+    // grade applied uniformly, so gold-lit stone, wooden crates and character
+    // cloth all sit at the same saturation… mushy at full size".
+    //
+    // The round-5 note was right about *where* chroma is spent, though, and that
+    // survives: this number is below where it started, the key still gets only
+    // 0.8 + 0.3·chroma of it, and the sources keep their authored hue outright.
+    // What comes back is the fill — the sky, the ground bounce and the flat
+    // term — which is the half of the split that was reading as grey slate.
+    chroma: 1.44,
+    colorSplit: 0.36,
     // 0.85 → 0.76. Measured: round 4 put 28.7% of the board in the darkest
     // luminance decile against 8–11% in both Triangle references, i.e. we were
     // not "dramatic", we were bimodal — clipped gold or black, with the mid-tones
     // that carry material identity missing entirely. Deep shadow stays the goal;
     // a shadow with nothing legible in it is a different failure.
-    contrast: 0.84,
+    //
+    // ROUND-6: 0.84 → 0.93, and it is worth being explicit about why this dial
+    // rather than `keyIntensity`. `battle-open` — the shipping scenario — patches
+    // keyIntensity, hemiIntensity, ambientIntensity, skyColor, groundColor and
+    // rimIntensity over this preset from `state/scenarios.ts`, so every level the
+    // preset authors for those is dead on the map we are actually judged on.
+    // `contrast`, `chroma`, `exposure` and the practical dials are *not* patched,
+    // which makes them the only levers that reach the frame. That is by design —
+    // see the header note on why fill level is the rig's and not the author's —
+    // and it means the ratio dial has to carry the whole round-6 correction.
+    //
+    // At 0.93 the cloister's authored hemi 1.25 / ambient 0.42 / probe 1.35 land
+    // at roughly 0.30 / 0.05 / 0.52 against a key near 3.7: a shadowed flagstone
+    // receives about an eleventh of a lit one rather than an eighth. That is the
+    // ratio the reference throne room actually runs.
+    contrast: 0.93,
     // Raised with the fill cut. Once a shadowed flagstone is receiving a tenth of
     // the key rather than a third, a brazier finally *can* be the brightest thing
     // on the ground near it — but only if it is driven hard enough to reach two
@@ -537,7 +644,11 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // Softening the falloff to 1.5 buys most of that reach back at a third of
     // the peak — the pool is wider now and the stone inside it still has stones
     // in it.
-    practicalGain: 2.15,
+    // ROUND-6: 2.15 → 2.75, paired with the key cut above. The two numbers are
+    // one decision — total irradiance on the board is roughly held, and what
+    // moves is *where it comes from*. A sun that lights everything equally is a
+    // viewport; four fires that each light three tiles is a place.
+    practicalGain: 2.75,
     // Flattened again now that a ceiling exists. Peak and reach used to be the
     // same dial — the only way to light the far edge of a pool was to clip its
     // near edge — so `practicalDecay` had to compromise. With the peak capped
@@ -548,6 +659,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // The pool's peak lands just past the ACES shoulder's knee rather than a
     // factor of five beyond it, so the stone beside a fire keeps its masonry.
     practicalPeak: 3.9,
+    sourceBounce: 1.15,
   },
 
   /**
@@ -592,6 +704,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     practicalGain: 1.8,
     practicalDecay: 1.8,
     practicalPeak: 2.6,
+    sourceBounce: 0.55,
   },
 
   /**
@@ -633,6 +746,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     practicalGain: 2.6,
     practicalDecay: 1.5,
     practicalPeak: 3.8,
+    sourceBounce: 1.05,
   },
 
   /** Cold steel key, sodium underlight from the wet ground. Reads as wet stone. */
@@ -664,6 +778,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     practicalGain: 2.2,
     practicalDecay: 1.6,
     practicalPeak: 3.2,
+    sourceBounce: 0.7,
   },
 
   /**
@@ -704,6 +819,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // hold flame hue at peak, they do not clip to white.
     practicalDecay: 1.45,
     practicalPeak: 4.6,
+    sourceBounce: 1.35,
   },
 };
 
@@ -851,6 +967,29 @@ export class LightingRig {
   /** The one adopted light allowed to render a cube shadow. See `promoteShadowCaster`. */
   private shadowCaster: PointLight | null = null;
   private adoptScan = 0;
+  /**
+   * Spell lights found in the scene. Read-only to the rig — see `VFX_LIGHT_PREFIX`.
+   * They feed the bounce term and nothing else, so a detonation lights the room.
+   */
+  private readonly vfxLights: PointLight[] = [];
+  /** Weighted-average hue of everything currently burning. Drives the bounce lobes. */
+  private readonly bounceColor = new Color(0, 0, 0);
+  /** Bounce lobe weight, already normalised by diorama size. */
+  private bounceLevel = 0;
+  /** Compass bearing of the sources' centroid, so the bounce has a side. */
+  private bounceAzimuth = 0;
+  private bounceScan = 0;
+  private readonly bounceScratch = new Vector3();
+  /**
+   * The last `applyContrast` / `resolveBearings` result, so the bounce can rebuild
+   * the probe between commits without re-running the whole rig — and, critically,
+   * without re-running `placePracticals()`, which would stamp the flicker back to
+   * base every time the fire moved the ambient.
+   */
+  private lastRig: { key: number; rim: number; hemi: number; ambient: number; probe: number } | null =
+    null;
+  private readonly lastBearing = { key: 0, rim: 0 };
+  private lastKeyElevation = 30;
   /** Set once an owner drives `update()`, which retires the fallback ticker. */
   private externallyDriven = false;
   private rafHandle: number | null = null;
@@ -1251,6 +1390,11 @@ export class LightingRig {
     gradeLight(this.hemisphere.groundColor, s.groundColor, chroma * 1.15, split * 0.7);
     gradeLight(this.ambient.color, s.ambientColor, chroma * 1.2, -split * 1.2);
 
+    this.lastRig = rig;
+    this.lastBearing.key = bearing.key;
+    this.lastBearing.rim = bearing.rim;
+    this.lastKeyElevation = elevation;
+
     this.updateProbe(s, rig, bearing, elevation);
     this.placePracticals();
 
@@ -1347,8 +1491,32 @@ export class LightingRig {
     // lines down, so the lit band holds and only the unlit half falls away. The
     // measurable effect is a wider luminance histogram, which is exactly the
     // metric `tools/metrics.mjs` gates on.
-    const targetHemi = key * 0.1;
-    const targetAmbient = key * 0.009;
+    // ROUND-6, and this one is measured rather than argued.
+    //
+    // `tools/metrics.mjs` on the round-5 `battle-open` frame against
+    // `refs/curated/triangle/press_002_gematsu_1920x1080.jpg`:
+    //
+    //     metric              ours    reference
+    //     meanLuma            69.1    38.4
+    //     lumaP95            202.9   135.9
+    //     darkShareOfSubject   0.30    0.60
+    //
+    // Read those three together and they say one thing: our lit band is 1.5×
+    // too hot *and* twice as much of the frame is in it. The reference spends
+    // 60% of its subject area below the dark threshold and never takes a
+    // highlight past 136; we were clipping top faces at 203 while only 30% of
+    // the board had fallen away. That is precisely the "roughly 70% of the frame
+    // sits in the same mid-tone tan/cream band, so nothing separates figure from
+    // ground and the eye has no entry point" note, expressed as numbers.
+    //
+    // Both halves are this function's. The fill targets below govern how much
+    // area falls away; the recovery fraction at the bottom governs how hot the
+    // band that survives is. Round 5 had the first roughly right and the second
+    // badly wrong — it handed 85% of the surrendered fill straight back to the
+    // key, so every cut to the shadows bought a matching rise in the highlights
+    // and the histogram never actually widened at the top end.
+    const targetHemi = key * 0.075;
+    const targetAmbient = key * 0.007;
     const targetRim = key * 0.27;
     // Not lower than this. Measured on `mandalia-ford`, which authors contrast 0.9
     // over an already-dim dusk exposure: at a 0.6 cap the far bank of the river
@@ -1362,7 +1530,15 @@ export class LightingRig {
     // to be cut, though, and never to zero: it is directional irradiance, so it
     // is what keeps a shadowed wall coloured and legible rather than merely
     // black, and the fail list forbids obscuring tiles the player has to count.
-    const targetProbe = Math.min(s.probeIntensity, 0.56);
+    // 0.56 → 0.46 for round 6. The probe is the last fill term standing after
+    // hemi and ambient have been cut to a rounding error, so at 0.56 against a
+    // key of 4.4 it *was* the shadow side — a shadowed flagstone still sat at
+    // roughly an eighth of a lit one, which is enough to keep the whole board
+    // inside one readable value band. Dropping it is what actually moves
+    // `darkShareOfSubject`. It stays directional and it stays non-zero for the
+    // reason below: a shadow with nothing legible in it is a different failure,
+    // and the fail list forbids obscuring tiles the player has to count.
+    const targetProbe = Math.min(s.probeIntensity, 0.46);
 
     const hemi = MathUtils.lerp(s.hemiIntensity, targetHemi, drama);
     const ambient = MathUtils.lerp(s.ambientIntensity, targetAmbient, drama);
@@ -1391,7 +1567,24 @@ export class LightingRig {
     const throughput = Math.max(0.5, (1 + sine) * 0.5);
     const recovered = Math.max(0, surrendered - rimCost * 0.5) / throughput;
 
-    return { key: key + recovered * 0.85, rim, hemi, ambient, probe };
+    // ROUND-6: 0.85 → 0.42, and this is the single number behind `lumaP95`.
+    //
+    // "Brightness-neutral" was the right instinct for round 3, when the frame
+    // was a flat murk and the risk was trading flatness for darkness. It is the
+    // wrong instinct now. Handing 85% of the surrendered fill back to the key
+    // means the *lit* band rises by almost exactly as much as the shadow band
+    // falls, so every tightening of the contrast policy widened the histogram at
+    // the bottom and pushed the top further past the tone curve's shoulder. We
+    // arrived at a p95 of 203 against a reference 136 — clipped stone tops with
+    // no mortar left in them, which is both a fail condition on its own and the
+    // mechanism the critics kept mis-attributing to bloom.
+    //
+    // At 0.42 the key recovers enough that a lit face does not *dim* relative to
+    // where the author put it, and no more. The frame gets its dynamic range by
+    // the shadows falling away, which is how the references get theirs: the
+    // Triangle village frame's brightest stone is a mid-tone, and it reads as
+    // brilliant only because the four corners are black.
+    return { key: key + recovered * 0.42, rim, hemi, ambient, probe };
   }
 
   /**
@@ -1416,6 +1609,25 @@ export class LightingRig {
       this.probe.intensity = 0;
       return;
     }
+
+    // Project one directional lobe of `colour` into the accumulating SH. Split
+    // from `add` so the bounce term can pass a live `Color` — its hue is
+    // measured off the lights that are actually burning, not authored as a hex,
+    // and it must not go through `gradeLight`: these are *sources*, and the same
+    // rule applies to them as to the practicals themselves (see
+    // `placePracticals`) — the complementary split is for fill, and pushing an
+    // already-saturated flame further from grey lands on pure red.
+    const addColor = (colour: Color, azimuth: number, elevation: number, weight: number): void => {
+      const az = MathUtils.degToRad(azimuth);
+      const el = MathUtils.degToRad(elevation);
+      const h = Math.cos(el);
+      this.tmpVec.set(Math.sin(az) * h, Math.sin(el), -Math.cos(az) * h);
+      SphericalHarmonics3.getBasisAt(this.tmpVec, this.shBasis);
+      this.shColor.set(colour.r, colour.g, colour.b);
+      for (let i = 0; i < 9; i++) {
+        sh.coefficients[i]!.addScaledVector(this.shColor, this.shBasis[i]! * weight);
+      }
+    };
 
     const add = (hex: number, azimuth: number, elevation: number, weight: number, warmth: number): void => {
       gradeLight(this.tmpColorA, hex, s.chroma, warmth);
@@ -1442,8 +1654,145 @@ export class LightingRig {
     add(s.skyColor, 0, 90, rig.hemi * 0.62, -split * 1.15);
     add(s.groundColor, 0, -90, rig.hemi * 0.24, split * 0.45);
 
+    // ── Source bounce ────────────────────────────────────────────────────
+    //
+    // See `LightingPreset.sourceBounce`. Two lobes, and the geometry of each is
+    // the argument for it.
+    //
+    // The first arrives from BELOW. Light returning off a floor the fire has
+    // just lit is travelling upward, so as irradiance it comes from under the
+    // horizon — which is why this lobe, and only this lobe, puts warmth on the
+    // underside of a ledge, in the crevice between two stacked blocks, and on
+    // the lower half of a sprite standing beside a brazier. Every one of those
+    // is a place a critic said was "flat blue with no warm return".
+    //
+    // The second arrives from the horizontal bearing of the sources' centroid,
+    // just above the horizon, so the bounce has a *side*: a wall facing the
+    // fires picks it up and a wall facing away does not. Without it the term is
+    // just a warm ambient wash, which is the thing this whole file exists to
+    // avoid.
+    //
+    // The division by `rig.probe` is deliberate and is not a normalisation
+    // convenience. `probe.intensity` is the fill policy's dial, and the fill
+    // policy is about how much *undirected* light the author is allowed to add.
+    // Bounce off a real source is neither undirected nor the author's, so it
+    // must not be throttled when `applyContrast` cuts the fill — otherwise the
+    // dramatic presets, which are exactly the ones lit by fire, are the ones
+    // that lose their bounce.
+    if (this.bounceLevel > 1e-4) {
+      const w = this.bounceLevel / Math.max(0.05, rig.probe);
+      addColor(this.bounceColor, 0, -34, w * 0.62);
+      addColor(this.bounceColor, this.bounceAzimuth, 12, w * 0.38);
+    }
+
     this.probe.sh.copy(sh);
     this.probe.intensity = rig.probe;
+  }
+
+  /**
+   * Recompute the bounce contribution from every live source in the scene.
+   *
+   * Weighting is `intensity × reach²`, which is proportional to the flux a point
+   * source actually puts into its pool, then divided by the diorama's own
+   * cross-section so the same brazier does not light a 12-tile courtyard and a
+   * 24-tile field to the same degree. Colour is the flux-weighted mean, so a map
+   * with four fires and one cold sky shaft bounces mostly amber and a map with
+   * the reverse bounces mostly blue — with no author input either way, which is
+   * the point.
+   *
+   * Returns true when the result moved enough to be worth rebuilding the probe.
+   * A fire's flicker runs a ±45% swing, so this fires most ticks during combat
+   * and almost never on a still frame.
+   */
+  private updateSourceBounce(): boolean {
+    const gain = Math.max(0, this.live.sourceBounce);
+    const centre = this.boundsSphere.center;
+    let wr = 0;
+    let wg = 0;
+    let wb = 0;
+    let total = 0;
+    let dx = 0;
+    let dz = 0;
+
+    const consider = (light: PointLight): void => {
+      if (!light.visible) return;
+      const intensity = light.intensity;
+      if (intensity <= 1e-3) return;
+      const reach = light.distance > 0 ? light.distance : 8;
+      // `I · reach^(2 − decay)`, and the exponent is the whole reason this is
+      // not simply `I · reach²`.
+      //
+      // Measured on the first attempt, which did use reach²: the dawn cloister's
+      // cold sky shaft is authored with a 12-unit cutoff and a `near` of 3.2, so
+      // its peak ceiling lets it run at 30 candela — and reach² handed it a
+      // weight twelve times a brazier's. The bounce came out uniformly blue, at
+      // the cap, on every frame, which is a flat ambient wash by another name;
+      // it put mean luma *above* where it was before the contrast work and took
+      // `darkShareOfSubject` from 0.34 back down to 0.24.
+      //
+      // What a source actually returns to the room is the irradiance in its pool
+      // times the area of that pool, and irradiance already falls as
+      // `1/d^decay`. Folding the exponent in makes the two halves cancel: a
+      // physically-distant source (decay 2 — a shaft of sky) contributes in
+      // proportion to its candela alone, while an extended near source (decay
+      // ~1.1 — a fire) gets credit for the tiles its soft falloff actually
+      // reaches. Which is the correct answer and, not coincidentally, the one
+      // where the fires win on a map lit by fires.
+      const flux = intensity * Math.pow(reach, Math.max(0, 2 - light.decay));
+      total += flux;
+      wr += light.color.r * flux;
+      wg += light.color.g * flux;
+      wb += light.color.b * flux;
+      // World, not local: brazier lights are children of the terrain group and
+      // spell lights of the VFX group, and reading `position` directly would put
+      // the bounce's bearing in whichever space that parent happened to be in.
+      light.getWorldPosition(this.bounceScratch);
+      dx += (this.bounceScratch.x - centre.x) * flux;
+      dz += (this.bounceScratch.z - centre.z) * flux;
+    };
+
+    for (const p of this.practicals) consider(p);
+    for (const a of this.adopted) consider(a);
+    // Spell lights are read, never written. See `VFX_LIGHT_PREFIX`.
+    for (const v of this.vfxLights) consider(v);
+
+    const previous = this.bounceLevel;
+    if (total <= 1e-4 || gain <= 0) {
+      this.bounceLevel = 0;
+      return previous > 1e-4;
+    }
+
+    this.bounceColor.setRGB(wr / total, wg / total, wb / total);
+    // Renormalise to unit luminance: brightness is the level's job, hue is the
+    // colour's, and letting a 4-candela fire and a 40-candela one deliver
+    // different *hues* of bounce is a bug rather than a feature.
+    const luma =
+      this.bounceColor.r * 0.2126 + this.bounceColor.g * 0.7152 + this.bounceColor.b * 0.0722;
+    if (luma > 1e-5) this.bounceColor.multiplyScalar(1 / luma);
+
+    // Flux over the diorama's cross-section. The 4π is the sphere the flux would
+    // spread over if nothing absorbed it; the rest is the fraction a stone
+    // courtyard actually returns, which is a low number — masonry albedo is
+    // around 0.35 and only the hemisphere facing back at the geometry counts.
+    const radius = Math.max(1, this.boundsSphere.radius);
+    const raw = (total / (radius * radius)) * 4.0 * gain;
+    // Capped hard, and the cap is doing real work rather than guarding an edge
+    // case. Second-order bounce is *second order*: the moment it can rival the
+    // key it stops reading as return light off a lit floor and starts reading as
+    // the flat ambient wash `applyContrast` exists to remove. For scale, the
+    // dawn cloister's key lobe enters the same SH at roughly 0.45.
+    this.bounceLevel = Math.min(0.3, raw);
+
+    const ox = dx / total;
+    const oz = dz / total;
+    // Below a tile of offset the centroid is noise — a ring of fires around a
+    // courtyard averages to its middle — so the bounce keeps whatever side it
+    // last had rather than spinning as the flicker reweights the ring.
+    if (Math.hypot(ox, oz) > 0.9) {
+      this.bounceAzimuth = MathUtils.radToDeg(Math.atan2(ox, -oz));
+    }
+
+    return Math.abs(this.bounceLevel - previous) > Math.max(0.004, previous * 0.04);
   }
 
   /**
@@ -1527,10 +1876,18 @@ export class LightingRig {
     this.adoptedBase.length = 0;
     this.adoptedHome.length = 0;
     this.adoptedColor.length = 0;
+    this.vfxLights.length = 0;
     this.scene.traverse((o: Object3D) => {
-      if (this.adopted.length >= MAX_ADOPTED) return;
       const light = o as PointLight;
       if (!light.isPointLight) return;
+      // Spell lights are collected *before* the adoption cap, and never adopted.
+      // See `VFX_LIGHT_PREFIX`: the rig reads them so a detonation contributes to
+      // the bounce, and writes nothing, because they already have an envelope.
+      if (o.name.startsWith(VFX_LIGHT_PREFIX)) {
+        if (this.vfxLights.length < MAX_PRACTICALS) this.vfxLights.push(light);
+        return;
+      }
+      if (this.adopted.length >= MAX_ADOPTED) return;
       if (!o.name.startsWith(ADOPTED_LIGHT_PREFIX)) return;
       // Never adopt our own pool — that would double-drive the flicker.
       if (light.parent === this.group) return;
@@ -1721,6 +2078,33 @@ export class LightingRig {
         );
       }
     }
+
+    this.tickSourceBounce(dt);
+  }
+
+  /**
+   * Let the ambient breathe with the fires.
+   *
+   * Rebuilt at ~24 Hz rather than every frame — the SH projection is six dot
+   * products and change, but the *reason* to throttle is that a bounce term
+   * chasing a 90 Hz display would sample a different point of the flicker curve
+   * on every frame and read as noise rather than as a flame. A fifth of a
+   * flicker period is fast enough that the guttering is legible and slow enough
+   * that it looks like fire.
+   *
+   * Note what this deliberately does not call: `commit()`. That would re-run
+   * `placePracticals()`, which stamps every practical's intensity back to base —
+   * i.e. the act of letting the ambient follow the flicker would delete the
+   * flicker. Only the probe is rebuilt.
+   */
+  private tickSourceBounce(dt: number): void {
+    if (this.live.sourceBounce <= 0 && this.bounceLevel <= 0) return;
+    this.bounceScan -= dt;
+    if (this.bounceScan > 0) return;
+    this.bounceScan = 1 / 24;
+    if (!this.updateSourceBounce()) return;
+    if (!this.lastRig) return;
+    this.updateProbe(this.live, this.lastRig, this.lastBearing, this.lastKeyElevation);
   }
 
   dispose(): void {

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+  <!--
+    Parchment-tone twin of corner-ornament.svg. Same drawing, umber/bronze
+    palette: the parchment panel is an opaque physical document, so a bright
+    gold ornament on it reads as a sticker. The relief cast goes to a warm
+    sepia rather than near-black for the same reason.
+  -->
+  <defs>
+    <linearGradient id="br" x1="0" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#e6cf95"/>
+      <stop offset="0.24" stop-color="#c6a45c"/>
+      <stop offset="0.55" stop-color="#8f6f2c"/>
+      <stop offset="0.82" stop-color="#664d1e"/>
+      <stop offset="1" stop-color="#3f2f13"/>
+    </linearGradient>
+    <linearGradient id="brEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2e0b0"/>
+      <stop offset="0.55" stop-color="#b8934a"/>
+      <stop offset="1" stop-color="#5b451a"/>
+    </linearGradient>
+    <radialGradient id="brGem" cx="0.34" cy="0.3" r="0.78">
+      <stop offset="0" stop-color="#fdf1cf"/>
+      <stop offset="0.45" stop-color="#d8b96e"/>
+      <stop offset="1" stop-color="#6e5522"/>
+    </radialGradient>
+  </defs>
+
+  <g transform="translate(1.1,1.3)" fill="#4a3a1c" opacity="0.4">
+    <path d="M3 3 H35.5 V8.2 H8.2 V35.5 H3 Z"/>
+    <path d="M35.5 3 L41 5.9 L35.5 8.8 Z"/>
+    <path d="M3 35.5 L5.9 41 L8.8 35.5 Z"/>
+    <path d="M14.2 8.4 L19.9 14.1 L14.2 19.8 L8.5 14.1 Z"/>
+    <path d="M12 24 C12 17.4 17.4 12 24 12 L24 15.4 C19.3 15.4 15.4 19.3 15.4 24 Z"/>
+  </g>
+
+  <path d="M3 3 H35.5 V8.2 H8.2 V35.5 H3 Z" fill="url(#br)"/>
+  <path d="M3 3 H35.5 V4.1 H4.1 V35.5 H3 Z" fill="#f6e8c0" opacity="0.6"/>
+  <path d="M8.2 8.2 H35.5 V7.1 H7.1 V35.5 H8.2 Z" fill="#332510" opacity="0.45"/>
+
+  <path d="M35.5 3 L41 5.9 L35.5 8.8 Z" fill="url(#brEdge)"/>
+  <path d="M3 35.5 L5.9 41 L8.8 35.5 Z" fill="url(#brEdge)"/>
+
+  <path d="M14.2 8.4 L19.9 14.1 L14.2 19.8 L8.5 14.1 Z" fill="#3a2b12"/>
+  <path d="M14.2 9.5 L18.8 14.1 L14.2 18.7 L9.6 14.1 Z" fill="url(#brEdge)"/>
+  <path d="M14.2 11.1 L17.2 14.1 L14.2 17.1 L11.2 14.1 Z" fill="url(#brGem)"/>
+  <path d="M14.2 11.1 L15.7 12.6 L13.4 14.4 L11.2 14.1 Z" fill="#fdf6e2" opacity="0.6"/>
+
+  <path d="M12 24 C12 17.4 17.4 12 24 12 L24 14.6 C18.8 14.6 14.6 18.8 14.6 24 Z" fill="#8f6f2c" opacity="0.9"/>
+  <path d="M12 24 C12 17.4 17.4 12 24 12 L24 13 C18.1 13 13 18.1 13 24 Z" fill="#d8b96e" opacity="0.5"/>
+  <circle cx="26.4" cy="12.6" r="1.5" fill="url(#brEdge)"/>
+  <circle cx="12.6" cy="26.4" r="1.5" fill="url(#brEdge)"/>
+
+  <path d="M20 5.6 H33.6 V6.6 H20 Z" fill="#8f6f2c" opacity="0.55"/>
+  <path d="M5.6 20 H6.6 V33.6 H5.6 Z" fill="#8f6f2c" opacity="0.55"/>
+</svg>

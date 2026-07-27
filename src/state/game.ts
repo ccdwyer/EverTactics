@@ -24,6 +24,7 @@ import * as THREE from 'three';
 
 import { SPRITE_LAYER, installPostStack, markAsSprite, type PostStackPipeline } from './render';
 import { ALL_ABILITIES, bootstrapContent } from './content';
+import { ITEMS_BY_ID } from './items';
 import { actionSetOf } from './abilityIndex';
 import { canAimAt, coveredTiles, legalTargets, primaryTargetAt } from './targeting';
 import {
@@ -45,7 +46,8 @@ import {
 } from './scenarios';
 import { formationScreenVM, jobScreenVM, rosterScreenVM } from './screens';
 
-import { decideTurn } from '@core/ai';
+import { createAiWorld, decideTurn, type AiWorld } from '@core/ai';
+import { stockAwareWorld } from '@core/inventory';
 import { IllegalCommandError, advance, affectedTiles, applyCommand } from '@core/battle';
 import {
   buildOccupancy,
@@ -489,6 +491,18 @@ export class Game {
     return this.state.active === undefined ? undefined : this.state.units.get(this.state.active);
   }
 
+  /**
+   * The world the AI reasons about: the real ability table, plus the one rule
+   * the evaluator does not know on its own — a consumable the side has run out
+   * of is not an option. Without this the AI happily plans "drink a Potion" and
+   * the reducer rejects the command, wasting the unit's turn.
+   *
+   * Rebuilt per turn because the stock it closes over changes as items are used.
+   */
+  private aiWorld(): AiWorld {
+    return stockAwareWorld(createAiWorld({ abilities: ALL_ABILITIES, items: ITEMS_BY_ID }));
+  }
+
   /** Hand the turn to whoever holds it. Player → menu; enemy → AI. */
   async beginTurn(): Promise<void> {
     if (this.disposed || this.shot) return;
@@ -521,7 +535,7 @@ export class Game {
     // it emits goes through the exact same reducer the player's input does.
     await sleep(280);
     const commands = decideTurn(this.state, unit.id, {
-      abilities: ALL_ABILITIES,
+      world: this.aiWorld(),
       personalities: this.built.personalities,
     });
     for (const command of commands) {

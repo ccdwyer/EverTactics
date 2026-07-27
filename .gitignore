@@ -1,6 +1,7 @@
 node_modules/
 dist/
 shots/
+!shots/milestones/
 .vite/
 *.log
 refs/
