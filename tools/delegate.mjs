@@ -110,6 +110,25 @@ Respond with a first line of exactly PASS or FAIL, then your reasoning. Use FAIL
 is wrong. Be concrete: name files and lines.
 `.trim();
 
+/**
+ * Refuse to run on a dirty tree.
+ *
+ * The first live test of this harness diffed against HEAD while another agent was
+ * concurrently editing src/render/. Grok made no changes at all, but the diff was
+ * full of the other agent's work, so Sol reviewed someone else's code as though it
+ * were Grok's — and quite correctly failed it for violating the single-file scope.
+ * Attributing one worker's diff to another is worse than no review.
+ */
+const dirty = git('status', '--porcelain');
+if (dirty) {
+  console.error(
+    'FAIL: working tree is dirty. This harness diffs against HEAD to show the reviewer what was\n' +
+    'built, so any pre-existing change would be attributed to the builder. Commit or stash first.\n\n' +
+    dirty.split('\n').slice(0, 15).join('\n'),
+  );
+  process.exit(3);
+}
+
 const before = git('rev-parse', 'HEAD');
 let feedback = '';
 let verdict = 'NO ROUNDS RUN';
