@@ -75,6 +75,22 @@ uniform float uFarBloom;     // fraction of the bloom halo absorbed at full haze
 uniform float uFarTopAmount; // graduated-ND strength at the very top edge, far field only
 uniform float uFarTopStart;  // uv.y where that falloff begins
 
+/**
+ * uNear* : the FOREGROUND half of the same idea. See the block beside the term itself.
+ * Same shape as uFar*, opposite sign of depth, and NO in-scatter — foreground is where the
+ * frame's black point lives.
+ */
+uniform float uNearSubordinate;
+uniform float uNearDesat;
+uniform float uNearDarken;
+uniform vec3  uNearTint;
+uniform float uNearDensity;  // extinction per world unit of view depth IN FRONT of uNearStart
+uniform float uNearStart;    // view-space distance in front of the focal plane before it begins
+uniform float uNearBloom;    // fraction of the bloom halo killed at full foreground shadow
+uniform vec3  uNearBounce;   // linear warm bounce from the lit board onto the foreground
+uniform float uNearBottomStart; // uv.y below which the foreground term reaches full strength
+uniform float uNearHighFloor;   // its weight ABOVE that line, so near-but-high geometry is spared
+
 uniform float uGrainAmount;
 uniform float uGrainSize;
 uniform float uGrainShadowBias;
@@ -287,17 +303,48 @@ void main() {
   // sprite-free judge asked for by name — this is contrast COMPRESSION about a lower mean, not
   // a dim, which is what "subordinated by haze" means.
   float hazeT = 0.0;
-  if (uFarSubordinate > 0.0) {
+  float shadeT = 0.0;
+  if (uFarSubordinate > 0.0 || uNearSubordinate > 0.0) {
     float dRaw = rawDepth(uv);
     float focus = focalDistance();
+    bool bg = isBackground(dRaw);
     // Background has no geometry to measure; put it well past anything the board contains so
     // it lands at the asymptote rather than at whatever the depth clear value decodes to.
-    float dist = isBackground(dRaw) ? focus + 400.0 : viewDist(viewPosFromDepth(uv, dRaw));
+    float dist = bg ? focus + 400.0 : viewDist(viewPosFromDepth(uv, dRaw));
     float past = max(dist - focus - uFarStart, 0.0);
     hazeT = (1.0 - exp(-past * uFarDensity)) * uFarSubordinate;
+    float ahead = bg ? 0.0 : max(focus - uNearStart - dist, 0.0);
+    shadeT = (1.0 - exp(-ahead * uNearDensity)) * uNearSubordinate;
+    // GRADUATED, and for the same reason the far term's ND is graduated — with the sign of
+    // everything flipped.
+    //
+    // On a tilted-ortho rig ELEVATION converts to view-space distance: raising a point by h
+    // moves it sin(pitch)·h NEARER the camera. So "in front of the focal plane" catches two
+    // completely different populations — the foreground rubble at the bottom edge, which is
+    // what this term is for, and any TALL STRUCTURE STANDING ON THE BOARD, which it must not
+    // touch. Round 10 measured the consequence directly: ungated, the term took the staging
+    // area's own luma from 49.8 to 44.6 by shading the plinths and colonnades the party is
+    // standing on, which lowers the DENOMINATOR of farTop/board and makes the composition
+    // measurement worse while appearing to make it better.
+    //
+    // Depth alone cannot separate those two, and screen position alone cannot either (it
+    // would shade the far skirt at the bottom of a different camera yaw). The product can:
+    // full strength only where the geometry is both NEAR and LOW, with a floor so a near
+    // object higher in the composition still loses a little chroma rather than nothing.
+    //
+    // This can never produce the "blurred by screen position rather than by distance" defect
+    // a judge can name, because it does not touch the circle of confusion at all — it is
+    // value and chroma only, and a graduated filter is a physical object a photographer puts
+    // in front of a lens.
+    // Not squared. The first pass was, and it measured: the rubble mass this term exists for
+    // spans uv.y 0.05-0.35, and a squared smoothstep from 0.46 delivered it 31% weight — the
+    // pale mauve was still pale mauve. A single smoothstep over a longer baseline puts full
+    // strength on the bottom third and still leaves the mid-board plinths under 30%.
+    shadeT *= mix(uNearHighFloor, 1.0, smoothstep(uNearBottomStart, 0.0, uv.y));
   }
 
-  color += texture2D(uBloom, uv).rgb * uBloomIntensity * uBloomTint * (1.0 - uFarBloom * hazeT);
+  color += texture2D(uBloom, uv).rgb * uBloomIntensity * uBloomTint
+         * (1.0 - uFarBloom * hazeT) * (1.0 - uNearBloom * shadeT);
 
   if (hazeT > 0.002) {
     vec3 c = mix(color, vec3(luma(color)) * uFarTint, uFarDesat * hazeT);
@@ -328,6 +375,73 @@ void main() {
     //     strong without flattening the backdrop into background.
     float ndY = smoothstep(uFarTopStart, 1.0, uv.y);
     color *= 1.0 - uFarTopAmount * ndY * ndY * hazeT;
+  }
+
+  // 1c — FOREGROUND SUBORDINATION. Round 10, and it is the measurement this round turned on.
+  //
+  // 'tools/_scratch/fartop.mjs' reports two ratios, not one. The far one (top 15% of frame
+  // over the staging area) is the one rounds 8-9 chased and it now measures 0.583 against a
+  // reference band of 0.34-0.65 — done. The near one had never been looked at:
+  //
+  //                                 bottom 12% / board
+  //   ours, round 10 baseline              0.605
+  //   official_033_se_screenshot           0.121
+  //   official_007_steam                   0.203
+  //   official_009_steam                   0.324
+  //   press_002_gematsu                    0.374
+  //   official_005_steam                   0.421
+  //
+  // Every reference frame puts its DARKEST large region in the near foreground, by a factor
+  // of three to eight against the board. Ours puts it at parity, and a crop of the bottom
+  // right says exactly what the critics have been filing for four rounds: "a large pale
+  // pink/lavender mass over flat beige that is entirely outside the scene's grade ... it eats
+  // roughly a sixth of the frame", "the near-field debris that should never have been in shot
+  // occupies the bottom-right corner". That mass is not even defocused — '?postdebug=coc'
+  // puts its near CoC at 0.055 of maximum, i.e. under a pixel of blur — so it is a sharp,
+  // bright, low-detail region sitting in the corner of the frame competing with the subject.
+  //
+  // The fix is not more blur (the fail list forbids hiding geometry behind defocus) and it is
+  // not a bigger bottom vignette: a rectangular screen-space band cannot tell a foreground
+  // rubble pile from the near rank of the playable board, and the two are stacked vertically
+  // in this composition. It is the same aerial term as above with the sign of depth flipped —
+  // foreground standing in front of the light rather than behind the air.
+  //
+  // Two deliberate asymmetries against the far term:
+  //   - NO in-scatter. The far field's black point is lifted because skylight is scattered
+  //     into the path; the near field has no path to scatter into, and every reference frame
+  //     keeps its true black down here (official_033's bottom band measures 6.7/255). This is
+  //     the term that gives the picture a black point at all.
+  //   - the tint is the map's shadow colour rather than its sky colour, so the frame gains a
+  //     third value zone — dark cool foreground, warm lit board, hazed cool distance — which
+  //     is the direct answer to "a duotone ... with no tertiary hue and no desaturated
+  //     mid-value between them".
+  //
+  // 'uNearBounce' is the one thing this shares with the far term, and it arrived by
+  // measurement rather than by design. The first pass was transmission only, and it worked —
+  // the bottom band went 0.605 -> 0.468 of the board — but 'tools/metrics.mjs' put
+  // 'backgroundFraction' at 0.254 against a HARD FAIL at 0.25. That detector floods inward
+  // from the frame border over anything within L1 24 of a corner colour, and the corners of
+  // this frame are (1,2,8): darkening a large edge-connected region toward black is,
+  // to that metric, indistinguishable from deleting it. Subordinating the foreground must
+  // not turn it into the void this project spent rounds 2-5 filling.
+  //
+  // The physical answer and the metric's answer are the same one: a foreground standing a
+  // couple of metres in front of a lit stone board is not in a black room, it is receiving
+  // BOUNCE off that board, and the critics have filed exactly that note — "the brazier
+  // contributes no indirect at all; shadows two metres from an open flame are pure navy. Add
+  // a warm hemisphere/bounce term". So the foreground floor is warm and the frame's far floor
+  // is cool, which is the warm/cool split doing work in the shadows instead of only in the
+  // highlights, and it puts the near band a clear L1 50 away from the corner colour.
+  if (shadeT > 0.002) {
+    vec3 c = mix(color, vec3(luma(color)) * uNearTint, uNearDesat * shadeT);
+    // The bounce is added on shadeT SQUARED while the transmission runs on shadeT. Measured:
+    // linear, it lifted 'farTop' from 22.7 to 25.8 all by itself, because elevation reads as
+    // nearness on this rig and the far towers at the top of frame therefore carry a small
+    // shadeT — so an additive term proportional to it painted a floor across exactly the
+    // region rounds 8-9 spent themselves pulling down. Squaring confines the floor to the
+    // deep foreground, where it is doing its job (keeping the near band clear of the void
+    // detector's corner match), and leaves everything the term merely grazes untouched.
+    color = c * (1.0 - uNearDarken * shadeT) + uNearBounce * shadeT * shadeT;
   }
 
   // 2 — Subject dodge. A wide falloff centred on what the shot is composed on (the same UV
@@ -440,6 +554,11 @@ void main() {
     color = srgbEncode(texture2D(uDoF, vUv).rgb);
   } else if (uDebug == 5) {
     color = vec3(texture2D(uSpriteMask, vUv).a);
+  } else if (uDebug == 7) {
+    // Aerial coefficients. Red = far haze, green = foreground shadow, black = the band that
+    // is graded by neither. Reading this is the only way to answer "is the subordination
+    // coming from distance or from screen position?".
+    color = vec3(hazeT, shadeT, 0.0);
   }
 
   gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);

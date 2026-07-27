@@ -11,7 +11,7 @@ import './styles.css';
 import { setReducedMotion } from './anim';
 import { play, setSoundEnabled } from './audio';
 import { AbilityMenu } from './components/AbilityMenu';
-import { BannerLayer, HintBar, type BannerTone, type HintDef } from './components/Banner';
+import { BannerLayer, HintBar, PromptBar, type BannerTone, type HintDef } from './components/Banner';
 import { CommandMenu } from './components/CommandMenu';
 import { FloatingTextLayer } from './components/FloatingText';
 import { TargetPreview } from './components/TargetPreview';
@@ -76,6 +76,9 @@ export class UIRoot {
   private readonly floats: FloatingTextLayer;
   private readonly banners: BannerLayer;
   private readonly hints: HintBar;
+  private readonly prompt: PromptBar;
+  /** Name of the unit whose turn it is — the step prompt addresses them by name. */
+  private activeName = '';
 
   private readonly jobScreen: JobScreen;
   private readonly formationScreen: FormationScreen;
@@ -136,6 +139,7 @@ export class UIRoot {
     this.banners = new BannerLayer();
     this.hints = new HintBar();
     this.hints.set(FIELD_HINTS);
+    this.prompt = new PromptBar();
 
     const left = div('et-hud__left');
     const right = div('et-hud__right');
@@ -147,7 +151,7 @@ export class UIRoot {
     add(menus, this.commandMenu.root, this.abilityMenu.root);
     this.commandMenu.hide();
     this.abilityMenu.hide();
-    add(this.hud, this.turnOrder.root, left, right, menus, this.hints.root);
+    add(this.hud, this.prompt.root, this.turnOrder.root, left, right, menus, this.hints.root);
 
     // ── screens ─────────────────────────────────────────────────────────────
     const emit = (i: UIIntent): void => this.emit(i);
@@ -220,6 +224,30 @@ export class UIRoot {
   /** The unit whose turn it is — drives the left panel. */
   setActiveUnit(unit: UnitVM | null): void {
     this.activeInfo.set(unit);
+    this.activeName = unit?.name ?? '';
+    this.refreshPrompt();
+  }
+
+  /**
+   * Restate what the player is being asked for.
+   *
+   * Derived rather than pushed, so the game layer cannot leave a stale
+   * instruction on screen: whichever of the three battle modes is live wins, and
+   * "nothing open" falls back to the field step. See the note on `PromptBar`.
+   */
+  private refreshPrompt(): void {
+    const who = this.activeName ? ` for ${this.activeName}` : '';
+    if (this.targeting) this.prompt.set('Choose a target and press %k to commit.', 'Enter');
+    else if (this.abilityMenu.isOpen) this.prompt.set('Choose an ability, or press %k to go back.', 'Esc');
+    else if (this.commandMenu.isOpen) this.prompt.set(`Choose a command${who} and press %k to confirm.`, 'Enter');
+    else if (this.activeName) this.prompt.set(`${this.activeName} is ready to act.`);
+    else this.prompt.set(null);
+  }
+
+  /** Override the derived step prompt; `null` restores the derived one. */
+  setPrompt(text: string | null, key?: string): void {
+    if (text === null) this.refreshPrompt();
+    else this.prompt.set(text, key);
   }
 
   /**
@@ -253,6 +281,7 @@ export class UIRoot {
     this.dockMenusAwayFrom(anchor);
     this.commandMenu.show(this.menus);
     this.input.push(this.commandMenu);
+    this.refreshPrompt();
     this.hints.set([
       { keys: ['↑', '↓'], label: 'Select' },
       { keys: ['Enter'], label: 'Confirm' },
@@ -263,6 +292,7 @@ export class UIRoot {
   hideCommandMenu(): void {
     this.commandMenu.hide();
     this.input.remove(this.commandMenu);
+    this.refreshPrompt();
     if (!this.abilityMenu.isOpen) this.hints.set(FIELD_HINTS);
   }
 
@@ -273,6 +303,7 @@ export class UIRoot {
     this.abilityMenu.setItems(items, opts);
     this.abilityMenu.show(this.menus);
     this.input.push(this.abilityMenu);
+    this.refreshPrompt();
     this.hints.set([
       { keys: ['↑', '↓'], label: 'Select' },
       { keys: ['Enter'], label: 'Confirm' },
@@ -283,6 +314,7 @@ export class UIRoot {
   hideAbilityMenu(): void {
     this.abilityMenu.hide();
     this.input.remove(this.abilityMenu);
+    this.refreshPrompt();
     if (!this.commandMenu.isOpen) this.hints.set(FIELD_HINTS);
   }
 
@@ -297,6 +329,7 @@ export class UIRoot {
     this.targeting = vm !== null;
     this.targetPreview.set(vm);
     this.inspectInfo.set(this.targeting ? null : this.inspected);
+    this.refreshPrompt();
   }
 
   /** Spawn floating combat text at a screen-space point. */
@@ -369,6 +402,7 @@ export class UIRoot {
     this.input.remove(screen);
     this.openScreen = null;
     this.hud.classList.remove('is-behind-screen');
+    this.refreshPrompt();
     this.hints.set(FIELD_HINTS);
   }
 
@@ -380,6 +414,7 @@ export class UIRoot {
     if (!this.input.has(screen)) this.input.push(screen);
     this.openScreen = name;
     this.hud.classList.add('is-behind-screen');
+    this.prompt.setVisible(false);
     this.hints.set([
       { keys: ['Tab'], label: 'Switch pane' },
       { keys: ['↑', '↓', '←', '→'], label: 'Navigate' },

@@ -270,8 +270,56 @@ export function unitLuminance(c: Color, out = new Color()): Color {
  * the board's own upper edge means the transition happens *behind* geometry,
  * where there is no clean line for it to draw. Ends short of 1.0 so the very
  * top rows are not a separate flat plateau.
+ *
+ * ── Round 10 retune: 0.26 -> 0.92 ──────────────────────────────────────────
+ *
+ * The floor was set when the surround was measurably brighter than the board.
+ * It is not any more, and a fixed multiply does not know that. Measured on the
+ * round-10 tree, sweeping the floor in place via '?envrecess=' (see
+ * 'WorldEnvironment.applyDebugQuery'):
+ *
+ *   floor   bgFraction   bgDetail   farTop/board
+ *   0.26      0.248        7.85        0.363
+ *   0.42      0.236        7.89        —
+ *   0.58      0.226        8.06        0.377
+ *   0.95      0.208        8.25        —
+ *   1.15      0.206        8.47        0.399
+ *   1.34      0.195        8.34        0.417
+ *
+ * Monotonic on both, in the same direction, with no turning point inside the
+ * legal range — i.e. under the current grade this ramp was only ever removing
+ * background. The reference ratio settles the question: press_002 measures
+ * farTop/board 0.607 and official_033 0.564, so at 0.363 the top of our frame
+ * was roughly a third too dark, not too bright. The ramp is kept rather than
+ * deleted because it is still the only term that separates a roofline from the
+ * air behind it when a scenario picks a brighter exposure; it is now weak
+ * enough to be a grade rather than a bar across the top of the image.
+ *
+ * ── Round 10 reconcile: 0.92 -> 1.34, taken from the table above ────────────
+ *
+ * The sweep that produced this table was run on 'battle-open', where the four HUD
+ * panels interrupt the void detector's flood fill along three frame edges. Re-run on
+ * 'terrain-only' — the scene whose whole purpose is judging geometry and light with
+ * no UI to hide behind — the same tree measured 'backgroundFraction' 0.317 against a
+ * HARD FAIL at 0.25, where round 9 measured 0.236. So the frame that actually gets
+ * judged on its surround had gone over the gate while the frame the sweep was run on
+ * had not.
+ *
+ * 0.92 was the conservative pick off a monotone curve. Re-swept on 'terrain-only'
+ * with everything else this round intact:
+ *
+ *   floor   bgFraction   bgDetail   localContrast
+ *   0.92      0.317        6.32        19.36
+ *   1.34      0.299        6.49        19.60
+ *   1.60      0.298        6.50        19.61
+ *   2.10      0.298        6.50        19.62
+ *
+ * Still monotone, still no turning point, and it plateaus at ~1.34 — so 1.34 is the
+ * whole of the available win rather than a point on a slope, which is why it can be
+ * taken without re-opening the argument above. It carries on 'battle-open' too
+ * (0.219 -> 0.204, detail 8.23 -> 8.32), so this is not a trade between the scenes.
  */
-export const DEFAULT_RECESSION: [number, number, number] = [0.44, 0.99, 0.26];
+export const DEFAULT_RECESSION: [number, number, number] = [0.52, 0.99, 1.34];
 
 /**
  * The sky recedes HARDER than the geometry standing in front of it.
@@ -290,8 +338,16 @@ export const DEFAULT_RECESSION: [number, number, number] = [0.44, 0.99, 0.26];
  * floor under the geometry's reproduces that: silhouettes gain contrast exactly
  * where the grade is strongest, which is the opposite of what a single floor
  * does.
+ *
+ * Round 10: 0.55 -> 0.80, for the same reason the floor above moved. This is a
+ * multiplier ON that floor, so the two compounded — at the old values the sky's
+ * effective floor was 0.26 x 0.55 = 0.14, i.e. the top rows of the frame were
+ * rendered at a seventh of their lit value and measured as pure black across the
+ * full width. The bias is retained because the widening-gap argument below is
+ * still correct and still visible; it just cannot be allowed to do seven-eighths
+ * of the work.
  */
-export const SKY_RECESSION_BIAS = 0.55;
+export const SKY_RECESSION_BIAS = 0.8;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette

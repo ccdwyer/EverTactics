@@ -57,7 +57,31 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 6 | 4/6 baseline, 5/6 after | 4/6 | |
 | 7 | 5/6 baseline, 5/6 after | 5/6 | |
 | 8 | **2/6** baseline, 5/6 after | **6/6** baseline | see the variance note |
-| 9 | 5/12 baseline, 9/12 after | **11/12** and **10/12** | first n=12 round |
+| 9 | 5/12 baseline, 9/12 after | 11/12 and 10/12 | first n=12 round |
+| 10 | 6/12 baseline, 10/12 after | 9/12 and **8/12** | **the loop has stopped paying** |
+
+### Rounds 9-10: the polish loop is no longer producing gains
+Four n=12 measurements across two rounds: identification **5, 9, 6, 10** of 12. Mean 62%, no trend.
+The round-9 build was measured twice — 9/12 and 6/12 — and against a pooled 0.62 both tails are
+p≈0.27, so **within-build noise is still ±3 at n=12**. Nothing in rounds 9 or 10 moved identification.
+
+More telling, preference is **eroding**: 11, 10, 9, 8 of 12. At 8/12,
+P(>=8 | coin flip) = **0.19** — no longer significant. The one claim that was solidly established
+after round 9 is no longer established after round 10.
+
+**Recommendation: stop running undirected polish rounds.** Ten rounds have taken the frame from
+"obviously worse" to "preferred but identifiable", and the last two produced no measurable gain
+while consuming ~4.5M subagent tokens each. Cross-agent coupling is now actively causing
+regressions (round 10 found the void had drifted to 0.264, past its hard-fail gate, because one
+agent's grade change interacted with another's recession ramp).
+
+Better uses of the next effort, in order:
+1. **Wire the decoded animation** (item 3). Static units are a bigger perceptual gap than any
+   remaining material work, and it is plumbing, not research.
+2. A single **art-directed pass on one scenario** rather than parallel fixers on separate axes —
+   the frame now suffers from too many independently-tuned systems, not too few features.
+3. If the blind test is resumed, it needs **n>=30 per measurement** to detect the size of effect
+   these rounds actually produce.
 
 ### Round 9, the first round with enough samples to say anything
 Identification: 5 of 12 then 9 of 12. Tested against a pooled rate of 0.58, P(<=5 of 12)=0.19 and

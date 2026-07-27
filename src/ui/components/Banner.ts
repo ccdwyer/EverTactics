@@ -45,6 +45,71 @@ export class BannerLayer {
   }
 }
 
+/**
+ * The step prompt — one line of instruction, centred on the top edge.
+ *
+ * Measured off refs/curated/fft/press-042310-...-mediakit-06.png: the shipped
+ * frame carries a rounded translucent pill at the top centre reading "Select a
+ * tile and press ⨂ to move.", with the button glyph set INLINE in the sentence.
+ * It is the piece of HUD grammar the critics kept naming by shape — "a rounded
+ * tooltip pill with icon and body copy" — and the reason the reference reads as
+ * a game being played rather than as a render: it states what the player is
+ * being asked for right now, which no other element in either HUD does.
+ *
+ * It is distinct from the hint rail in the opposite corner, and the reference
+ * runs both at once: the rail is the button legend (what the keys do), the pill
+ * is the instruction (what you are doing). Ours had the legend and not the
+ * instruction, so the frame described its controls and never its state.
+ *
+ * `%k` in the text is replaced by a keycap, so the glyph sits mid-sentence the
+ * way the reference sets it rather than being bolted to one end.
+ */
+export class PromptBar {
+  readonly root: HTMLDivElement;
+  private text = '';
+  private key = '';
+
+  constructor() {
+    this.root = div('et-prompt');
+    this.root.setAttribute('role', 'status');
+    this.setVisible(false);
+  }
+
+  /** `null` hides the pill. Re-setting the same text does not re-animate. */
+  set(text: string | null, key = ''): void {
+    if (!text) {
+      this.text = '';
+      this.setVisible(false);
+      return;
+    }
+    if (text === this.text && key === this.key) {
+      this.setVisible(true);
+      return;
+    }
+    this.text = text;
+    this.key = key;
+    const inner = div('et-prompt__inner');
+    inner.appendChild(div('et-prompt__pip'));
+    const line = el('span', 'et-prompt__text');
+    for (const [i, part] of text.split('%k').entries()) {
+      if (i > 0) line.appendChild(el('kbd', 'et-key et-key--inline', key || '↵'));
+      if (part) line.appendChild(el('span', 'et-prompt__frag', part));
+    }
+    inner.appendChild(line);
+    inner.appendChild(div('et-prompt__pip'));
+    this.root.replaceChildren(inner);
+    // Re-trigger the entrance so a changed instruction reads as a new one.
+    this.root.classList.remove('is-in');
+    reflow(this.root);
+    this.setVisible(true);
+  }
+
+  setVisible(v: boolean): void {
+    this.root.classList.toggle('is-hidden', !v);
+    if (v) this.root.classList.add('is-in');
+  }
+}
+
 export interface HintDef {
   keys: readonly string[];
   label: string;

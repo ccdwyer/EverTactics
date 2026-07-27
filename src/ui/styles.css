@@ -140,6 +140,11 @@
   --hud-col-right: 330px;
   --hud-bottom: var(--hud-safe);
   --hud-top: var(--hud-safe);
+  /* Measured height of the acting-unit band in the bottom-left corner (gold frame
+     top edge at y=822 on a 1080 frame with --hud-bottom 32). The turn rail hangs
+     off this, so the two stay welded together at any safe-area inset — see the
+     ROUND 10 note on .et-turnorder. */
+  --hud-band-h: 226px;
 
   /* ── surfaces ──────────────────────────────────────────────────────────── */
   /* Layered: an inner top light-line (the bevel), a deep inner cast so the panel
@@ -1008,9 +1013,28 @@
    The rail is now sized by its chips and the caption is allowed to overhang —
    which is what the shipped Combat Timeline does, its "Combat Timeline" header
    being noticeably wider than the column of faces beneath it. */
+/* ROUND 10 — THE RAIL RUNS UPWARD AND ENDS ON THE ACTING PANEL.
+   ---------------------------------------------------------------------------
+   Measured on refs/curated/fft/press-042310-...-mediakit-06.png: the Combat
+   Timeline is numbered 9 at the TOP down to 1 at the BOTTOM, and entry 1 — the
+   unit acting now — sits directly on top of the acting-unit panel in the
+   bottom-left corner. The two are one instrument: the card at the foot of the
+   column and the portrait in the panel are the same person, eight pixels apart,
+   and the eye reads "this is who is up, and here is everything about them" in a
+   single downward sweep.
+
+   Ours ran the other way — NOW pinned to the top-left corner, the panel pinned
+   to the bottom-left, and 90px of bare board between them. That put the two
+   loudest pieces of chrome at opposite ends of the left edge with nothing
+   binding them, i.e. two objects where the reference has one, and it spent the
+   top-left corner (the emptiest, darkest part of our frame) on a caption.
+
+   So the rail is now anchored to the BOTTOM, growing upward, with the track in
+   column-reverse so the acting card lands at its foot. The caption stays at the
+   head of the column, which is where the reference puts "Combat Timeline". */
 .et-turnorder {
   position: absolute;
-  top: var(--hud-top);
+  bottom: calc(var(--hud-bottom) + var(--hud-band-h) + 12px);
   left: var(--hud-gutter);
   width: var(--hud-rail);
   display: flex;
@@ -1098,10 +1122,15 @@
 .et-turnorder__track {
   position: relative;
   display: flex;
-  flex-direction: column;
+  /* REVERSE: entry 0 is the acting unit and it belongs at the FOOT of the
+     column, adjacent to the acting panel. DOM order is untouched, so the
+     `.is-current + .et-turnchip` legend rule still lands on the next unit to
+     act — which now renders immediately ABOVE the acting card, i.e. the
+     direction the queue reads. */
+  flex-direction: column-reverse;
   align-items: stretch;
   gap: 0;
-  padding: 2px 0 10px;
+  padding: 10px 0 2px;
 }
 /* What is left of the plate: a soft pool of shade, no edges anywhere.
    The hard-edged, backdrop-blurred plate was the rail's box; a wide radial that
@@ -1153,7 +1182,11 @@
 .et-turnchip--enemy { --team-color: var(--team-enemy); }
 .et-turnchip--ally { --team-color: var(--team-ally); }
 .et-turnchip--neutral { --team-color: var(--team-neutral); }
-.et-turnchip:hover { transform: translateX(4px); }
+/* The acting chip paints above its neighbours. The column is contiguous and the
+   acting card is DOM-first, so without this its gold glow and its crown finial
+   were both painted over by the queued card stacked on top of it. */
+.et-turnchip.is-current { z-index: 2; }
+.et-turnchip:hover { transform: translateX(4px); z-index: 3; }
 .et-turnchip.is-disabled { opacity: 0.4; filter: grayscale(0.75); }
 .et-turnchip.is-new { animation: et-chip-in 340ms var(--ease-out-expo); }
 @keyframes et-chip-in {
@@ -1233,15 +1266,27 @@
     0 0 20px -4px rgba(240, 221, 160, 0.5),
     0 6px 16px -8px rgba(0, 0, 0, 0.95);
 }
+/* ROUND 10 — A FINIAL ON THE TOP EDGE, NOT A NICK IN THE CORNER.
+   At 13px tucked into the card's top-right corner the crown was half-occluded
+   by the card's own keyline and by the queued card stacked immediately above it
+   (the column is contiguous, so that corner is the one place on the card that
+   is never clear). Shot at 2.5x it read as a gold chip in the border — damage,
+   not ornament. Centred on the top edge and grown to 17px it sits proud of the
+   card the way a finial sits on a plaque, with the card's own edge as its base,
+   and it is the only silhouette in the rail that breaks the column's straight
+   right edge — which is exactly the job it was added to do. */
 .et-turnchip__crown {
   position: absolute;
-  top: -7px;
-  right: -6px;
-  width: 13px;
-  height: 13px;
+  top: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 17px;
+  height: 17px;
   color: var(--gold-bright);
   z-index: 3;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 8px rgba(240, 221, 160, 0.5));
+  filter:
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 1))
+    drop-shadow(0 0 9px rgba(240, 221, 160, 0.55));
 }
 /* Name and CT swap places in the rail: the tick delta is the left gutter column,
    the name only appears for the unit acting now. Twelve names stacked vertically
@@ -1360,17 +1405,28 @@
    of the column keeps the round-4 fix (the numbers are not unexplained debug
    output) at an eighth of the ink. */
 .et-turnchip__delta-unit { display: none; }
+/* ROUND 10 — it was printing at 7px in gold-dim on a dark board, i.e. below the
+   threshold at which a two-letter word resolves at all. Shot against
+   `battle-open` it read as a smudge beside the numeral: not a label, an
+   artefact, which is worse than the bare digit it was added to explain. At 9px
+   with the numeral's own dark ring it resolves as "CT", and it takes the
+   numeral's team hue rather than gold so the caption belongs to the digit above
+   it instead of to the rail's frame. */
 .et-turnchip.is-current + .et-turnchip .et-turnchip__delta-unit {
   display: block;
-  margin-top: 2px;
+  margin-top: 3px;
   font-family: var(--font-display);
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   line-height: 1;
-  color: var(--gold-dim);
-  opacity: 0.9;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 1), 0 0 6px rgba(0, 0, 0, 0.9);
+  color: color-mix(in srgb, var(--team-color) 62%, #e8dcc0);
+  text-shadow:
+    1px 0 0 rgba(3, 5, 11, 0.95),
+    -1px 0 0 rgba(3, 5, 11, 0.95),
+    0 1px 0 rgba(3, 5, 11, 0.95),
+    0 -1px 0 rgba(3, 5, 11, 0.95),
+    0 2px 4px rgba(0, 0, 0, 1);
 }
 .et-turnchip.is-current .et-turnchip__delta {
   font-size: 10px;
@@ -2449,6 +2505,105 @@
   letter-spacing: 0.08em;
   color: var(--vellum-dim);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+/* ===========================================================================
+   Step prompt — top-centre instruction pill
+   ===========================================================================
+   Measured on refs/curated/fft/press-042310-...-mediakit-06.png at 1080p: a
+   554x62 rounded pill centred on the frame, top edge at y=90, filled with a
+   flat translucent slate and carrying one sentence of body copy with a button
+   glyph set inline. It is the only piece of the shipped HUD we did not have,
+   and it is the one that says the frame is a game in a state rather than a
+   render — the bottom-right rail says what the buttons do, this says what you
+   are being asked for.
+
+   Two deliberate departures from the reference. Ours is shorter (44px, not 62)
+   because our body face sets smaller than the reference's, and it takes the
+   HUD's navy-and-gold rather than the reference's neutral slate, so it belongs
+   to the same family as the four panels rather than reading as a system toast
+   dropped on top of them. The pips at each end are the same lozenge the panel
+   dividers use.
+
+   It sits ABOVE the board's horizon in every framing we ship (the top ~10% of
+   `battle-open` is blurred backdrop, not playable tiles), which is the
+   condition VISUAL_TARGET puts on any chrome that is not cornered. */
+.et-prompt {
+  position: absolute;
+  top: var(--hud-top);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  pointer-events: none;
+  /* A long unit name must not push the pill under the top-right card. The
+     sentence truncates instead; the keycap and the closing pip are flex-none so
+     the instruction never loses its verb or its glyph. */
+  max-width: min(52vw, 760px);
+  transition:
+    opacity var(--dur) var(--ease-soft),
+    transform var(--dur-slow) var(--ease-out-expo);
+}
+.et-prompt.is-hidden { opacity: 0; transform: translate(-50%, -10px); }
+.et-prompt.is-in { animation: et-prompt-in 460ms var(--ease-out-expo) both; }
+@keyframes et-prompt-in {
+  from { opacity: 0; transform: translate(-50%, -12px) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+.et-prompt__inner {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+  overflow: hidden;
+  /* 48/17 rather than 44/15: the reference pill sets its body copy at ~42% of
+     the pill height (26 in 62) and ours was at 34%, which read as a caption in
+     a bar rather than as a sentence addressed to the player. */
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(28, 40, 70, 0.9) 0%, rgba(10, 15, 30, 0.9) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 223, 0.14),
+    inset 0 0 0 1px rgba(201, 162, 39, 0.34),
+    inset 0 -10px 22px -14px rgba(0, 0, 0, 0.9),
+    0 6px 20px -8px rgba(0, 0, 0, 0.9),
+    0 2px 5px -2px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(5px) saturate(0.8);
+  -webkit-backdrop-filter: blur(5px) saturate(0.8);
+}
+/* Lozenge caps: the same 45deg square the panel dividers terminate on, so the
+   pill is visibly part of the same drawing kit as the framed panels. */
+.et-prompt__pip {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  transform: rotate(45deg);
+  background: var(--gold-dim);
+  box-shadow: 0 0 0 1px rgba(6, 9, 18, 0.8), 0 0 7px rgba(240, 221, 160, 0.4);
+}
+.et-prompt__text {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-body);
+  font-size: 17px;
+  letter-spacing: 0.028em;
+  color: var(--vellum);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+.et-prompt__frag { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.et-prompt__pip { flex: none; }
+/* A keycap set mid-sentence has to sit on the text baseline, not on the flex
+   centre line, or the sentence visibly steps up around it. */
+.et-key--inline {
+  height: 19px;
+  min-width: 19px;
+  font-size: 9px;
+  translate: 0 -1px;
 }
 
 /* ===========================================================================

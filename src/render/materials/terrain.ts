@@ -33,6 +33,7 @@ import {
   grassTexel,
   lavaTexel,
   metalTexel,
+  plasterTexel,
   roofTexel,
   rubbleTexel,
   sandTexel,
@@ -72,6 +73,7 @@ export type TerrainMaterialKind =
   | 'bed'
   | 'stonewall'
   | 'ashlar'
+  | 'plaster'
   | 'coping'
   | 'tread'
   | 'nosing'
@@ -97,6 +99,7 @@ const TEXELS: Record<TerrainMaterialKind, TexelFn> = {
   stone: stoneTexel,
   stonewall: stoneWallTexel,
   ashlar: ashlarTexel,
+  plaster: plasterTexel,
   coping: copingTexel,
   tread: stairTreadTexel,
   nosing: nosingTexel,
@@ -127,6 +130,13 @@ const BUMP_STRENGTH: Partial<Record<TerrainMaterialKind, number>> = {
   stone: 2.1,
   stonewall: 2.3,
   ashlar: 2.6,
+  // Plaster's relief is the string course and the pilaster strips, plus the craters
+  // where it has spalled. Those are the only things on a rendered wall that can catch
+  // a highlight on the lit side and darken on the shadow side, so the bump has to be
+  // strong enough for them to read — the first cut at 1.1 with a 0.70 normal scale
+  // produced a wall that lit identically whichever way it faced, which is the exact
+  // defect the material was added to answer.
+  plaster: 2.0,
   coping: 1.4,
   tread: 2.0,
   nosing: 1.6,
@@ -1055,6 +1065,38 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
     aoStrength: 1.0, macroStrength: 0.20, macroScale: 0.10,
     batchStrength: 0.50, batchSize: 1.40,
     tileGrid: 0.95, tileRotate: 0, tileSharpen: 2.6, normalScale: 1.15,
+  },
+  /**
+   * Lime render — the second built vocabulary, selected by height in
+   * 'render/terrain.ts' so the upper storeys of the enclosure are a *plastered*
+   * building standing on a masonry base.
+   *
+   * Every tuning value here is chosen to be as unlike the three stones as possible,
+   * because the defect it exists to fix is that ashlar, rubble and coping all still
+   * read as "masonry" at diorama distance:
+   *
+   *  - **No batch grid worth the name.** 'batchStrength' is a third of the stones' and
+   *    its cell is 3.4 units — a structural bay, not a block — so plaster varies
+   *    bay-to-bay the way re-limewashing does and never acquires a lattice.
+   *  - **Coarsest UV in the set.** One repeat spans 3.2 world units against ashlar's
+   *    1.8, so the trowel sweep is measured in tiles while the coursing beside it is
+   *    measured in tenths of one. That difference is the point: "one brick/plank motif
+   *    tiled at a single UV scale across walls, floors, roofs and stairs".
+   *  - **Top of the roughness dial.** 0.86–1.00 against dressed ashlar at 0.50–0.96 and
+   *    wet stone (etWet) below that, so this is the chalky end of the frame's specular
+   *    spread and the judge's "nothing is chalky" stops being true.
+   *  - **No rotation, no v mirror.** The sheet has rising damp at its foot and runoff
+   *    down its face; either transform would send the weather sideways or upward.
+   */
+  plaster: {
+    // A pale material needs *less* inter-reflection help than a dark one, not more:
+    // at the default 0.60 the rendered piers were the brightest thing in an unlit
+    // quadrant and read as milky flats. 0.30 lets them fall to the scene's blue.
+    roughRange: [0.86, 1.00], weather: 1.00, bounceFloor: 0.30,
+    uvScale: 1.00, roughness: 1, metalness: 0, color: 0xffffff,
+    aoStrength: 1.0, macroStrength: 0.46, macroScale: 0.11,
+    batchStrength: 0.20, batchSize: 3.40,
+    tileGrid: 0.40, tileRotate: 0, tileMirrorU: 1, tileSharpen: 2.4, normalScale: 1.05,
   },
   /**
    * The dressed cap on an exposed edge. Coarsest module of the three (one repeat over

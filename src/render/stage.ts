@@ -315,6 +315,13 @@ export class Stage {
     this.environment =
       options.environment === false ? null : new WorldEnvironment(options.environment ?? {});
     this.environment?.addTo(this.scene);
+    // '?envdebug=ground,fore' suppresses environment layers so their
+    // contribution to a frame can be measured by difference. Read here rather
+    // than in the caller so the attribution loop works on any scene without the
+    // state layer having to opt in. Diagnostics only.
+    if (typeof window !== 'undefined') {
+      this.environment?.applyDebugQuery(window.location.search);
+    }
 
     this.installResizeHandling();
     this.resize();

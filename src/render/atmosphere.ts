@@ -63,6 +63,23 @@ import {
   type PaletteTuning,
 } from './sky.js';
 
+/**
+ * Every suppressible backdrop layer, for '?envdebug='. Bands first, then the
+ * two non-band layers the 'Backdrop' owns.
+ */
+const ENV_LAYER_NAMES = [
+  'flank',
+  'skirt',
+  'verge',
+  'scatter',
+  'apron',
+  'ridge',
+  'nearfield',
+  'fore',
+  'ground',
+  'glow',
+] as const;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Motes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -740,6 +757,54 @@ export class WorldEnvironment {
   setEnabled(on: boolean): void {
     this.enabled = on;
     this.group.visible = on;
+  }
+
+  /**
+   * Hide environment layers so their contribution to a frame can be measured by
+   * difference: '?envdebug=ground,fore' renders everything except those two.
+   *
+   * Diagnostics only — nothing in the game calls this. It exists because the
+   * per-band luma attributions quoted throughout 'backdrop.ts' were produced by
+   * hand-editing the source and rebuilding, which is slow enough that they were
+   * measured once and then quietly went stale. Layer names are the backdrop band
+   * names plus 'ground', 'glow', 'sky', 'motes' and 'haze'.
+   */
+  setLayersHidden(names: readonly string[]): void {
+    const set = new Set(names.map((n) => n.trim()).filter(Boolean));
+    this.sky.mesh.visible = !set.has('sky');
+    this.motes.points.visible = !set.has('motes');
+    this.haze.visible = !set.has('haze');
+    for (const name of ENV_LAYER_NAMES) {
+      this.backdrop.setLayerHidden(name, set.has(name));
+    }
+  }
+
+  /**
+   * Apply the environment's diagnostic query parameters.
+   *
+   *   '?envdebug=ground,fore'      hide layers, to attribute by difference
+   *   '?envrecess=0.44,0.99,0.26'  override the upward-recession ramp
+   *
+   * 'envrecess' exists because the ramp is three module-level constants, so
+   * every trial value used to cost a full rebuild-and-reshoot. Sweeping it in
+   * place is the difference between measuring four candidates and measuring one.
+   */
+  applyDebugQuery(search: string): string[] {
+    const params = new URLSearchParams(search);
+
+    const recess = params.get('envrecess');
+    if (recess) {
+      const n = recess.split(',').map(Number);
+      if (n.length === 3 && n.every((v) => Number.isFinite(v))) {
+        this.setRecession(n[0]!, n[1]!, n[2]!);
+      }
+    }
+
+    const raw = params.get('envdebug');
+    if (!raw) return [];
+    const names = raw.split(',').map((n) => n.trim()).filter(Boolean);
+    this.setLayersHidden(names);
+    return names;
   }
 
   /**

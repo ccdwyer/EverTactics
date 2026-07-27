@@ -79,7 +79,7 @@ export type PostQuality = 'low' | 'medium' | 'high' | 'ultra';
 /** Names the critic loop can toggle individually for an A/B. */
 export type EffectName = 'ao' | 'bloom' | 'dof' | 'grade' | 'vignette' | 'grain' | 'chroma' | 'aa';
 
-export type DebugView = 'off' | 'ao' | 'bloom' | 'coc' | 'dof' | 'sprite-mask' | 'no-grade';
+export type DebugView = 'off' | 'ao' | 'bloom' | 'coc' | 'dof' | 'sprite-mask' | 'no-grade' | 'aerial';
 
 export interface AoSettings {
   enabled: boolean;
@@ -317,6 +317,49 @@ export interface FocusGradeSettings {
   farTopFalloff: number;
   /** uv.y where that falloff begins. Below this the far field is graded by haze alone. */
   farTopStart: number;
+
+  /**
+   * Master weight of the FOREGROUND subordination, 0..1.
+   *
+   * Round 10. The far half of this pair has been tuned since round 7; the near half did not
+   * exist, and 'tools/_scratch/fartop.mjs' says that is where the composition defect now is —
+   * our bottom 12% of frame measures 0.605 of the staging area's luma against a reference
+   * band of 0.12-0.42. See the block beside the term in 'materials/post/composite.ts'.
+   */
+  nearAmount: number;
+  /** Fraction of chroma removed at full foreground shadow. */
+  nearDesaturate: number;
+  /** Fraction of light removed at full foreground shadow. No in-scatter pairs with it. */
+  nearDarken: number;
+  /** The map's SHADOW colour — deliberately not the same hue as {@link FocusGradeSettings.farTint}. */
+  nearTint: [number, number, number];
+  /** Extinction per world unit of view depth in front of {@link FocusGradeSettings.nearStart}. */
+  nearDensity: number;
+  /** View-space distance IN FRONT of the focal plane before the term begins, in world units. */
+  nearStart: number;
+  /** Fraction of the bloom halo killed at full foreground shadow, 0..1. */
+  nearBloom: number;
+  /**
+   * Linear WARM bounce added at full foreground shadow, before exposure.
+   *
+   * The near-field counterpart of {@link FocusGradeSettings.farScatter}, and the term that
+   * keeps this a grade rather than a deletion — see the block in
+   * 'materials/post/composite.ts'. Warm on purpose: the far floor is cool, so the two
+   * subordinated zones sit either side of the board's own warm/cool split instead of
+   * collapsing onto one navy.
+   */
+  nearBounce: [number, number, number];
+  /**
+   * uv.y below which the foreground term reaches full strength. Above it the term falls off
+   * to {@link FocusGradeSettings.nearHighFloor}.
+   *
+   * The near-field counterpart of {@link FocusGradeSettings.farTopStart}, and it exists
+   * because elevation reads as NEARNESS on a tilted-orthographic rig — see the block beside
+   * the term in 'materials/post/composite.ts'.
+   */
+  nearBottomStart: number;
+  /** Weight of the foreground term above that line, 0..1. Never 0: a near object high in the frame still loses some chroma. */
+  nearHighFloor: number;
 }
 
 export interface GrainSettings {
@@ -897,7 +940,16 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // being subordination and starts being the void. Measured on the same tree: it is worth
       // ~0.02 on the ratio and it spends every bit of it on the staging area. lumaP95 comes
       // back at 143/255, so the ACES shoulder is still a long way from plating out.
-      lift: 2.18,
+      // ROUND 10: 2.18 -> 2.34, and it is bookkeeping rather than a taste move. The foreground
+      // term added this round takes light out of the bottom of frame, and the 'board' window
+      // 'tools/_scratch/fartop.mjs' measures reaches down into that region — so on the A/B with
+      // the near term switched off, 'board' fell 47.9 -> 45.2 and farTop/board went 0.544 ->
+      // 0.576 even though every other number improved. This puts the denominator back where it
+      // was, in the middle of the composition rather than at its edge: same tree, same shot,
+      // farTop/board 0.541, bottom/board 0.444, 'backgroundFraction' 0.219 against 0.277 with
+      // the whole thing off. lumaP95 comes back at 140/255, so the ACES shoulder is nowhere
+      // near plating out.
+      lift: 2.34,
       // Starts falling at 16% of the way to the frame edge and takes 62% to get there, so it
       // is still a gradient over most of the picture — but a much tighter one than the first
       // attempt, which started at 0.40. That version measured as a no-op (ratio 1.49 -> 1.51)
@@ -1027,6 +1079,120 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // being more haze.
       farTopFalloff: 0.86,
       farTopStart: 0.46,
+      // ── foreground half ──
+      //
+      // ROUND 10 RECONCILE: 1.0 -> 0.45.
+      //
+      // The term's own stated stopping rule is the one being applied here, not
+      // overridden — see 'nearDarken' below: "it stops at 0.58 rather than going
+      // further because foreground that goes fully black stops being foreground and
+      // starts being void, and 'tools/metrics.mjs' scores exactly that." That bound was
+      // calibrated against 'battle-open', which measured 0.219 with the term at full
+      // strength — under the 0.25 hard fail, and read as headroom.
+      //
+      // 'battle-open' is the wrong yardstick for this particular metric. The detector
+      // floods inward from the frame border, and that frame has four opaque HUD panels
+      // sitting on three of its edges, which break the flood before it can travel. The
+      // scene that exists to be judged without that help is 'terrain-only', and there
+      // the same tree measured:
+      //
+      //                       bgFraction   bgDetail   localContrast
+      //   round 9                0.236       9.29        24.01
+      //   round 10, near 1.0     0.317       6.49        19.60     <- FAILS at 0.25
+      //   round 10, near 0.45    0.285       6.97        20.11
+      //   round 10, near 0.0     0.259       7.81        20.62
+      //
+      // Two things in that table matter more than the gate. First, the term costs
+      // background DETAIL as well as background area — the surround it grades is losing
+      // structure, not just level, which is the difference between subordinating the
+      // foreground and deleting it. Second, the curve has a knee: most of the
+      // composition win survives well below full strength while most of the void and
+      // detail cost does not.
+      //
+      // 0.45 keeps a real foreground term (at 'nearDarken' 0.58 that is still a 26%
+      // transmission loss and a 32% chroma pull at full depth, and the bottom-band
+      // ratio the term was written for stays well inside the reference band) while
+      // handing back roughly a third of what it cost the surround. It improves every
+      // reported axis on BOTH scenes, so it is not a trade between them:
+      //
+      //                   terrain-only              battle-open
+      //   near 1.0    0.299 / 6.49 / 19.60     0.204 / 8.32 / 23.97
+      //   near 0.45   0.285 / 6.97 / 20.11     0.196 / 8.95 / 24.38
+      //
+      // HONEST STATUS: this does NOT clear the gate. 'terrain-only' still measures
+      // 0.285 against 0.25, and it does not clear it at nearAmount 0 either (0.259), so
+      // the remaining ~0.02-0.03 is structural and lives somewhere else — the airGlow
+      // hue rotation added to 'lighting.ts' this round accounts for about 0.019 of it on
+      // its own. That is a real regression against round 9 and it is not fixed here.
+      nearAmount: 0.45,
+      // Chroma goes first here too, and for this frame it is the term that matters most: the
+      // offending mass is pale MAUVE over flat beige, a hue that appears nowhere else in a
+      // night courtyard graded orange-against-navy. Pulling its chroma toward the shadow
+      // colour is what stops it reading as a different asset pack.
+      nearDesaturate: 0.72,
+      // Transmission. Measured A/B on ONE build with the whole term switched off, which is the
+      // only comparison worth anything while four agents are editing the same tree — the
+      // absolute numbers here drift between rounds as lighting and terrain land, the delta does
+      // not. Final pair:
+      //
+      //                     bottom/board   farTop/board   backgroundFraction   localContrast
+      //   near term off         0.543          0.539            0.196              24.23
+      //   near term on          0.445          0.542            0.219              23.78
+      //
+      // It stops at 0.58 rather than going further because foreground that goes fully black
+      // stops being foreground and starts being void, and 'tools/metrics.mjs' scores exactly
+      // that. Worth recording that the 0.023 of 'backgroundFraction' this costs is STRUCTURAL
+      // and not a function of how hard the term pushes: 0.52 measured 0.221 and 0.58 measured
+      // 0.219, i.e. inside the noise. The flood fill either reaches around the bottom band or
+      // it does not. Raising 'nearBounce' by a third to break the connection was tried and made
+      // both numbers worse (0.224 / 0.460).
+      nearDarken: 0.58,
+      // The cool violet the vignette multiplies toward, one step lighter. Deliberately a
+      // different hue from 'farTint' (which is a pale sky blue): the far field is subordinated
+      // by air, the near field by shadow, and they are not the same colour in any of the
+      // reference frames.
+      nearTint: [0.66, 0.68, 0.92],
+      // Steep, because there is very little depth to work with. The whole visible ground plane
+      // spans about ±3.2 world units of view distance on this orthographic rig (see the note on
+      // 'focusRange'), so the foreground pile sits barely a unit in front of the near rank of
+      // the board. 1.15/unit reaches ~70% at 1.05 units past the start and ~25% at 0.25, which
+      // is a real gradient across that short baseline instead of a step.
+      nearDensity: 1.15,
+      // Well inside the near sharp limit (which sits at 'focusRange * nearRangeScale' = 3.0),
+      // so the term begins long BEFORE the defocus does. That is deliberate and it is the whole
+      // reason this is a grade rather than more blur: value and chroma may be taken off the
+      // front rank of the board without costing a single countable tile, where blur may not.
+      //
+      // It has to be this far in. '?postdebug=aerial' on the first pass, which started at 2.25,
+      // reported the offending pale plane at a foreground coefficient of 0.02 — i.e. untouched.
+      // Working the numbers back through the exponential puts that plane at 2.27 world units in
+      // front of the focal plane and a sample of ELEVATED MID-BOARD geometry at 2.42, so the
+      // thing this term exists to subordinate is measurably FURTHER from the camera than the
+      // board it is competing with. Depth cannot separate them on its own; the vertical gate
+      // below is what does, and this value is what gives it something to gate.
+      nearStart: 1.40,
+      // Higher than 'farBloom'. A distant lantern's halo is dimmed by the air; a foreground
+      // object in shadow has no halo at all, and the round-10 crop shows three orange bloom
+      // blobs sitting on the rubble pile with no light source in front of them.
+      nearBloom: 0.85,
+      // Sized by arithmetic against the void detector, not by eye, and applied on shadeT
+      // SQUARED (see the term) so it is a floor under the deep foreground rather than a wash.
+      // At 'battle-open''s exposure of 2.1 the fully-shaded floor arrives at the tonemapper
+      // around 0.019/0.013/0.008 linear, which srgbEncode puts near code 38/29/23 — still
+      // genuinely dark, and an L1 of about 80 from the frame's corner colour of (1,2,8), where
+      // the flood fill stops at 24. That margin is the whole reason the near band can be this
+      // dark without being counted as void.
+      nearBounce: [0.0092, 0.0060, 0.0038],
+      // Two fifths of frame height. Below this line 'battle-open' holds the rock skirt, the
+      // water channel and the rubble field and no countable tile at any camera yaw; above it,
+      // anything the depth term calls "near" is a tower standing ON the board or a far tower
+      // rising into the top of the composition, and neither wants shading.
+      nearBottomStart: 0.40,
+      // A fifth. Enough that a near pillar loses a little chroma and reads as forward of the
+      // tiles behind it, not enough to shade a unit standing on top of one. Stepped 0.12 ->
+      // 0.26 -> 0.20 on rendered frames; the differences across that span are inside the
+      // frame-to-frame variance, so the middle of the range is where it sits.
+      nearHighFloor: 0.20,
     },
     grain: { enabled: true, amount: REFERENCE_FLOOR.grainAmount, size: 1.0, shadowBias: 0.4, animate: true },
     // Halved from 0.35. That value was authored when the frame corners were empty
@@ -1386,6 +1552,16 @@ export class PostStack implements PostEffectsHost {
       uFarBloom: { value: this.settings.focusGrade.farBloom },
       uFarTopAmount: { value: this.settings.focusGrade.farTopFalloff },
       uFarTopStart: { value: this.settings.focusGrade.farTopStart },
+      uNearSubordinate: { value: 0 },
+      uNearDesat: { value: this.settings.focusGrade.nearDesaturate },
+      uNearDarken: { value: this.settings.focusGrade.nearDarken },
+      uNearTint: { value: new Vector3(1, 1, 1) },
+      uNearDensity: { value: this.settings.focusGrade.nearDensity },
+      uNearStart: { value: this.settings.focusGrade.nearStart },
+      uNearBloom: { value: this.settings.focusGrade.nearBloom },
+      uNearBounce: { value: new Vector3(0, 0, 0) },
+      uNearBottomStart: { value: this.settings.focusGrade.nearBottomStart },
+      uNearHighFloor: { value: this.settings.focusGrade.nearHighFloor },
       uGrainAmount: { value: this.settings.grain.amount },
       uGrainSize: { value: this.settings.grain.size },
       uGrainShadowBias: { value: this.settings.grain.shadowBias },
@@ -1904,6 +2080,16 @@ export class PostStack implements PostEffectsHost {
     cu['uFarBloom']!.value = Math.min(1, Math.max(0, fg.farBloom));
     cu['uFarTopAmount']!.value = fgOn ? Math.min(1, Math.max(0, fg.farTopFalloff)) : 0;
     cu['uFarTopStart']!.value = Math.min(0.999, Math.max(0, fg.farTopStart));
+    cu['uNearSubordinate']!.value = fgOn ? Math.min(1, Math.max(0, fg.nearAmount)) : 0;
+    cu['uNearDesat']!.value = fg.nearDesaturate;
+    cu['uNearDarken']!.value = fg.nearDarken;
+    (cu['uNearTint']!.value as Vector3).set(fg.nearTint[0], fg.nearTint[1], fg.nearTint[2]);
+    cu['uNearDensity']!.value = Math.max(0, fg.nearDensity);
+    cu['uNearStart']!.value = fg.nearStart;
+    cu['uNearBloom']!.value = Math.min(1, Math.max(0, fg.nearBloom));
+    (cu['uNearBounce']!.value as Vector3).set(fg.nearBounce[0], fg.nearBounce[1], fg.nearBounce[2]);
+    cu['uNearBottomStart']!.value = Math.min(0.999, Math.max(0.001, fg.nearBottomStart));
+    cu['uNearHighFloor']!.value = Math.min(1, Math.max(0, fg.nearHighFloor));
     cu['uGrainAmount']!.value = this.settings.grain.enabled
       ? floor
         ? Math.max(this.settings.grain.amount, REFERENCE_FLOOR.grainAmount)
@@ -2087,7 +2273,7 @@ export class PostStack implements PostEffectsHost {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DEBUG_VIEWS: readonly DebugView[] = ['off', 'ao', 'bloom', 'coc', 'dof', 'sprite-mask', 'no-grade'];
+const DEBUG_VIEWS: readonly DebugView[] = ['off', 'ao', 'bloom', 'coc', 'dof', 'sprite-mask', 'no-grade', 'aerial'];
 
 /**
  * '?postdebug=coc' on the page URL. The screenshot harness can only pass query parameters,
@@ -2109,6 +2295,7 @@ function debugCode(view: DebugView): number {
     case 'dof': return 4;
     case 'sprite-mask': return 5;
     case 'no-grade': return 6;
+    case 'aerial': return 7;
     default: return 0;
   }
 }

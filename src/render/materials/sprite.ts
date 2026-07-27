@@ -1121,8 +1121,21 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uAlbedoPivot: { value: options.albedoPivot ?? 0.32 },
     uShadeKnee: { value: options.shadeKnee ?? 1.15 },
     uShadeCompress: { value: options.shadeCompress ?? 0.8 },
-    uIndirectGain: { value: options.indirectGain ?? 0.36 },
-    uSkyOcclusion: { value: options.skyOcclusion ?? 0.3 },
+    // Round 10: 0.36 → 0.30. Measured on 'battle-open', a unit standing in an
+    // unlit pocket ('e-sable') renders at mean luma 71 against ground at 34 —
+    // twice as bright as the surface it stands on. The same measurement on
+    // 'refs/curated/fft/…-mediakit-03' gives figure 90 against carpet 139, i.e.
+    // the shipped game's units are *darker* than their floor. Most of that gap
+    // is the floor, not the figure, and the floor is not this file's to fix —
+    // but a shadowed unit collecting 36% of a hemisphere it presents a full
+    // face to is the part that is, and it is exactly the critics' "sits in a
+    // fully shadowed pocket and is still lit at full key".
+    uIndirectGain: { value: options.indirectGain ?? 0.3 },
+    // Round 10: 0.30 → 0.24. This ramps the indirect term *down the body*, and
+    // stacked on top of the foot pinch it was part of the same 2.2x head-to-boot
+    // collapse the band measurement found (see uFootShade). It still gives a
+    // figure internal modelling with the key occluded, which is what it is for.
+    uSkyOcclusion: { value: options.skyOcclusion ?? 0.24 },
     uSceneTint: { value: new THREE.Color(options.sceneTint ?? 0xffffff) },
     uGradeSaturation: { value: options.gradeSaturation ?? 0.96 },
     uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x1b2438) },
@@ -1158,10 +1171,33 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     // which is where 'refs/curated/fft/press-311722-…-03' puts it: the blue-clad
     // unit's boots run luma 60-75 against a torso at ~150 and the transition is
     // over within a boot-height.
+    // ── ROUND 10: 0.82/11 was annihilating the boots, not pinching them ───────
+    // Measured properly this round, band by band rather than by picking texels.
+    // Eight horizontal bands down the figure, reporting the *brightest* texel in
+    // each band (a mean is diluted by however much background the box catches,
+    // which is what made the round-8 reading unreliable):
+    //
+    //   refs/curated/fft/…-mediakit-03, right-hand unit, head → boot:
+    //       227 206 208 193 207 207 202 203     — essentially flat
+    //   ours, 'e-sable' on 'battle-open', same eight bands:
+    //       223 221 173 194 168 109 102 111     — a 2.2x collapse
+    //
+    // So the reference does *not* fade its figures out toward the ground. Its
+    // contact darkening is a two-or-three-texel seam at the sole — the black
+    // line where boot meets carpet — and above that the boot is as bright as the
+    // tunic. An 11-texel ramp at 0.82 is a quarter of a standing figure's height
+    // dissolving into the background, which reads as the sprite fading out, not
+    // as occlusion, and it costs the unit its silhouette exactly where the eye
+    // goes looking for the contact.
+    //
+    // Five texels at 0.55 puts ~2x of darkening in the lowest two rows and is
+    // back at 0.98 by the fifth, which is the shape the reference actually
+    // draws and the shape the brief asks for: "tight, high-contrast darkening
+    // exactly where the sprite meets the surface".
     uFootBaseTexels: { value: 0 },
     uBodyTexels: { value: options.frameHeight },
-    uFootShade: { value: 0.82 },
-    uFootShadeTexels: { value: 9 },
+    uFootShade: { value: 0.55 },
+    uFootShadeTexels: { value: 5 },
     uGrounded: { value: 1 },
 
     uFlashColor: { value: new THREE.Color(0xffffff) },

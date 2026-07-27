@@ -1053,6 +1053,13 @@ void main() {
     // props sat at saturation 0.086 — a grey mass, which is its own explicit
     // fail condition; the reference frames' equivalent windows measure 0.70 and
     // 0.88. Clamped at 0 by the max() on the way out.
+    // Round 10 tried 0.88 / 0.24 here, to match the plate grade below. Measured
+    // worse on every axis that matters — backgroundFraction 0.205 -> 0.208,
+    // backgroundDetail 8.25 -> 7.94, localContrast 23.72 -> 23.11 — so these
+    // weights stand. The props and the plate legitimately want different
+    // numbers: the props are small, high-contrast silhouettes whose chroma
+    // variance is load-bearing for the background test, and the plate is one
+    // large continuous surface where the same variance reads as noise.
     col = mix(vec3(lum), col, 1.0 + 0.5 * s);
   }
 
@@ -1468,6 +1475,66 @@ void main() {
   float lateral = smoothstep(uHalfW * 0.55, uHalfW * 1.75, abs(vLocal.x));
   col *= mix(1.0, 0.30, lateral * lateral);
 
+  // ── Margin chroma grade ───────────────────────────────────────────────────
+  //
+  // Everything above this line, and every previous round's work on this plate,
+  // is a pure VALUE operation: the occlusion bowl, the contact darkening, the
+  // near-field crush and the lateral ramp are all 'col *= k'. STRUCT_FRAG
+  // already documents why that is not sufficient on its own — the terms feeding
+  // this surface are a warm sun plus a cool sky, whose average is colourless, so
+  // scaling it down yields a darker neutral rather than a darker colour. The
+  // props got the three-step fix in round 7; the plate they stand on never did.
+  //
+  // Measured on the round-10 frame by hiding this layer ('?envdebug=ground'):
+  //
+  //             with plate      without      i.e. the plate contributes
+  //   nearC     27.6 / 0.636    18.6 / 0.762   +9.0 luma, −0.126 saturation
+  //   nearR     33.6 / 0.581    22.0 / 0.722  +11.6 luma, −0.141 saturation
+  //
+  // So the plate is not merely bright in the near field, it is actively pulling
+  // chroma OUT of the bottom third — the one region where both references are at
+  // their most saturated. press_002 measures 0.899/0.926 in those two windows
+  // and official_033 measures 0.866/0.888, against boards at 0.857 and 0.607.
+  // In every reference the near field is the MOST chromatic zone in the frame;
+  // in ours it was the least, and this surface is the reason.
+  //
+  // Same three steps, same rationale, same axis as STRUCT_FRAG's block, so the
+  // plate and the clutter standing on it recede together instead of the props
+  // binding to the grade while the surface under them drifts to tan:
+  //   1. bind hue toward the map's crushed-black tint at CONSTANT luminance
+  //      (uDeepUnit is already normalised to unit luma, so this cannot change
+  //      value even in principle — the silhouette work above survives intact)
+  //   2. extrapolate away from luminance so step 1 can never land on a neutral.
+  //
+  // Placed before the practical pool on purpose: the pool is a real light and
+  // must stay warm: grading after it would drag the brazier's own spill toward
+  // the cool anchor, which is the opposite of the warm/cool split the rubric
+  // asks for.
+  {
+    const vec3 LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+    // A screen-height term was tried here as a mirror of 'etRecede' (the lower
+    // right reads off-palette at every yaw, and screen height is the axis that
+    // defect is actually stated on). Measured, it went the wrong way:
+    // backgroundFraction 0.208 -> 0.215 with no visible hue improvement, because
+    // the warm cast in that corner is the practical pool below, which is added
+    // AFTER this grade and so is out of its reach entirely. Left out rather than
+    // left in at zero weight, but recorded so it is not re-derived next round.
+    float margin = max(nearAmt * nearAmt, lateral * lateral);
+    float lum = dot(col, LUMA_W);
+    col = mix(col, uDeepUnit * lum, margin * 0.84);
+    // Deliberately a weak extrapolation. The first pass ran this at 0.62 and it
+    // made the lower right go magenta: extrapolating away from luminance
+    // amplifies whatever hue is already present, and where the plate sits under
+    // an additive warm glow card the residual is a warm pink, so the term that
+    // was supposed to stop the margin going grey instead invented a hue that
+    // exists nowhere else in the palette. Binding harder toward the map's own
+    // tone and amplifying less converges the whole margin on ONE hue family,
+    // which is what both references actually do — their near fields are a single
+    // deep chromatic band, not a saturated mixture.
+    col = mix(vec3(lum), col, 1.0 + 0.22 * margin);
+    col = max(col, 0.0);
+  }
+
   // ── Warm practical pool ──────────────────────────────────────────────────
   //
   // "The fire pit is emissive-only: it blooms but illuminates nothing" and
@@ -1696,7 +1763,41 @@ export class Backdrop extends Group {
     this.receiveShadow = false;
   }
 
+  /**
+   * Layers suppressed for attribution. See 'setLayerHidden'.
+   *
+   * Kept as a set of names rather than as 'mesh.visible' writes because
+   * 'layout()' rebuilds every mesh, and a rebuild that silently un-hid a layer
+   * mid-measurement is exactly the kind of thing that makes an attribution run
+   * disagree with itself.
+   */
+  private readonly hidden = new Set<string>();
+
   // ── build ────────────────────────────────────────────────────────────────
+
+  /**
+   * Hide one layer so its contribution to a frame can be measured by difference.
+   *
+   * Round 7 attributed the over-bright lower-right window by toggling layers at
+   * runtime, but did it by hand-editing the source and rebuilding each time.
+   * That is slow enough that it only ever got run once, and the numbers in the
+   * comments below went stale as a result. Names are the band names ('verge',
+   * 'nearfield', 'fore', 'flank', 'skirt', 'scatter', 'apron', 'ridge') plus
+   * 'ground' and 'glow'.
+   */
+  setLayerHidden(name: string, hidden: boolean): void {
+    if (hidden) this.hidden.add(name);
+    else this.hidden.delete(name);
+    this.applyHidden();
+  }
+
+  private applyHidden(): void {
+    for (const mesh of this.bandMeshes) {
+      mesh.visible = !this.hidden.has(mesh.name.replace('env-backdrop-', ''));
+    }
+    if (this.groundMesh) this.groundMesh.visible = !this.hidden.has('ground');
+    if (this.glowMesh) this.glowMesh.visible = !this.hidden.has('glow');
+  }
 
   /** Tear down and regenerate for a new camera framing / board size. */
   layout(layout: BackdropLayout): void {
@@ -2044,6 +2145,8 @@ export class Backdrop extends Group {
     this.buildGlow();
 
     this.applyPalette();
+    // A relayout rebuilds every mesh, so re-assert any attribution suppression.
+    this.applyHidden();
   }
 
   /** One merged draw call of view-aligned additive cards, one per practical. */
