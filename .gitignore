@@ -1,7 +1,14 @@
 node_modules/
 dist/
-shots/
+# NOTE: must be `shots/*`, not `shots/`. Excluding the directory itself stops git
+# descending into it, so a `!shots/milestones/` negation can never take effect —
+# the README's images silently 404'd on the published repo because of exactly this.
+shots/*
 !shots/milestones/
 .vite/
 *.log
 refs/
+
+# Agent scratch output — diagnostic renders, probe scripts. Not part of the project.
+tools/_scratch/
+tools/out/
