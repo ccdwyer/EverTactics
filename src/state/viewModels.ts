@@ -133,7 +133,15 @@ export function unitVM(_state: BattleState, unit: Unit): UnitVM {
 // Turn order
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function turnOrderVM(state: BattleState, limit = 12): TurnEntryVM[] {
+/**
+ * Upcoming turns for the order rail.
+ *
+ * The default is 8, not 12. The rail is a vertical strip on the left edge and
+ * each chip is slightly taller than it is wide, so twelve entries run under the
+ * unit panel at 1080p and the last one is clipped. Eight fills the column, keeps
+ * every chip legible, and still shows further ahead than a player plans.
+ */
+export function turnOrderVM(state: BattleState, limit = 8): TurnEntryVM[] {
   const forecast = forecastTurns(state, limit);
   const out: TurnEntryVM[] = [];
   for (let i = 0; i < forecast.length; i++) {

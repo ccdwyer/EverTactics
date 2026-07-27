@@ -168,6 +168,34 @@ describe('job roster', () => {
     expect(empty).toEqual([]);
   });
 
+  it('has a portrait face family for every job', () => {
+    // `JOB_FACE` in src/ui/portraits.ts is keyed by the job's DISPLAY NAME
+    // lowercased ("white mage"), not its kebab id ("white-mage"), because that
+    // is what `viewModels.portraitFor` passes. A job with no entry silently
+    // falls through to a hashed generic face, which is how the turn rail ended
+    // up showing a lizard and a goat beside twelve human sprites.
+    //
+    // This is asserted at source level rather than by importing the module,
+    // because portraits.ts pulls in DOM helpers that do not exist under node.
+    const src = readFileSync(resolve(REPO, 'src/ui/portraits.ts'), 'utf8');
+    const block = /const JOB_FACE[^=]*=\s*\{([\s\S]*?)\n\};/.exec(src);
+    expect(block, 'could not find the JOB_FACE table').not.toBeNull();
+
+    // Keys are a mix of quoted multi-word names and bare identifiers. Matching
+    // only the bare ones is an easy mistake that makes the table look 6 entries
+    // short — count both.
+    const keys = new Set(
+      [...block![1]!.matchAll(/^\s*(?:['"]([^'"]+)['"]|([A-Za-z_][A-Za-z0-9_]*))\s*:/gm)]
+        .map((m) => (m[1] ?? m[2] ?? '').toLowerCase()),
+    );
+
+    const missing = allJobs()
+      .map((j) => j.name.toLowerCase())
+      .filter((name) => !keys.has(name));
+
+    expect(missing, `jobs with no portrait family: ${missing.join(', ')}`).toEqual([]);
+  });
+
   it('writes real prose for every job', () => {
     for (const job of allJobs()) {
       expect(job.name.length, `${job.id} name`).toBeGreaterThan(2);

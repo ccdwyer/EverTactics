@@ -24,6 +24,7 @@
 
 import * as THREE from 'three';
 import type { Battlefield, SlopeKind, SurfaceKind, Tile, Vec3 } from '@core/types';
+import { getMapDef } from '@core/grid';
 import {
   createSurfaceMaterial,
   isWaterSurface,
@@ -67,6 +68,12 @@ const SKIRT = 0.55;
 const WATERLINE_SKIRT = 0.3;
 /** …nor above the lowest walkable ground, so every column keeps some thickness. */
 const GROUND_SKIRT = 0.2;
+/**
+ * Thickness of a deck surface (`MapDef.deckSurfaces`) — a bridge is planking on
+ * trestles, not a column of masonry, so its side faces stop this far below the top
+ * and the understructure is built as real geometry.
+ */
+const DECK_THICKNESS = 0.17;
 /** Water column depth (in half-tiles) carved beneath each water surface. */
 const WATER_BED_DEPTH = 3;
 const DEEPWATER_BED_DEPTH = 7;
@@ -91,17 +98,24 @@ const RELIEF_SURFACES: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
   'snow',
   'swamp',
 ]);
-const RELIEF_AMPLITUDE = 0.075;
+const RELIEF_AMPLITUDE = 0.13;
 
-/** World-Y offset applied to natural ground tops at world (wx, wz). */
+/**
+ * World-Y offset applied to natural ground tops at world (wx, wz).
+ *
+ * Deliberately **never positive**: sprites anchor at `tile.height * HEIGHT_UNIT`, so
+ * soil that rose above that would leave feet hanging in the air. Turf that dips below
+ * it just buries the feet a little, which is what grounded looks like. As a bonus it
+ * leaves paving standing a few centimetres proud of the grass it abuts, so the
+ * material boundary is a real lip instead of a texture change.
+ */
 function groundRelief(surface: SurfaceKind, wx: number, wz: number): number {
   if (!RELIEF_SURFACES.has(surface)) return 0;
-  // Two octaves at different world scales: a slow swell across the whole lawn plus a
-  // finer hummock, biased downward so a unit's feet sink into the turf rather than
-  // hovering over it.
-  const broad = fbm3(wx * 0.29, 0, wz * 0.29, 913, 2) - 0.5;
-  const fine = fbm3(wx * 1.15, 0, wz * 1.15, 2287, 2) - 0.5;
-  return (broad * 1.35 + fine * 0.55) * RELIEF_AMPLITUDE - RELIEF_AMPLITUDE * 0.28;
+  // A slow swell across the whole lawn plus a finer hummock on top of it.
+  const broad = fbm3(wx * 0.27, 0, wz * 0.27, 913, 2);
+  const fine = fbm3(wx * 1.05, 0, wz * 1.05, 2287, 2);
+  const n = Math.min(1, Math.max(0, broad * 0.72 + fine * 0.28));
+  return -RELIEF_AMPLITUDE * (0.12 + 0.88 * n);
 }
 
 /** Height of the walkable surface of a tile, in world units. */
@@ -368,7 +382,6 @@ class ColumnField {
     // silt bed on the map: whatever is exposed to open air on at least one side is
     // what the viewer can see the bottom of.
     let minRim = Infinity;
-    let minWater = Infinity;
     let minGround = Infinity;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -379,17 +392,19 @@ class ColumnField {
         this.heights[i] = solidTopHalf(t);
         this.slopes[i] = isWaterSurface(t.surface) ? 'flat' : t.slope;
 
+        // Water contributes its *surface*, not its bed: a pond does not make the
+        // island thicker, it makes a hole in it.
         const surfaceY = t.height * HEIGHT_UNIT;
-        if (isWaterSurface(t.surface)) minWater = Math.min(minWater, surfaceY);
-        else minGround = Math.min(minGround, surfaceY);
+        if (!isWaterSurface(t.surface)) minGround = Math.min(minGround, surfaceY);
         const exposed =
           !at(x - 1, y) || !at(x + 1, y) || !at(x, y - 1) || !at(x, y + 1);
-        if (exposed) minRim = Math.min(minRim, surfaceY);
+        if (exposed) {
+          minRim = Math.min(minRim, surfaceY - (isWaterSurface(t.surface) ? WATERLINE_SKIRT : 0));
+        }
       }
     }
 
     let base = Number.isFinite(minRim) ? minRim - SKIRT : -SKIRT;
-    if (Number.isFinite(minWater)) base = Math.min(base, minWater - WATERLINE_SKIRT);
     if (Number.isFinite(minGround)) base = Math.min(base, minGround - GROUND_SKIRT);
     this.baseY = base;
 
@@ -1107,6 +1122,12 @@ function isNaturalRock(
 ): boolean {
   if (NATURAL_ROCK.has(kind)) return true;
   if (kind !== 'stone') return false;
+  // Masonry is masonry. An impassable stone tile is a wall, a plinth or a fountain
+  // kerb — something a mason built — so it keeps coursed stone sides no matter how
+  // much grass has grown up around it. Only walkable stone is allowed to resolve as
+  // bedrock, which is what a rocky outcrop poking through a lawn actually is.
+  const self = tiles[ty * width + tx];
+  if (self && !self.passable) return false;
   let natural = 0;
   let built = 0;
   for (let dz = -1; dz <= 1; dz++) {
@@ -1534,6 +1555,108 @@ function addParapet(
 }
 
 /**
+ * A corbelled timber gallery projecting from an outer wall face.
+ *
+ * A tall masonry elevation seen from outside is the flattest thing a diorama can
+ * show, and no amount of texture detail fixes it — what fixes it is something that
+ * sticks *out*, catches the key light on its deck and drops a hard shadow band on the
+ * wall beneath. Two stone corbels carry a plank floor, a rail runs along the front,
+ * and a shallow pent roof caps it.
+ */
+function addGallery(
+  stone: Bucket,
+  timber: Bucket,
+  cx: number, cz: number,
+  deckY: number,
+  outX: number, outZ: number,
+  seed: number,
+): void {
+  const yaw = Math.atan2(outZ, outX);
+  const reach = 0.36 + hash3(Math.round(cx * 4), Math.round(cz * 4), 3, seed) * 0.12;
+  const half = 0.44;
+  // Along-wall axis, perpendicular to the outward normal.
+  const ax = outX === 0 ? 1 : 0;
+  const az = outX === 0 ? 0 : 1;
+
+  // Corbels: two stubby brackets on the wall face carrying the deck.
+  stone.hint = 0.34;
+  for (const side of [-1, 1] as const) {
+    addBox(
+      stone,
+      cx + outX * (0.5 + reach * 0.42) + ax * side * 0.3,
+      deckY - 0.13,
+      cz + outZ * (0.5 + reach * 0.42) + az * side * 0.3,
+      outX === 0 ? 0.075 : reach * 0.45,
+      0.075,
+      outX === 0 ? reach * 0.45 : 0.075,
+      0,
+    );
+  }
+  stone.hint = -1;
+
+  // Deck.
+  timber.hint = 0.62;
+  addBox(
+    timber,
+    cx + outX * (0.5 + reach * 0.5),
+    deckY - 0.035,
+    cz + outZ * (0.5 + reach * 0.5),
+    outX === 0 ? half : reach * 0.5,
+    0.035,
+    outX === 0 ? reach * 0.5 : half,
+    0,
+  );
+  // Front rail plus two posts, so the silhouette is broken by thin elements too.
+  timber.hint = 0.86;
+  addBox(
+    timber,
+    cx + outX * (0.5 + reach),
+    deckY + 0.20,
+    cz + outZ * (0.5 + reach),
+    outX === 0 ? half : 0.035,
+    0.032,
+    outX === 0 ? 0.035 : half,
+    0,
+  );
+  for (const side of [-1, 1] as const) {
+    addBox(
+      timber,
+      cx + outX * (0.5 + reach) + ax * side * (half - 0.05),
+      deckY + 0.10,
+      cz + outZ * (0.5 + reach) + az * side * (half - 0.05),
+      0.033, 0.115, 0.033,
+      0,
+    );
+  }
+  timber.hint = -1;
+
+  // Pent roof, tilted out — the overhang that puts a shadow band across the wall.
+  timber.hint = 0.98;
+  addBox(
+    timber,
+    cx + outX * (0.5 + reach * 0.55),
+    deckY + 0.52,
+    cz + outZ * (0.5 + reach * 0.55),
+    outX === 0 ? half + 0.06 : reach * 0.72,
+    0.030,
+    outX === 0 ? reach * 0.72 : half + 0.06,
+    yaw * 0,
+  );
+  stone.hint = 0.4;
+  for (const side of [-1, 1] as const) {
+    addBox(
+      stone,
+      cx + outX * 0.52 + ax * side * (half - 0.02),
+      deckY + 0.32,
+      cz + outZ * 0.52 + az * side * (half - 0.02),
+      0.035, 0.20, 0.035,
+      0,
+    );
+  }
+  stone.hint = -1;
+}
+
+/**
  * A pilaster buttress running down the outer face of the diorama's pedestal, with a
  * weathered sloping top and a spreading foot. Three or four of these per side turn a
  * blank retaining wall into architecture and, more importantly, break the silhouette
@@ -1937,6 +2060,7 @@ function populateProps(
   height: number,
   columns: readonly ColumnSpec[],
   pedestalBaseY: number,
+  isDeck: (t: Tile) => boolean,
   bucketFor: (k: TerrainMaterialKind) => Bucket,
   ember: Bucket,
 ): PropPlacement {
@@ -1951,6 +2075,61 @@ function populateProps(
 
   const rnd = (x: number, y: number, salt: number): number =>
     hash3(x, y, salt, PROP_SEED);
+
+  // ── deck understructure ─────────────────────────────────────────────────
+  // A bridge is not a column of masonry with a plank lid. The solid pass already
+  // stops the fascia at DECK_THICKNESS; here we hang the beams and trestle legs that
+  // carry it, so the span reads as built rather than extruded.
+  for (let ty = 0; ty < height; ty++) {
+    for (let tx = 0; tx < width; tx++) {
+      const t = tileAtIn(tiles, width, height, tx, ty);
+      if (!t || !isDeck(t)) continue;
+      const deckY = centreY(t) - DECK_THICKNESS;
+      let footY = deckY;
+      for (const [dx, dy] of ORTHO) {
+        const n = tileAtIn(tiles, width, height, tx + dx, ty + dy);
+        if (!n || isDeck(n)) continue;
+        footY = Math.min(footY, solidTopHalf(n) * HEIGHT_UNIT);
+      }
+      footY = Math.min(footY, pedestalBaseY + 0.1);
+      const ox = tx * TILE_SIZE;
+      const oz = ty * TILE_SIZE;
+
+      // Two longitudinal stringers under the planking.
+      timber.hint = 0.42;
+      addBox(timber, ox - 0.3, deckY - 0.055, oz, 0.075, 0.06, 0.5);
+      addBox(timber, ox + 0.3, deckY - 0.055, oz, 0.075, 0.06, 0.5);
+      addBox(timber, ox, deckY - 0.055, oz - 0.3, 0.5, 0.06, 0.075);
+      addBox(timber, ox, deckY - 0.055, oz + 0.3, 0.5, 0.06, 0.075);
+      timber.hint = -1;
+
+      const legH = deckY - 0.11 - footY;
+      if (legH > 0.12) {
+        timber.hint = 0.3;
+        for (const [lx, lz] of [
+          [-0.31, -0.31],
+          [0.31, -0.31],
+          [-0.31, 0.31],
+          [0.31, 0.31],
+        ] as const) {
+          const lean = 0.045 * legH;
+          addBox(
+            timber,
+            ox + lx + Math.sign(lx) * lean * 0.5,
+            footY + legH * 0.5,
+            oz + lz + Math.sign(lz) * lean * 0.5,
+            0.055,
+            legH * 0.5,
+            0.055,
+          );
+        }
+        // A cross-brace halfway down so the trestle is not four bare sticks.
+        addBox(timber, ox, footY + legH * 0.55, oz - 0.31, 0.33, 0.038, 0.05);
+        addBox(timber, ox, footY + legH * 0.55, oz + 0.31, 0.33, 0.038, 0.05);
+        timber.hint = -1;
+      }
+    }
+  }
 
   // ── columns ─────────────────────────────────────────────────────────────
   for (const c of columns) {
@@ -2036,6 +2215,13 @@ function populateProps(
                 addButtress(
                   stone, ox, oz, y, pedestalBaseY, dx, dy,
                   PROP_SEED ^ (tx * 23 + ty * 41 + dx),
+                );
+              } else if (drop > 2.0 && rnd(tx, ty, dx * 5 + dy * 11 + 80) > 0.55) {
+                // A projecting gallery on a tall outer bay: the overhang is what stops
+                // the elevation reading as one poured plane.
+                addGallery(
+                  stone, timber, ox, oz, y - 0.30, dx, dy,
+                  PROP_SEED ^ (tx * 37 + ty * 19 + dy),
                 );
               }
             }
@@ -2193,6 +2379,11 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
     if (!t) continue;
     tiles[c.ty * width + c.tx] = { ...t, height: c.baseHalf, slope: 'flat' };
   }
+
+  // Which surfaces this map wants rendered as a deck over open air rather than as a
+  // solid column of earth (the bridge over Orbonne's reflecting pool, Mandalia's ford).
+  const deckKinds = new Set<SurfaceKind>(getMapDef(field.mapId)?.deckSurfaces ?? []);
+  const isDeck = (t: Tile): boolean => deckKinds.has(t.surface);
 
   const buckets = new Map<TerrainMaterialKind, Bucket>();
   const bucketFor = (k: TerrainMaterialKind): Bucket => {
@@ -2472,7 +2663,11 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
               ? tile.height * HEIGHT_UNIT - CHAMFER_DROP
               : ringYEdge(tile, tx, ty, ei, u, vv),
           );
-          if (nbSolid && nb) {
+          // A deck does not fill its column, so a solid tile beside one must still
+          // show its own section — otherwise you see straight through the gap under
+          // the bridge into an unclosed hole.
+          const nbFills = nbSolid && nb && (!isDeck(nb) || isDeck(tile));
+          if (nbFills && nb) {
             const mu = e.mu0 + (e.mu1 - e.mu0) * p;
             const mv = e.mv0 + (e.mv1 - e.mv0) * p;
             bottoms.push(ringYEdge(nb, tx + e.dx, ty + e.dy, (ei + 2) % 4, mu, mv));
@@ -2480,6 +2675,13 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
             // Down to the diorama's underside — or past it, where this column's own
             // silt bed cuts deeper than the base, so the section never opens a hole.
             bottoms.push(column.bottomAt(tx, ty));
+          }
+        }
+        if (isDeck(tile)) {
+          // Planking: the section stops just under the deck, and the trestle that
+          // carries it is built as geometry in `populateProps`.
+          for (let i = 0; i <= S; i++) {
+            bottoms[i] = Math.max(bottoms[i]!, tops[i]! - DECK_THICKNESS);
           }
         }
         let maxDrop = 0;
@@ -2679,7 +2881,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
   // ── props ───────────────────────────────────────────────────────────────
   const emberBucket = new Bucket();
   const placement = populateProps(
-    srcTiles, width, height, columnSpecs, column.baseY, bucketFor, emberBucket,
+    srcTiles, width, height, columnSpecs, column.baseY, isDeck, bucketFor, emberBucket,
   );
 
   // ── assemble ────────────────────────────────────────────────────────────

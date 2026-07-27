@@ -139,6 +139,15 @@ export interface EnvironmentPalette {
   sunDirection: Vector3;
   /** Key intensity, so distant geometry can be lit in the same units. */
   sunIntensity: number;
+  /**
+   * False when the scene has no lighting rig yet, or none at all.
+   *
+   * The diagnostic scenes (`ui-only`, `sprites-only`) run without one. With the
+   * warm fallback key they were getting a full sepia sky complete with a sun
+   * bloom, which is noise in a frame whose whole job is to isolate one
+   * subsystem. When this is false the sky drops to a flat cool wash.
+   */
+  hasKey: boolean;
 }
 
 export interface PaletteTuning {
@@ -175,7 +184,8 @@ function tintOf(c: Color, out = new Color()): Color {
 
 const DEFAULT_DEEP = new Color().setHex(0x080d18, 'srgb');
 const DEFAULT_HAZE = new Color().setHex(0x1b3050, 'srgb');
-const DEFAULT_SUN = new Color().setHex(0xffc07a, 'srgb');
+/** Cool, not warm: this is the no-lighting-rig fallback, not a sunrise. */
+const DEFAULT_SUN = new Color().setHex(0x9fb6d8, 'srgb');
 
 function firstKeyLight(scene: Scene): DirectionalLight | null {
   let best: DirectionalLight | null = null;
@@ -258,7 +268,7 @@ export function deriveEnvironmentPalette(scene: Scene, tuning: PaletteTuning = {
   /** Only visible below the horizon where the ground plate has faded out. */
   const ground = hazeTint.clone().lerp(deepTint, 0.45).multiplyScalar(GROUND_LEVEL * skyGain);
 
-  return { zenith, horizon, haze, ground, sun, deep, sunDirection, sunIntensity };
+  return { zenith, horizon, haze, ground, sun, deep, sunDirection, sunIntensity, hasKey: key !== null };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

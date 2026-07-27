@@ -310,37 +310,43 @@ const QUALITY: Record<PostQuality, QualityProfile> = {
  */
 export const REFERENCE_FLOOR = {
   /**
-   * Blur radius at the softest part of the frame, in pixels at 1080p. Measured ~20px on the
-   * reference corners. A floor: the soft parts of the frame must be genuinely soft.
+   * Blur radius at the softest part of the frame, in pixels at 1080p — a floor: wherever the
+   * frame IS soft it must be genuinely soft. Raised from 20 once the board started filling
+   * the frame: the only scenery left in shot is the near wall and the two outer corners, so
+   * what little is defocused has to commit or the miniature read never fires.
    */
-  dofCoCPixels: 20,
+  dofCoCPixels: 26,
   /**
-   * Minimum half-height of the fully sharp band, in UV — a floor on sharpness.
+   * Minimum half-height of the fully sharp band, in UV — a floor on SHARPNESS.
    *
-   * At 0.28 (round 1's value, applied as a CAP) the band centred on v = 0.52 defocused
-   * everything above v = 0.24 and below v = 0.80. With the board now filling the frame
-   * rather than floating in it, that is the top three tile rows and the bottom two: exactly
-   * the "blurring pillars and gameplay-relevant tiles" defect section 3 names.
+   * Round 1 applied this as a CAP at 0.28 with the band centred on v = 0.52, which defocused
+   * everything above v = 0.80 and below v = 0.24: the top three tile rows and the bottom two.
+   * That is precisely the "blurring pillars and gameplay-relevant tiles" defect section 3
+   * names, so the clamp direction is flipped and the value is measured, not guessed.
    *
-   * Measured on `shots/r2-c.png`, the framing `frameField` now produces puts playable tiles
-   * between v = 0.33 and v = 0.88 — centre 0.60, half-height 0.28. So the band is centred on
-   * 0.60 (see `defaultPostSettings`) and 0.30 covers the board with a little to spare, while
-   * leaving the near chapel wall and the map's skirt below it, and the sky above it, to fall
-   * off. Wider than this and the foreground scenery stays sharp too, which is the "zero
-   * depth of field" tell; narrower and it eats tiles the player has to count.
+   * Measured on `shots/r2-l.png` at the framing `frameField` now produces: playable tiles
+   * run from v = 0.19 to v = 0.90. Centre 0.55 (see `defaultPostSettings`) with a 0.34
+   * half-band covers v ∈ [0.21, 0.89] — the whole board bar its last row of skirt — and
+   * leaves the top ~10% and the bottom ~20% to fall off, which is the split VISUAL_TARGET.md
+   * measures on the reference frame.
    */
-  dofTiltBandMin: 0.3,
+  dofTiltBandMin: 0.34,
   /**
    * Minimum falloff distance past the band. Long enough that the transition is a ramp
    * rather than a visible seam across the board; the references have no hard focus edge.
    */
   dofTiltFalloffMin: 0.3,
   /**
-   * MAXIMUM corner-term weight. This is the term that softens the frame corners so a
-   * horizontal band does not leave them razor sharp — but at 0.7 it reached inward far
-   * enough to blur the left and right walls of the cloister, which are playable geometry.
+   * MAXIMUM corner-term weight — the term that softens the frame corners, which a purely
+   * horizontal band leaves razor sharp.
+   *
+   * Capped, not floored. At round 1's 0.7 starting from a normalised radius of 0.42 it
+   * reached inward far enough to blur the left and right cloister walls, which are playable
+   * geometry. The answer was not to weaken it but to move it outward: `tiltRadialStart` now
+   * begins at 0.70 of the way to the corner, so the term is confined to the corners and can
+   * afford to be strong there.
    */
-  dofTiltRadialMax: 0.34,
+  dofTiltRadialMax: 0.44,
   /** Fraction of light removed at the frame corner. */
   vignetteAmount: 0.34,
   /**
@@ -396,14 +402,14 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // Slightly above centre: the reference frames put the sharp band on the action and
       // leave the negative space above it soft. Matches the camera's composition offset,
       // which lifts the subject the same way.
-      tiltCenter: [0.5, 0.6],
+      tiltCenter: [0.5, 0.55],
       tiltAngle: 0,
       tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
       tiltFalloff: REFERENCE_FLOOR.dofTiltFalloffMin,
       tiltRadial: REFERENCE_FLOOR.dofTiltRadialMax,
       // Pushed out from 0.42: the corner term now begins two thirds of the way to the
       // corner, so it is a corner softener rather than a second vignette.
-      tiltRadialStart: 0.66,
+      tiltRadialStart: 0.7,
       maxCoCPixels: REFERENCE_FLOOR.dofCoCPixels,
       bokehBoost: 1.6,
       nearStrength: 0.9,
@@ -570,12 +576,12 @@ export class PostStack implements PostEffectsHost {
     focusDistance: 18,
     focusRange: 6,
     cocScale: 0.55,
-    tiltCenter: [0.5, 0.6],
+    tiltCenter: [0.5, 0.55],
     tiltAngle: 0,
     tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
     tiltFalloff: REFERENCE_FLOOR.dofTiltFalloffMin,
     tiltRadial: REFERENCE_FLOOR.dofTiltRadialMax,
-    tiltRadialStart: 0.66,
+    tiltRadialStart: 0.7,
     bokehBoost: 1.6,
     nearStrength: 0.9,
     nearSpread: 0.4,

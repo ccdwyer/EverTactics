@@ -41,21 +41,25 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * BANDS
  * ─────────────────────────────────────────────────────────────────────────────
- *   flank   |depth| small, |x| beyond the board — fills the left/right void
- *   apron   depth  R+1 … R+9,  h 1–6  — outbuildings, walls, trees, lanterns
- *   ridge   depth  R+9 … R+22, h 4–14 — bell tower, keep wall, big roofs
- *   fore    depth  −16 … −5,   h 2–7  — out-of-focus foreground framing
+ * All four are expressed against the *measured* window — `boardRadius` R and
+ * `visibleDepth`, with `run = visibleDepth − R` the usable depth behind the
+ * board (about 4.5 units at the shipping framing):
+ *
+ *   flank   |depth| ≤ 0.95R, |x| past the footprint — the left/right strips
+ *   apron   depth  R … R+0.62·run   — outbuildings, walls, trees, lanterns
+ *   ridge   depth  R+0.45·run … R+1.25·run — towers whose tops crop at the top edge
+ *   fore    depth  0.5·nearDepth … 1.45·nearDepth — foliage framing the bottom corners
  *
  * `fore` exists because both reference frames have a soft, dark foreground
  * element breaking into the bottom of the image, and because `post.ts`'s DoF
- * needs something in the near field to actually blur.
+ * needs something in the near field to actually blur. It is restricted to
+ * organic shapes: buildings there came back from the DoF pass as featureless
+ * black rectangles.
  *
  * Everything is merged per band, so the whole surround is five draw calls.
  */
 
 import {
-  AdditiveBlending,
-  BackSide,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -96,6 +100,33 @@ export interface BackdropLayout {
   halfH: number;
   /** Depth at which the ground plate has fully dissolved into haze. */
   horizonDepth: number;
+  /**
+   * Depth at which a point on the ground plate leaves the TOP of the frame.
+   *
+   * This is the number that governs everything, and it is much smaller than
+   * intuition suggests. Under the shipping framing it measures ~15 world units
+   * against a board radius of ~10.6 — so the entire surround has four and a half
+   * units of usable depth behind the board, and anything authored past that is
+   * geometry nobody will ever see. The first pass put two whole bands out there.
+   */
+  visibleDepth: number;
+  /** Depth at which the ground plate leaves the BOTTOM of the frame (negative). */
+  nearDepth: number;
+  /**
+   * Board footprint half-extents on the world X/Z axes, and the camera yaw the
+   * layout was built for.
+   *
+   * The clearance test needs the *real* footprint, not a bounding disc. At the
+   * shipping 45° yaw the cloister is a diamond on screen: at five units of depth
+   * its silhouette is only ±5.6 wide, so a disc of the circumscribed radius
+   * (10.6) forbids placement across the entire visible left and right strips —
+   * which is exactly where the remaining void lives. Since the surround already
+   * follows yaw, the layout is rebuilt on a yaw change and can afford to be
+   * exact.
+   */
+  boardHalfX: number;
+  boardHalfZ: number;
+  yaw: number;
   /** Deterministic layout seed. Screenshots must be reproducible. */
   seed: number;
 }
@@ -303,6 +334,7 @@ uniform float uHazeFar;
 uniform float uHazeMax;
 uniform float uGroundY;
 uniform float uWindowGain;
+uniform float uTone;
 uniform float uExposure;
 uniform float uTime;
 
@@ -322,32 +354,76 @@ void main() {
   // Roofs read warmer/darker than walls; that separation is most of what makes
   // a cluster of buildings legible at this size.
   vec3 albedo = mix(uBase, uRoof, smoothstep(0.35, 0.85, up));
-  albedo *= 0.78 + 0.44 * vTint;
+  albedo *= 0.55 + 0.78 * vTint;
+
+  // Face-local coordinates: across the face, and up it. Deriving the pattern
+  // from these rather than from world xz is what lets a wall carry courses and
+  // a roof carry tile rows without either bleeding onto the other.
+  vec2 face = abs(n.x) > abs(n.z) ? vec2(vLocal.z, vLocal.y) : vec2(vLocal.x, vLocal.y);
 
   // Macro + detail noise. Two octave sets at different scales so neither the
   // silhouette band nor an individual face is ever one value.
-  float macro = etFbm(vLocal.xz * 0.11 + vLocal.y * 0.05, 3);
-  float detail = etFbm(vLocal.xz * 1.7 + vec2(vLocal.y * 2.3, 0.0), 3);
-  albedo *= 0.74 + 0.34 * macro + 0.18 * detail;
+  //
+  // Frequencies were fixed in an earlier pass (0.11 was under a tenth of a
+  // period across a 3-unit outbuilding); the AMPLITUDES were not, and that is
+  // the half that actually mattered. At 0.48/0.26 against a mean of ~0.99 the
+  // whole modulation was ±14%, which on a surround albedo this dark is ±4 of
+  // 255 — measured on the frame, the flank houses came out as perfectly
+  // uniform cubes with a single flat window on them, i.e. exactly the
+  // flat-untextured-surface fail condition the frequency fix was aimed at.
+  float macro = etFbm(vLocal.xz * 0.62 + vLocal.y * 0.28, 3);
+  float detail = etFbm(face * 3.6 + vec2(vLocal.y * 1.7, macro * 5.0), 3);
+  float grain = etFbm(face * 13.0 + 31.4, 2);
 
-  // Horizontal courses on vertical faces: cheap masonry banding.
-  float courses = 0.5 + 0.5 * sin(vLocal.y * 7.3 + macro * 4.0);
-  albedo *= mix(1.0, 0.90 + 0.12 * courses, 1.0 - up);
+  // Every surface pattern is accumulated into ONE scalar rather than applied
+  // straight to the albedo, because the sky-edge lift further down is additive and
+  // was not albedo-modulated: on the near flank boxes it was the largest term in
+  // the composite, so it washed a constant value over faces that did carry a
+  // full masonry pattern and rendered them as untextured cubes. A single
+  // modulation factor can be applied to the ambient lift as well, which is the
+  // only way a term like that can exist without erasing the surface.
+  float tex = 0.34 + 0.62 * macro + 0.52 * detail + 0.22 * grain;
+
+  // Masonry: horizontal courses, and a per-block offset within each course so
+  // no two stones in a row share a value. Vertical faces only — a roof gets
+  // its own tile rows below.
+  float row = floor(face.y * 5.6);
+  float blockU = face.x * 2.4 + fract(row * 0.5) * 0.5;
+  float block = etHash12(vec2(floor(blockU), row) + 3.7);
+  float mortarY = 1.0 - smoothstep(0.0, 0.13, abs(fract(face.y * 5.6) - 0.5) - 0.37);
+  float mortarX = 1.0 - smoothstep(0.0, 0.16, abs(fract(blockU) - 0.5) - 0.34);
+  float masonry = (0.74 + 0.46 * block) * (1.0 - 0.42 * max(mortarY, mortarX));
+  tex *= mix(1.0, masonry, 1.0 - up);
+
+  // Roof: tile rows running across the pitch so adjacent courses separate.
+  float tileRow = 0.5 + 0.5 * sin(face.x * 15.0 + macro * 3.0);
+  tex *= mix(1.0, 0.72 + 0.44 * tileRow, up);
+
+  // Weathering streaks running down the wall from the eaves — the single most
+  // recognisable "this is old stone outdoors" cue, and it is low-frequency
+  // enough to survive the DoF pass on the near bands.
+  float streak = etFbm(vec2(face.x * 4.2, face.y * 0.35), 3);
+  tex *= mix(1.0, 0.66 + 0.5 * smoothstep(0.35, 0.72, streak), (1.0 - up) * 0.8);
 
   // Dirt climbing the base — grime accumulates where the ground meets the wall.
   float base = clamp((vLocal.y - uGroundY) / 1.6, 0.0, 1.0);
-  albedo *= mix(0.55, 1.0, pow(base, 0.7));
+  tex *= mix(0.55, 1.0, pow(base, 0.7));
 
-  vec3 lit = albedo * (0.16 + 0.84 * ndl);
-  lit += uSunColor * albedo * ndl * 0.55;
-  lit += uSkyColor * albedo * sky * 0.42;
+  albedo *= tex;
+
+  // The ambient floor is high on purpose. These meshes are outside the fitted
+  // shadow frustum and outside the practicals, so a 0.16 floor made every
+  // shadow-side face read as a black hole punched in the frame — which is the
+  // void problem again, just object-shaped.
+  vec3 lit = albedo * (0.34 + 0.66 * ndl);
+  lit += uSunColor * albedo * ndl * 0.65;
+  lit += uSkyColor * albedo * sky * 0.60;
 
   // Window practicals: a cell grid on vertical faces, a hash per cell decides
   // whether that room is occupied. This is the single cheapest "somebody lives
   // here" signal available and both references lean on it hard.
-  float vertical = 1.0 - smoothstep(0.25, 0.6, abs(n.y));
+  float vertical = 1.0 - smoothstep(0.10, 0.32, abs(n.y));
   if (vWindow > 0.5 && vertical > 0.01) {
-    vec2 face = abs(n.x) > abs(n.z) ? vec2(vLocal.z, vLocal.y) : vec2(vLocal.x, vLocal.y);
     vec2 cell = face / vec2(1.05, 1.25);
     vec2 id = floor(cell);
     vec2 f = fract(cell);
@@ -356,6 +432,18 @@ void main() {
     vec2 rect = smoothstep(0.30, 0.36, f) * (1.0 - smoothstep(0.64, 0.70, f));
     float win = rect.x * rect.y * lit01 * vertical * flick;
     win *= step(uGroundY + 0.55, vLocal.y);
+
+    // Spill: the masonry immediately around a lit opening catches its light.
+    //
+    // Not decoration — load-bearing. A window is emissive and its wall is not,
+    // so on a ridge-band tower silhouetted against a night sky of almost the
+    // same value, the only thing that survived was the opening itself: the
+    // frame showed two cream parallelograms hanging in empty sky with no
+    // building attached to them. Spill guarantees a lit band of wall around
+    // every opening, which both fixes that and is what light actually does.
+    vec2 halo = smoothstep(0.06, 0.34, f) * (1.0 - smoothstep(0.66, 0.94, f));
+    float spill = halo.x * halo.y * lit01 * vertical * flick;
+    lit += uWindowColor * spill * uWindowGain * 0.22 * step(uGroundY + 0.55, vLocal.y);
     lit += uWindowColor * win * uWindowGain;
   }
 
@@ -368,7 +456,11 @@ void main() {
   // so nothing in the surround terminates on a hard line against the plate.
   haze = clamp(haze + (1.0 - base) * 0.30 * smoothstep(uHazeNear * 0.5, uHazeFar, depth), 0.0, 0.96);
 
-  vec3 col = mix(lit, uHaze, haze) * uExposure;
+  // Sky-side edge lift. Without it a low-tone band renders as a solid black
+  // cut-out and the eye reads "missing texture" rather than "in shadow".
+  float edge = pow(clamp(1.0 - abs(n.y), 0.0, 1.0), 3.0) * (0.5 + 0.5 * n.x);
+  vec3 toned = lit * uTone + uSkyColor * edge * 0.16 * uTone * tex;
+  vec3 col = mix(toned, uHaze, haze) * uExposure;
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
 `;
@@ -384,9 +476,19 @@ ${GLSL_NOISE}
 float heightAt(vec2 p) {
   // Flat immediately around the board so the diorama's own base meets clean
   // ground, then rolling as it recedes.
-  float away = smoothstep(uBoardRadius * 0.9, uBoardRadius * 3.2, length(p));
+  //
+  // The relief is the only variation on this plate that SURVIVES. Everything in
+  // the fragment shader below runs at 0.5–11 cycles per world unit, and the
+  // near half of the plate sits under a 26px circle of confusion — measuring a
+  // patch of it came back with a standard deviation of 6/255, i.e. a swatch,
+  // however many octaves of albedo noise were layered on. Shading variation off
+  // real geometry at an ~18-unit period is low-frequency enough to come through
+  // the blur, so the amplitude has to be big enough to bend the normal, and the
+  // ramp has to start close enough in that the visible strip is inside it.
+  float away = smoothstep(uBoardRadius * 0.55, uBoardRadius * 1.5, length(p));
   return (etFbm(p * 0.055, 4) - 0.5) * uUndulate * away
-       + (etFbm(p * 0.21, 3) - 0.5) * uUndulate * 0.22 * away;
+       + (etFbm(p * 0.16, 3) - 0.5) * uUndulate * 0.42 * away
+       + (etFbm(p * 0.42, 3) - 0.5) * uUndulate * 0.16 * away;
 }
 
 void main() {
@@ -430,31 +532,62 @@ void main() {
   float ndl = max(dot(n, -uSunLocal), 0.0);
 
   // Ground cover: two tones broken by clumped noise, plus worn dirt on the
-  // paths radiating from the board. Never one flat green.
-  float clump = etFbm(vLocal.xz * 0.34, 4);
-  float fine = etFbm(vLocal.xz * 2.6, 3);
-  float worn = smoothstep(0.42, 0.0, abs(etFbm(vLocal.xz * 0.09 + 4.1, 3) - 0.5));
-  vec3 albedo = mix(uNearColor, uFarColor, clamp(clump * 0.85 + fine * 0.25, 0.0, 1.0));
-  albedo = mix(albedo, uFarColor * 1.22, worn * 0.5);
-  albedo *= 0.80 + 0.40 * fine;
+  // paths radiating from the board. Never one flat green — and the amplitudes
+  // here are deliberately loud, because the visible strip of this plate is only
+  // a few world units deep and low-contrast variation over that distance is
+  // indistinguishable from a flat swatch.
+  float blotch = etFbm(vLocal.xz * 0.13 + 21.7, 3);
+  float clump = etFbm(vLocal.xz * 0.55, 4);
+  float fine = etFbm(vLocal.xz * 2.9, 3);
+  float micro = etFbm(vLocal.xz * 11.0, 2);
+  float worn = smoothstep(0.40, 0.0, abs(etFbm(vLocal.xz * 0.16 + 4.1, 3) - 0.5));
+  // Three scales of variation, because the depth-of-field pass smooths away
+  // anything above about eight cycles per screen — high-frequency grain alone
+  // came back from the compositor as a flat swatch.
+  //
+  // The mix factor is CENTRED, not summed. (blotch * 0.7 + clump * 0.75) has a
+  // mean of 0.72 against two [0,1] fields, so it clamped to 1 across roughly
+  // half the plate and pinned that half to a single colour — the flat-surface
+  // fail condition reintroduced by the very term meant to prevent it. Biasing
+  // around 0.5 keeps the whole range in play.
+  float blend = clamp((blotch - 0.5) * 0.9 + (clump - 0.5) * 1.05 + 0.5, 0.0, 1.0);
+  vec3 albedo = mix(uNearColor, uFarColor, blend);
+  albedo = mix(albedo, uFarColor * 1.35, worn * 0.55);
+  // Multiplier swing is where the texture lives: 0.26 to ~2.1, i.e. eight times
+  // between the crevices and the crowns of the tussocks, at four different
+  // world scales. A gentler curve here is what made the plate read as one
+  // colour even though every octave was present.
+  albedo *= 0.26 + 0.95 * fine + 0.34 * micro + 0.52 * blotch + 0.30 * clump;
 
-  vec3 lit = albedo * (0.18 + 0.82 * ndl);
-  lit += uSunColor * albedo * ndl * 0.5;
-  lit += uSkyColor * albedo * 0.34;
+  vec3 lit = albedo * (0.30 + 0.70 * ndl);
+  lit += uSunColor * albedo * ndl * 0.55;
+  lit += uSkyColor * albedo * 0.30;
 
   // The diorama's own shadow on the surrounding ground. The fitted shadow map
   // in lighting.ts stops at the board bounds, so past that edge this stands in
-  // for it — and it is what stops the board reading as a floating slab.
+  // for it — and it is what stops the board reading as a floating slab. Kept
+  // shorter and softer than the first pass, which crushed the entire visible
+  // apron to near-black.
   vec2 rel = vLocal.xz - uShadowOffset;
-  float sd = length(rel / vec2(uBoardRadius * 1.05, uBoardRadius * 1.05));
-  lit *= 1.0 - uShadowStrength * (1.0 - smoothstep(0.62, 1.35, sd));
+  float sd = length(rel) / (uBoardRadius * 0.92);
+  lit *= 1.0 - uShadowStrength * (1.0 - smoothstep(0.75, 1.25, sd));
   // A tighter contact darkening hugging the base itself.
-  float contact = 1.0 - smoothstep(uBoardRadius * 0.98, uBoardRadius * 1.45, length(vLocal.xz));
-  lit *= 1.0 - 0.34 * contact;
+  float contact = 1.0 - smoothstep(uBoardRadius * 0.95, uBoardRadius * 1.22, length(vLocal.xz));
+  lit *= 1.0 - 0.30 * contact;
 
   float depth = -vLocal.z;
-  float haze = smoothstep(uHazeNear, uHorizonDepth, depth);
-  vec3 col = mix(lit, uHaze, clamp(haze * 1.06, 0.0, 1.0));
+  // Held back from a full mix so the ground keeps some of its own colour and
+  // grain right up to the horizon — fog that erases texture is just a void
+  // with a gradient on it.
+  float haze = smoothstep(uHazeNear, uHorizonDepth, depth) * 0.72;
+  vec3 col = mix(lit, uHaze, haze);
+
+  // Ground fog pooling against the board's base. This is what dissolves the
+  // pedestal's silhouette instead of letting it cut a hard line into the plate,
+  // and it is the single thing in this shader doing the most work.
+  float pool = 1.0 - smoothstep(uBoardRadius * 0.92, uBoardRadius * 1.55, length(vLocal.xz));
+  float poolBreak = 0.55 + 0.45 * etFbm(vLocal.xz * 0.8 + 9.3, 3);
+  col = mix(col, uHaze * 1.7, pool * poolBreak * 0.30);
 
   // Dissolve, rather than terminate. Alpha goes out just before the haze mix
   // completes, so the plate hands off to the sky gradient invisibly. Lateral
@@ -477,9 +610,19 @@ interface BandSpec {
   count: number;
   depthMin: number;
   depthMax: number;
+  /** Minimum |x|. Used by `fore` to keep the near band out of frame centre. */
+  lateralMin?: number;
   lateralMax: number;
   scale: number;
   haze: [number, number, number];
+  /**
+   * Value multiplier for the band. Near-camera bands go dark: in both reference
+   * frames the foreground element is a silhouette, and a pale out-of-focus block
+   * sitting in front of the board is the worst of both worlds — it reads as
+   * untextured placeholder geometry because DoF has smoothed away whatever
+   * detail it had.
+   */
+  tone: number;
   windows: number;
   kinds: readonly ('house' | 'tower' | 'wall' | 'tree' | 'rock' | 'lantern')[];
 }
@@ -539,69 +682,80 @@ export class Backdrop extends Group {
 
     const R = layout.boardRadius;
     const groundY = layout.groundY;
-    const horizon = layout.horizonDepth;
     const halfW = layout.halfW;
 
     this.buildGround(layout);
 
-    // Bands are expressed relative to the board radius and the solved horizon
-    // depth, so a 12-tile skirmish map and a 30-tile siege map both get a
-    // correctly-scaled surround with no per-map authoring.
+    // Bands are expressed relative to the board radius and the *measured*
+    // visible depth window, so a 12-tile skirmish map and a 30-tile siege map
+    // both get a correctly-scaled surround with no per-map authoring — and
+    // nothing is generated where the frame cannot show it.
+    const vis = Math.max(layout.visibleDepth, R + 2.5);
+    const run = Math.max(2.5, vis - R); // usable depth behind the board
     const bands: BandSpec[] = [
       {
+        // Left and right of the board. This is the band that fills the vertical
+        // strips at the frame edges, which is where most of the remaining void
+        // lives once the camera is framed tight.
         name: 'flank',
-        count: 26,
-        depthMin: -R * 0.9,
-        depthMax: R * 0.9,
-        lateralMax: halfW * 1.9,
-        scale: 1.0,
-        haze: [R * 0.6, horizon * 1.5, 0.34],
+        count: 68,
+        depthMin: -R * 0.95,
+        depthMax: R * 0.95,
+        lateralMax: halfW * 2.0,
+        scale: 0.78,
+        haze: [R * 0.7, R + run * 2.2, 0.36],
+        tone: 0.62,
         windows: 1,
-        kinds: ['house', 'house', 'wall', 'tree', 'lantern', 'rock'],
+        kinds: ['house', 'wall', 'wall', 'tree', 'tree', 'lantern', 'rock', 'rock'],
       },
       {
+        // Immediately behind the board: low outbuildings, walls, scrub.
         name: 'apron',
-        count: 34,
-        depthMin: R + 1.2,
-        depthMax: R + horizon * 0.42,
-        lateralMax: halfW * 1.85,
+        count: 66,
+        depthMin: R + 0.8,
+        depthMax: R + run * 0.62,
+        lateralMax: halfW * 1.95,
         scale: 1.0,
-        haze: [R + 1.0, horizon * 1.05, 0.58],
+        haze: [R + 0.5, R + run * 1.5, 0.55],
+        tone: 1.0,
         windows: 1,
         kinds: ['house', 'house', 'tree', 'wall', 'lantern', 'rock', 'tower'],
       },
       {
+        // The band whose tops crop against the top edge of the frame. Bases sit
+        // near the horizon; heights are deliberately over-scaled so the roofline
+        // runs off the image the way it does in both references.
         name: 'ridge',
-        count: 22,
-        depthMin: R + horizon * 0.4,
-        depthMax: R + horizon * 0.95,
-        lateralMax: halfW * 1.8,
-        scale: 1.35,
-        haze: [R, horizon * 0.9, 0.82],
+        count: 46,
+        depthMin: R + run * 0.45,
+        depthMax: R + run * 1.25,
+        lateralMax: halfW * 1.95,
+        scale: 1.5,
+        haze: [R, R + run * 1.1, 0.80],
+        tone: 1.15,
         windows: 1,
-        kinds: ['tower', 'house', 'wall', 'tree', 'tower'],
+        kinds: ['tower', 'house', 'wall', 'tower', 'tree'],
       },
       {
-        name: 'far',
-        count: 16,
-        depthMin: R + horizon * 0.95,
-        depthMax: R + horizon * 1.5,
-        lateralMax: halfW * 1.8,
-        scale: 2.1,
-        haze: [R, horizon * 0.7, 0.94],
-        windows: 0,
-        kinds: ['tower', 'house', 'tree'],
-      },
-      {
+        // Out-of-focus foreground framing, hard against the left and right
+        // frame edges.
+        //
+        // This band is only allowed organic shapes now. Buildings here came out
+        // as metre-wide near-black rectangles: DoF erases their surface detail,
+        // the near-camera tone crushes their value range, and what is left is a
+        // slab of cardboard taped over a third of the image. Foliage and rock
+        // survive the same blur because their silhouette is doing the work.
         name: 'fore',
-        count: 9,
-        depthMin: -(R + layout.halfH * 1.6),
-        depthMax: -(R + layout.halfH * 0.55),
-        lateralMax: halfW * 1.75,
-        scale: 1.25,
+        count: 13,
+        depthMin: layout.nearDepth * 0.5,
+        depthMax: layout.nearDepth * 1.45,
+        lateralMin: halfW * 1.02,
+        lateralMax: halfW * 1.95,
+        scale: 0.85,
         haze: [-999, -998, 0.0],
+        tone: 0.26,
         windows: 0,
-        kinds: ['tree', 'rock', 'wall', 'lantern'],
+        kinds: ['tree', 'tree', 'rock', 'lantern'],
       },
     ];
 
@@ -622,20 +776,34 @@ export class Backdrop extends Group {
     index: number,
   ): Mesh | null {
     const rng = mulberry32(layout.seed * 7919 + index * 104729);
-    const R = layout.boardRadius;
     const pieces: BufferGeometry[] = [];
+
+    // Rotate a yaw-local (x, depth) back onto the world axes so the footprint
+    // test uses the board's actual rectangle. Local −Z is "away", so the local
+    // offset is (x, 0, −depth).
+    const cy = Math.cos(layout.yaw);
+    const sy = Math.sin(layout.yaw);
+    const margin = 1.5;
+    const insideBoard = (x: number, depth: number): boolean => {
+      const wx = cy * x + sy * -depth;
+      const wz = -sy * x + cy * -depth;
+      return (
+        Math.abs(wx) < layout.boardHalfX + margin && Math.abs(wz) < layout.boardHalfZ + margin
+      );
+    };
 
     let attempts = 0;
     let placed = 0;
     while (placed < band.count && attempts < band.count * 24) {
       attempts += 1;
       const depth = band.depthMin + rng() * (band.depthMax - band.depthMin);
-      const x = (rng() * 2 - 1) * band.lateralMax;
+      const lateralMin = band.lateralMin ?? 0;
+      const x =
+        (rng() < 0.5 ? -1 : 1) * (lateralMin + rng() * Math.max(0, band.lateralMax - lateralMin));
 
       // Keep the play space clear: nothing inside the board footprint, and a
       // little extra margin so a roof never crowds a playable tile.
-      const clearance = R + 2.2;
-      if (Math.hypot(x, depth) < clearance) continue;
+      if (insideBoard(x, depth)) continue;
 
       const kind = band.kinds[Math.floor(rng() * band.kinds.length)]!;
       let parts: BufferGeometry[];
@@ -669,7 +837,7 @@ export class Backdrop extends Group {
       for (const part of parts) {
         part.scale(s, s * (0.9 + rng() * 0.3), s);
         part.rotateY(rot);
-        part.translate(x, groundY, -depth);
+        part.translate(x, groundY - 0.28, -depth);
         const n = part.attributes.position!.count;
         part.setAttribute('aTint', new BufferAttribute(new Float32Array(n).fill(tint), 1));
         part.setAttribute('aWindow', new BufferAttribute(new Float32Array(n).fill(win), 1));
@@ -702,6 +870,7 @@ export class Backdrop extends Group {
         uHazeFar: { value: band.haze[1] },
         uHazeMax: { value: Math.min(0.96, band.haze[2] * this.opts.hazeStrength) },
         uGroundY: { value: groundY },
+        uTone: { value: band.tone },
         uWindowGain: { value: (band.windows > 0 ? 1 : 0) * this.opts.windowGain },
         uExposure: { value: this.opts.exposure },
         uTime: { value: 0 },
@@ -769,9 +938,9 @@ export class Backdrop extends Group {
         uHazeNear: { value: layout.boardRadius * 0.9 },
         uHorizonDepth: { value: layout.horizonDepth },
         uHalfW: { value: layout.halfW },
-        uUndulate: { value: Math.max(1.2, layout.boardRadius * 0.18) },
+        uUndulate: { value: Math.min(3.2, Math.max(1.2, layout.boardRadius * 0.24)) },
         uExposure: { value: this.opts.exposure },
-        uShadowStrength: { value: 0.5 },
+        uShadowStrength: { value: 0.34 },
       },
       vertexShader: GROUND_VERT,
       fragmentShader: GROUND_FRAG,
@@ -839,13 +1008,41 @@ export class Backdrop extends Group {
    */
   private applyPalette(): void {
     const p = this.palette;
-    // Structures read as cool stone and warm tile, both sitting well under the
-    // board's value so the play space stays the brightest thing in the frame.
-    const wallBase = p.haze.clone().lerp(p.deep, 0.30).multiplyScalar(3.0);
-    const roof = p.haze.clone().lerp(p.horizon, 0.45).multiplyScalar(2.1);
+
+    // Hue and level are set separately, for the same reason `sky.ts` does it:
+    // deriving a surface colour by lerping between two *levelled* colours drags
+    // it toward whichever one is brighter and the result desaturates. The first
+    // version of this produced pale neutral-grey walls and pale neutral-grey
+    // roofs — a village of untextured slabs, and a direct hit on the
+    // no-flat-surfaces fail condition.
+    const norm = (c: Color): Color => {
+      const m = Math.max(c.r, c.g, c.b, 1e-5);
+      return c.multiplyScalar(1 / m);
+    };
+    const hazeTint = norm(p.haze.clone());
+    const sunTint = norm(p.sun.clone());
+    const deepTint = norm(p.deep.clone());
+
+    // Cool stone, saturated toward the map's own shadow colour.
+    //
+    // Levels measured, not chosen. Sampling the surround band of
+    // `refs/curated/triangle/official_001_steam.jpg` puts its background
+    // architecture at luma 86–165/255; the previous levels here (0.052 / 0.034)
+    // rendered ours at luma 21–33, which is why `tools/metrics.mjs` scored a
+    // third of the frame as void: near-black textured geometry is
+    // indistinguishable from no geometry at all, and the corner-match test
+    // counts it as background. Raising the albedo is not "brightening the
+    // scene" — the board is still four stops above this — it is the difference
+    // between a village behind the map and a hole behind the map.
+    const wallBase = norm(hazeTint.clone().lerp(deepTint, 0.45)).multiplyScalar(0.148);
+    // Warm tile. Darker than the walls: a roof plane faces the sky, so if it is
+    // also the lightest albedo in the set every rooftop reads as a highlight.
+    const roof = norm(sunTint.clone().lerp(hazeTint, 0.62)).multiplyScalar(0.094);
     const window = p.sun.clone().multiplyScalar(0.30);
     const sky = p.zenith.clone().multiplyScalar(2.2);
-    const sunLight = p.sun.clone().multiplyScalar(0.55);
+    // Halved from the first pass — a strong warm additive on a cool albedo is
+    // what neutralised the walls.
+    const sunLight = p.sun.clone().multiplyScalar(0.30);
 
     for (const m of this.structMaterials) {
       (m.uniforms.uBase!.value as Color).copy(wallBase);
@@ -857,8 +1054,16 @@ export class Backdrop extends Group {
     }
     if (this.groundMaterial) {
       const u = this.groundMaterial.uniforms;
-      (u.uNearColor!.value as Color).copy(p.haze).lerp(p.deep, 0.45).multiplyScalar(2.6);
-      (u.uFarColor!.value as Color).copy(p.haze).lerp(p.horizon, 0.35).multiplyScalar(2.4);
+      // The plate stays DARK. It was rendering at luma 46 with a 6–69 range —
+      // a smooth swatch over the whole lower third of the frame — and the
+      // obvious fix, raising its level, was tried and is wrong: at 0.145 the
+      // surround became a pale concrete apron brighter than half the board,
+      // which breaks both "the play space is the brightest thing in the frame"
+      // and the crushed-blacks grade. What a swatch actually lacks is variance,
+      // not brightness, so the level moves a little and the CONTRAST between
+      // the two tones (and the multiplier below) moves a lot.
+      (u.uNearColor!.value as Color).copy(norm(hazeTint.clone().lerp(deepTint, 0.62))).multiplyScalar(0.030);
+      (u.uFarColor!.value as Color).copy(norm(hazeTint.clone().lerp(sunTint, 0.40))).multiplyScalar(0.076);
       (u.uHaze!.value as Color).copy(p.haze);
       (u.uSunColor!.value as Color).copy(sunLight);
       (u.uSkyColor!.value as Color).copy(sky);
@@ -899,7 +1104,3 @@ export class Backdrop extends Group {
 }
 
 const UP = new Vector3(0, 1, 0);
-
-// Keep the tree-shaker honest about imports that only exist for future layers.
-void BackSide;
-void AdditiveBlending;

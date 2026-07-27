@@ -474,7 +474,7 @@ const BATTLE_OPEN: Scenario = {
   // Both now sit at 1.0 and the shape lives in `REFERENCE_FLOOR`.
   // Exposure measured, not guessed: `tools/shoot.mjs` reports mean frame luma, the reference
   // frames sit at 66-80/255, and at 1.05 this scene came back at 39.
-  post: { exposure: 1.3, dof: 1.0, vignette: 1.0 },
+  post: { exposure: 1.5, dof: 1.0, vignette: 1.0 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,

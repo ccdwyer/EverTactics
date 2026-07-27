@@ -614,6 +614,9 @@ function canvasTexture(
   return texture;
 }
 
+/** Shared constant for de-saturating authored light colours toward white. */
+const WHITE = new THREE.Color(0xffffff);
+
 /** How far the contact decal floats above the tile surface, in world units. */
 const CONTACT_SHADOW_LIFT = 0.012;
 
@@ -675,20 +678,30 @@ function getGroundShadowTexture(): THREE.CanvasTexture {
       const u = (px + 0.5) / size;
       const du = u - 0.5;
 
-      // Contact core: tight, slightly wider than deep, sat right on the feet.
-      const cu = du / 0.155;
-      const cv = (v - SHADOW_FOOT_V) / 0.115;
-      const core = Math.exp(-(cu * cu + cv * cv));
+      // Contact core: wider than deep, sat right on the feet.
+      //
+      // Sized by measurement, not taste. The camera looks down the ground plane
+      // at ~35°, so the world point under a unit's feet projects to exactly
+      // where its boots are drawn — a *tight* core is therefore 100% occluded
+      // by the sprite that casts it and contributes nothing. (First pass here
+      // used sigma 0.155/0.115 and an A/B of the frame with the decal hidden
+      // showed only a vague dimming, never a shape.) The core has to reach
+      // clearly past the boot silhouette — roughly half a tile — before any of
+      // it is visible, which is also what the FFT frames show: a soft patch
+      // spilling around the feet, not a dot beneath them.
+      const cu = du / 0.245;
+      const cv = (v - SHADOW_FOOT_V) / 0.175;
+      const core = Math.exp(-(cu * cu + cv * cv) * 0.85);
 
       // Directional tail: fades and widens with distance, so the far end
       // dissolves into the ground instead of ending on an edge.
       const t = Math.min(1, Math.max(0, (v - SHADOW_FOOT_V) / (1 - SHADOW_FOOT_V)));
-      const width = 0.165 + 0.115 * t;
+      const width = 0.19 + 0.13 * t;
       const lobe = Math.exp(-((du / width) * (du / width)));
       const tail = lobe * Math.pow(1 - t, 2.0) * 0.85;
 
       const occlusion = Math.min(1, Math.max(core, tail));
-      const value = Math.round(255 * (1 - occlusion * 0.66));
+      const value = Math.round(255 * (1 - occlusion * 0.74));
       const o = (py * size + px) * 4;
       image.data[o] = value;
       image.data[o + 1] = Math.round(value * 0.985);
@@ -1750,7 +1763,16 @@ export class UnitSprite {
     this.bundle.uniforms.uFillLightDir.value
       .set(-key.x, -Math.abs(key.y) * 0.5, -key.z)
       .normalize();
-    if (rimColor !== undefined) this.bundle.uniforms.uRimColor.value.set(rimColor);
+    if (rimColor !== undefined) {
+      // The rig hands us its *preset* rim hue, which is deliberately extreme —
+      // dawn's is 0x46a6ff, a fully saturated cyan chosen to separate stone
+      // silhouettes at a distance. Painted at full chroma along a 40-texel
+      // figure it reads as a neon keyline rather than as light, so pull it
+      // toward white before it touches the art. The hue survives; the poster
+      // paint does not.
+      this.bundle.uniforms.uRimColor.value.set(rimColor).lerp(WHITE, 0.45);
+      this.bundle.uniforms.uBackRimColor.value.set(rimColor).lerp(WHITE, 0.6);
+    }
 
     // Aim the grounded shadow down the same ray. The decal's tail runs along its
     // own local −Z, and rotating a mesh by θ about Y sends −Z to

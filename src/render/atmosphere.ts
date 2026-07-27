@@ -279,9 +279,15 @@ void main() {
   vec2 d = (vUv - 0.5) * 2.0;
   float fall = 1.0 - smoothstep(0.15, 1.0, length(d * vec2(1.0, 1.35)));
 
-  // Torn, drifting body — a constant-alpha quad reads as a decal immediately.
-  float n = etFbm(vUv * vec2(3.4, 1.9) + vec2(uTime * uDrift, uTime * uDrift * 0.35), 4);
-  float body = smoothstep(0.24, 0.86, n * 0.75 + 0.35);
+  // Torn, drifting body. The first version remapped the noise into [0.35,1.1]
+  // before the smoothstep, which saturated it to ~1 everywhere and turned each
+  // bank into a flat grey wash across a third of the frame — a worse artefact
+  // than the void it was covering. Threshold the raw fbm instead, and take two
+  // octave sets so the tears have tears.
+  vec2 flow = vec2(uTime * uDrift, uTime * uDrift * 0.35);
+  float n = etFbm(vUv * vec2(3.1, 1.7) + flow, 4);
+  float n2 = etFbm(vUv * vec2(9.5, 5.5) - flow * 1.7, 3);
+  float body = smoothstep(0.34, 0.72, n) * (0.55 + 0.45 * smoothstep(0.25, 0.75, n2));
 
   // Fog is densest at its base and thins upward.
   float vertical = mix(1.0, smoothstep(1.0, 0.05, vUv.y), uSoftBottom);
@@ -322,7 +328,6 @@ export class HazeBanks extends Group {
   layout(layout: BackdropLayout): void {
     this.clearContents();
     const R = layout.boardRadius;
-    const H = layout.horizonDepth;
     const W = layout.halfW;
 
     // Every bank sits strictly outside the board footprint. An earlier revision
@@ -330,17 +335,20 @@ export class HazeBanks extends Group {
     // straight through the courtyard floor and washed two units out of the
     // frame. Fog that hugs the *board's own* base belongs in the ground plate's
     // shader, not in a quad the board can intersect.
-    const clear = R * 1.25;
+    const run = Math.max(2.5, layout.visibleDepth - R);
+    const clear = R * 1.12;
     const specs: BankSpec[] = [
       // Immediately beyond the pedestal: this is the pair that kills the hard
       // silhouette where the board's edge used to meet nothing.
-      { depth: clear, lateral: -0.62, rise: 0.5, width: W * 2.0, height: R * 0.8, opacity: 0.5, warm: 0.2, softBottom: 0.25, drift: 0.009 },
-      { depth: clear, lateral: 0.66, rise: 0.45, width: W * 1.9, height: R * 0.7, opacity: 0.45, warm: 0.45, softBottom: 0.25, drift: -0.008 },
-      // Between apron and ridge — the band that makes the surround feel deep.
-      { depth: R + H * 0.45, lateral: -0.2, rise: 1.4, width: W * 3.2, height: R * 1.3, opacity: 0.5, warm: 0.25, softBottom: 0.5, drift: 0.005 },
-      { depth: R + H * 0.85, lateral: 0.3, rise: 2.0, width: W * 3.4, height: R * 1.6, opacity: 0.58, warm: 0.5, softBottom: 0.55, drift: -0.004 },
-      // In front of the board: a whisper of near haze that DoF will smear.
-      { depth: -(R + layout.halfH * 1.0), lateral: 0.35, rise: 0.2, width: W * 1.9, height: R * 0.9, opacity: 0.26, warm: 0.15, softBottom: 0.2, drift: 0.011 },
+      { depth: clear, lateral: -0.7, rise: 0.5, width: W * 1.5, height: R * 0.55, opacity: 0.20, warm: 0.2, softBottom: 0.25, drift: 0.009 },
+      { depth: clear, lateral: 0.72, rise: 0.4, width: W * 1.4, height: R * 0.5, opacity: 0.18, warm: 0.45, softBottom: 0.25, drift: -0.008 },
+      // Between the apron and the ridge — the band that makes the surround
+      // feel deep rather than pasted.
+      { depth: R + run * 0.5, lateral: -0.25, rise: 1.1, width: W * 2.6, height: R * 0.9, opacity: 0.24, warm: 0.3, softBottom: 0.5, drift: 0.005 },
+      { depth: R + run * 1.0, lateral: 0.3, rise: 1.7, width: W * 2.8, height: R * 1.1, opacity: 0.30, warm: 0.55, softBottom: 0.55, drift: -0.004 },
+      // Flanking wisps at the frame edges, out where the board does not reach.
+      { depth: R * 0.2, lateral: -1.5, rise: 0.8, width: W * 1.0, height: R * 0.7, opacity: 0.17, warm: 0.2, softBottom: 0.3, drift: 0.011 },
+      { depth: R * 0.2, lateral: 1.5, rise: 0.8, width: W * 1.0, height: R * 0.7, opacity: 0.17, warm: 0.35, softBottom: 0.3, drift: -0.010 },
     ];
 
     for (let i = 0; i < specs.length; i += 1) {
@@ -477,6 +485,7 @@ export class WorldEnvironment {
   private lastBoardRadius = -1;
   private lastHalfW = -1;
   private lastGroundY = Number.NaN;
+  private lastYaw = Number.NaN;
   private framesSinceMeasure = 1e9;
   private aspect = 16 / 9;
   private pixelRatio = 1;
@@ -484,7 +493,7 @@ export class WorldEnvironment {
   constructor(options: WorldEnvironmentOptions = {}) {
     this.options = {
       enabled: options.enabled ?? true,
-      horizonScreenFraction: options.horizonScreenFraction ?? 0.86,
+      horizonScreenFraction: options.horizonScreenFraction ?? 0.94,
       exposure: options.exposure ?? 1,
       seed: options.seed ?? 1337,
       palette: options.palette ?? {},
@@ -503,6 +512,7 @@ export class WorldEnvironment {
       deep: new Color().setHex(0x080d18, 'srgb'),
       sunDirection: new Vector3(-0.5, -0.7, -0.5).normalize(),
       sunIntensity: 3,
+      hasKey: false,
     };
 
     this.sky = new Sky(this.palette);
@@ -566,6 +576,9 @@ export class WorldEnvironment {
       this.measure();
       this.palette = deriveEnvironmentPalette(this.scene, this.options.palette);
       this.sky.setPalette(this.palette);
+      // No lighting rig means no committed key direction, so the bloom would be
+      // placed arbitrarily. Drop it rather than invent one.
+      this.sky.setSunGlow(this.palette.hasKey ? 0.16 : 0.02);
       this.backdrop.setPalette(this.palette);
       this.motes.setPalette(this.palette);
       this.haze.setPalette(this.palette);
@@ -643,19 +656,27 @@ export class WorldEnvironment {
     const groundY = this.bounds.min.y;
 
     const { halfW, halfH } = visibleHalfExtents(camera, this.aspect);
+
+    camera.updateMatrixWorld();
+    FORWARD.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    const pitch = Math.asin(Math.min(1, Math.max(-1, -FORWARD.y)));
+    const yaw = Math.atan2(-FORWARD.x, -FORWARD.z);
+
+    // Yaw is a relayout trigger because the footprint clearance test is exact
+    // in the yaw-local frame. The rig snaps between four slots, so this fires at
+    // most four times a battle.
     const changed =
       Math.abs(boardRadius - this.lastBoardRadius) > this.lastBoardRadius * 0.08 ||
       Math.abs(halfW - this.lastHalfW) > this.lastHalfW * 0.1 ||
-      !(Math.abs(groundY - this.lastGroundY) < 0.01);
+      !(Math.abs(groundY - this.lastGroundY) < 0.01) ||
+      Math.abs(angleDelta(yaw, this.lastYaw)) > 0.05;
     if (!changed) return;
 
     this.lastBoardRadius = boardRadius;
     this.lastHalfW = halfW;
     this.lastGroundY = groundY;
+    this.lastYaw = yaw;
 
-    camera.updateMatrixWorld();
-    FORWARD.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-    const pitch = Math.asin(Math.min(1, Math.max(-1, -FORWARD.y)));
     const centre = this.bounds.getCenter(TMP_B);
 
     // Solve for the depth at which a point on the ground plate reaches the
@@ -671,13 +692,19 @@ export class WorldEnvironment {
     probe.set(centre.x + away.x * 10, groundY, centre.z + away.z * 10).project(camera);
     const slope = (probe.y - y0) / 10;
 
-    const ndcTarget = this.options.horizonScreenFraction * 2 - 1;
     const depthAt = (ndc: number): number =>
       Math.abs(slope) > 1e-5 ? (ndc - y0) / slope : boardRadius * 3;
-    let horizonDepth = depthAt(ndcTarget);
-    horizonDepth = Math.min(Math.max(horizonDepth, boardRadius * 1.6), boardRadius * 9 + 60);
-    console.error(
-      `[env2] y0=${y0.toFixed(3)} slope=${slope.toFixed(4)} dTop=${depthAt(1).toFixed(1)} dBot=${depthAt(-1).toFixed(1)} dSolve=${depthAt(ndcTarget).toFixed(1)}`,
+
+    // The three numbers that define the usable window. `visibleDepth` is where
+    // the ground plate leaves the top of the frame and `nearDepth` where it
+    // leaves the bottom; nothing outside that band can ever be seen, which is
+    // the constraint an orthographic rig imposes and the one the first pass
+    // ignored.
+    const visibleDepth = Math.max(boardRadius + 2.5, depthAt(1));
+    const nearDepth = Math.min(-2, depthAt(-1));
+    const horizonDepth = Math.min(
+      Math.max(depthAt(this.options.horizonScreenFraction * 2 - 1), boardRadius + 1.2),
+      visibleDepth * 1.02,
     );
 
     const layout: BackdropLayout = {
@@ -688,21 +715,26 @@ export class WorldEnvironment {
       halfW,
       halfH,
       horizonDepth,
+      visibleDepth,
+      nearDepth,
+      boardHalfX: size.x * 0.5,
+      boardHalfZ: size.z * 0.5,
+      yaw,
       seed: this.options.seed,
     };
 
-    console.error(
-      `[env] R=${boardRadius.toFixed(1)} groundY=${groundY.toFixed(1)} halfW=${halfW.toFixed(1)} halfH=${halfH.toFixed(1)} horizonDepth=${horizonDepth.toFixed(1)} pitch=${((pitch * 180) / Math.PI).toFixed(0)}`,
-    );
     this.backdrop.layout(layout);
     this.haze.layout(layout);
+    // The mote volume is clipped to what the frame can actually show: a box
+    // reaching 2.6 board radii into the sky put 80% of the particles above the
+    // top edge, where they cost fill rate and read as nothing.
     this.motes.layout(
-      -halfW * 1.7,
-      halfW * 1.7,
-      groundY - 1,
-      groundY + Math.max(halfH * 2.4, boardRadius * 2.6),
-      -(horizonDepth * 0.95),
-      boardRadius + halfH * 1.5,
+      -halfW * 1.9,
+      halfW * 1.9,
+      groundY - 0.5,
+      groundY + halfH * 2.0,
+      -visibleDepth,
+      -nearDepth,
     );
 
     // Put the sky's horizon band exactly where the ground plate vanishes.
@@ -717,6 +749,15 @@ export class WorldEnvironment {
     this.scene?.remove(this.group);
     this.scene = null;
   }
+}
+
+/** Signed smallest angle between two headings, radians. */
+function angleDelta(a: number, b: number): number {
+  if (!Number.isFinite(b)) return Math.PI;
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
 }
 
 /**

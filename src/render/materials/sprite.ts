@@ -599,9 +599,13 @@ float spriteRimTerm(vec3 lightView, vec2 outward) {
     float facing = clamp(dot(outward, -plane / lateral), 0.0, 1.0);
     side = facing * facing * facing * lateral;
   }
-  // A pure backlight haloes the whole silhouette evenly; weight it below the
-  // directional term so a side light still reads as directional.
-  float halo = clamp(lightView.z, 0.0, 1.0) * 0.3;
+  // A pure backlight haloes the whole silhouette evenly; weight it well below
+  // the directional term. This used to be 0.3, and once the art was graded down
+  // to the terrain's value range that constant alone was enough to trace a hard
+  // saturated keyline round every unit — including the interior gaps between an
+  // arm and a torso, where nothing physical could produce one. The reference
+  // halo is a soft bloom off the silhouette, not a stroke.
+  float halo = clamp(lightView.z, 0.0, 1.0) * 0.12;
   return clamp(side + halo, 0.0, 1.0);
 }
 `;
@@ -727,16 +731,49 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
     float aR = spriteAlphaAt(spriteCellUv + vec2(step.x, 0.0));
     float aD = spriteAlphaAt(spriteCellUv - vec2(0.0, step.y));
     float aU = spriteAlphaAt(spriteCellUv + vec2(0.0, step.y));
-    float edge = 1.0 - min(min(aL, aR), min(aD, aU));
-    vec2 grad = vec2(aR - aL, aU - aD);
+
+    // Two rings, not one.
+    //
+    // A single-texel ring makes the edge term exactly 1 on every boundary texel
+    // and 0 one texel in, so whatever colour is added lands as a *stroke*: a hard,
+    // uniform, fully saturated line tracing the whole silhouette, interior
+    // gaps included. That is what a cel outline looks like, not what light
+    // wrapping round a figure looks like. Weighting a second ring at half
+    // strength spreads the term over two texels and turns the same energy into
+    // a falloff, which is what the FFT frames actually show: a soft bloom off
+    // the silhouette that fades inward.
+    float aL2 = spriteAlphaAt(spriteCellUv - vec2(step.x * 2.0, 0.0));
+    float aR2 = spriteAlphaAt(spriteCellUv + vec2(step.x * 2.0, 0.0));
+    float aD2 = spriteAlphaAt(spriteCellUv - vec2(0.0, step.y * 2.0));
+    float aU2 = spriteAlphaAt(spriteCellUv + vec2(0.0, step.y * 2.0));
+    float edge1 = 1.0 - min(min(aL, aR), min(aD, aU));
+    float edge2 = 1.0 - min(min(aL2, aR2), min(aD2, aU2));
+    float edge = max(edge1 * 0.62, edge2 * 0.38);
+
+    vec2 grad = vec2(aR - aL + (aR2 - aL2) * 0.5, aU - aD + (aU2 - aD2) * 0.5);
     if (dot(grad, grad) > 1e-6 && edge > 0.0) {
       vec2 outward = -normalize(grad);
 
       vec3 keyView = normalize((viewMatrix * vec4(uKeyLightDir, 0.0)).xyz);
       vec3 fillView = normalize((viewMatrix * vec4(uFillLightDir, 0.0)).xyz);
 
-      spriteColor += uRimColor * (uRimStrength * edge * spriteRimTerm(keyView, outward));
-      spriteColor += uBackRimColor * (uBackRimStrength * edge * spriteRimTerm(fillView, outward));
+      // Fade the rim out at the feet: light wrapping round a silhouette is a
+      // property of the parts standing clear of the ground, and a bright edge
+      // on the boots un-does the contact darkening directly above it.
+      float rimFoot = 1.0 - footRamp * 0.85;
+
+      // Gate the key-side rim on the key actually reaching this unit. A figure
+      // standing in the wall's shadow that still carries a bright warm edge is
+      // the per-object fake rim the critics named — the rim has to be a
+      // consequence of the same light everything else obeys.
+      float keyVisible = clamp(
+        dot(reflectedLight.directDiffuse, vec3(0.2126, 0.7152, 0.0722)) * 2.4,
+        0.0, 1.0
+      );
+
+      spriteColor += uRimColor *
+        (uRimStrength * edge * rimFoot * (0.25 + 0.75 * keyVisible) * spriteRimTerm(keyView, outward));
+      spriteColor += uBackRimColor * (uBackRimStrength * edge * rimFoot * spriteRimTerm(fillView, outward));
     }
   }
 
@@ -855,9 +892,9 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
       value: (options.fillLightDirection ?? new THREE.Vector3(0.5, -0.6, 0.35)).clone().normalize(),
     },
     uRimColor: { value: new THREE.Color(options.rimColor ?? 0xffe6b8) },
-    uRimStrength: { value: options.rimStrength ?? 0.34 },
+    uRimStrength: { value: options.rimStrength ?? 0.28 },
     uBackRimColor: { value: new THREE.Color(options.backRimColor ?? 0x8fb0d8) },
-    uBackRimStrength: { value: options.backRimStrength ?? 0.16 },
+    uBackRimStrength: { value: options.backRimStrength ?? 0.07 },
 
     uBounceColor: { value: new THREE.Color(options.bounceColor ?? 0x6d5b46) },
     uBounceStrength: { value: options.bounceStrength ?? 0.32 },
