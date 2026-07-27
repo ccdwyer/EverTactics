@@ -325,7 +325,16 @@ Do:
     focus: `COMPOSITION FIRST. Round 1's critic scored composition 3/10 and lighting 2/10; these are
 concrete, already-diagnosed defects with file references. Fix them before any new effect work.
 
-**(1) The board is shrunk into the void.** \`fitWholeField: true\` in src/state/scenarios.ts forces
+**(1) COMPOSITION IS NOW THE LOWEST AXIS (4.3).** Earlier rounds fixed the void and the framing;
+what critics now describe is a frame with no focal hierarchy — everything equally detailed, equally
+lit, equally sharp, so the eye has nowhere to land. Open refs/curated/triangle/ and note that each
+frame has ONE bright, sharp, high-contrast focus with everything else deliberately subordinated by
+haze, blur or value compression. Ours competes with itself.
+
+Concretely: light the acting unit's area more than the rest, let the surround lose contrast with
+distance, and use the focus band to isolate rather than to decorate. Composition is subtraction.
+
+**(1b) The old framing note, largely addressed — verify before acting:** \`fitWholeField: true\` in src/state/scenarios.ts forces
 the zoom floor to zoomLevels[0] in src/render/camera.ts, which is why the map is a small object in
 a sea of background. Set it false and let the board BLEED PAST THE FRAME EDGES the way both
 reference games do. Open refs/curated/triangle/ and confirm: their maps run off the edge.

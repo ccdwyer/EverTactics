@@ -90,8 +90,13 @@ only on genuinely bright things (torches, spell light, emissive lattice) — nev
 
 ## The void problem — read this before touching materials
 
-Measured in round 1: roughly **half of our 1920×1080 frame is flat background colour**. The map is
-a small object centred in emptiness with a hard silhouette, like a 3D asset viewer with a turntable.
+**STATUS: FIXED IN ROUND 2. Do not rebuild this.** Measured in round 1, roughly half the frame was
+flat background colour. As of round 5 the connected-component void measures **0.113**, inside the
+reference band of 0.087–0.180. `sky.ts`, `backdrop.ts` and `atmosphere.ts` carry a graded sky,
+distance haze, a surround of silhouette architecture and a mote field, and they work — disabling
+the environment at runtime reverts the board to the round-1 floating island, which is how that was
+confirmed. The history below is kept because it explains WHY those modules exist; it is not a
+live defect. Read `node tools/metrics.mjs <frame>` before acting on any claim in this file.
 
 Neither reference game ever does this. In both, the map **bleeds off the frame edges** and is backed
 by sky, haze, distant silhouettes or painted scenery. Triangle Strategy's environments continue past
