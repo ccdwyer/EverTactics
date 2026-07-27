@@ -60,7 +60,23 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 9 | 5/12 baseline, 9/12 after | 11/12 and 10/12 | first n=12 round |
 | 10 | 6/12 baseline, 10/12 after | 9/12 and **8/12** | **the loop has stopped paying** |
 
-### FINAL MEASUREMENT — n=18, measurement-only, after the art-directed pass
+### FINAL MEASUREMENT — replicated across two independent draws (n=36 total)
+
+                        seed 7 (n=18)   seed 12 (n=18)
+    identified correctly     5               6         pooled 11/36, P(<=11|chance) = 0.014
+    preferred ours          18              16         P(>=16 of 18 | chance) = 0.00066
+    ours more coherent      17              14         P(>=14 of 18 | chance) = 0.015
+
+**The below-chance identification replicates.** Two independent reference draws, judged blind,
+both put it near 30%. Neither the 18->16 preference slip nor the 17->14 coherence slip is
+statistically real (p = 0.26 and 0.23 against a pooled rate) — those are the same n=18 noise band
+that made single rounds unreadable at n=12.
+
+The five named defects were worked between the two measurements and did NOT cost coherence, which
+was the risk. All-lights-off meanLuma continued down 23.5 -> 17.9 -> 16.4, i.e. the edge highlight
+is progressively less emissive.
+
+### The earlier single measurement, kept for the record
 
     identified correctly   5 / 18     P(<=5 | chance) = 0.048   -> BELOW chance
     preferred ours        18 / 18     P(=18 | chance) = 0.0000038
