@@ -1731,7 +1731,54 @@ class VfxLightPool {
       // whatever happens to fall inside its inverse-square reach. The rig reads
       // these and never writes them — the envelope below stays authoritative.
       light.name = `${VFX_LIGHT_PREFIX}${i}`;
-      light.castShadow = false;
+      // ── Exactly one spell light throws a shadow ────────────────────────
+      //
+      // ROUND-6. The critics wrote this one plainly and more than once: "Right
+      // shows no cast shadows at all despite an extremely strong nearby key
+      // light — a fire that bright should be throwing long hard shadows off the
+      // fence posts and the rock", and "the warm pools read as emissive quads
+      // rather than as illumination". A point light with `castShadow` off
+      // illuminates *through* everything, so a detonation lit the far side of
+      // every wall it was behind, left no bar of darkness across the flagstones,
+      // and put no mark under the unit standing in it. Emitting a real light was
+      // only ever half the contract; the other half is that the light has to be
+      // occluded by the same geometry it illuminates, or it reads as an additive
+      // decal that happens to be attached to a lamp.
+      //
+      // Slot 0, and only slot 0. A point-light shadow is a cube map — six render
+      // passes — and `acquire` steers the highest-priority spawn here so the
+      // shadow lands on the detonation rather than on whichever sparkle got the
+      // slot first.
+      //
+      // Two details that matter more than they look:
+      //
+      //  - `castShadow` is set ONCE, at construction, and never toggled.
+      //    Toggling it changes `NUM_POINT_LIGHT_SHADOWS`, which recompiles every
+      //    material in the scene — a hitch that would land on precisely the
+      //    frame a spell detonates, which is the worst frame in the game to drop.
+      //  - `autoUpdate = false` then makes the idle cost zero. three skips the
+      //    six passes entirely unless `needsUpdate` is set, and `update()` sets
+      //    it only while this slot is burning. The map is rendered once at
+      //    startup so the sampler is never bound to a null texture; a stale map
+      //    is harmless while the light sits at intensity 0, because a point
+      //    light's shadow only ever attenuates that light's own contribution.
+      light.castShadow = i === 0;
+      if (i === 0) {
+        light.shadow.mapSize.setScalar(512);
+        light.shadow.camera.near = 0.25;
+        light.shadow.camera.far = 12;
+        light.shadow.camera.updateProjectionMatrix();
+        // Same policy as the key light in `lighting.ts`: near-zero constant bias
+        // so contact stays attached to the caster's feet, and the acne work done
+        // by a normal offset sized to roughly one shadow texel. A spell light
+        // sits close to the geometry it lights, so peter-panning here is far more
+        // visible than it is on the sun.
+        light.shadow.bias = -0.0006;
+        light.shadow.normalBias = 0.045;
+        light.shadow.radius = 3;
+        light.shadow.autoUpdate = false;
+        light.shadow.needsUpdate = true;
+      }
       group.add(light);
       this.slots.push({
         light,
@@ -1751,6 +1798,13 @@ class VfxLightPool {
   }
 
   acquire(priority: number, now: number): LightSlot | null {
+    // Slot 0 is the only one that casts (see the constructor), so a detonation
+    // gets first refusal on it. Below the impact rank the shadow is not worth
+    // stealing the slot for — a heal sparkle occluding the courtyard would be
+    // a distraction, not drama — so ordinary spawns fall through to the normal
+    // first-free scan and leave the caster free.
+    const shadowSlot = this.slots[0];
+    if (priority >= 3 && shadowSlot && !shadowSlot.active) return shadowSlot;
     for (const s of this.slots) if (!s.active) return s;
     // Full: steal the weakest slot, preferring one already deep into its decay.
     let victim: LightSlot | null = null;
@@ -1775,6 +1829,18 @@ class VfxLightPool {
         s.active = false;
         s.light.intensity = 0;
         continue;
+      }
+      if (s.light.castShadow) {
+        // The whole reason `autoUpdate` is off: the six cube passes run on the
+        // frames a spell is actually burning and on no others. The far plane
+        // follows the light's own cutoff so the depth range is spent on the
+        // blast radius rather than on empty air twenty tiles out.
+        const far = Math.max(2, s.light.distance > 0 ? s.light.distance : 8);
+        if (Math.abs(s.light.shadow.camera.far - far) > 0.05) {
+          s.light.shadow.camera.far = far;
+          s.light.shadow.camera.updateProjectionMatrix();
+        }
+        s.light.shadow.needsUpdate = true;
       }
       let env: number;
       if (t <= 0) {

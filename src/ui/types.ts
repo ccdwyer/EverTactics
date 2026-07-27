@@ -76,6 +76,20 @@ export interface TurnEntryVM {
   current: boolean;
   /** Predicted ticks until this turn begins. Used for the delta labels. */
   ticksUntil: number;
+  /**
+   * Current / maximum HP, for the sliver drawn under the rail portrait.
+   *
+   * Optional because the rail has to keep working for producers that do not
+   * track HP (the formation preview, replays of a partial log). When both are
+   * present the chip grows a team-tinted health bar along its lower edge — the
+   * shipped Combat Timeline carries exactly this
+   * (refs/curated/fft/press-042310-cfaa9b3e-fft-tic-mediakit-06.png: every
+   * timeline entry has a coloured HP sliver under the face, which is how a
+   * player picks the wounded enemy out of a queue without hovering anything).
+   * Omit both and the chip renders as before.
+   */
+  hp?: number;
+  maxHp?: number;
   /** Optional annotation, e.g. "Fire II" while charging. */
   note?: string;
   /** Rendered faded when the unit is KO'd or otherwise unable to act. */

@@ -646,20 +646,26 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
    * `color` on it. A mason does not build a four-metre retaining wall out of the same
    * rubble he uses for a one-step riser.
    *
-   * One repeat over 3.1 world units across a 4×3 lattice makes a block roughly
-   * 0.78 × 0.78 — square, and about six times the area of a `stonewall` block, which is
-   * the proportion the reference harbour tower actually shows against its quay. `color`
-   * is left neutral now that the hue lives in the albedo where a grade can act on it.
+   * One repeat over 1.38 world units across a 4×3 lattice makes a block roughly
+   * 0.46 × 0.34 — about 2.4× the area of a `stonewall` block, so it is unmistakably the
+   * coarser stone while still putting two to three blocks across a one-unit tile face.
+   *
+   * The first pass at this ran 3.1 world units per repeat, giving a block a full tile
+   * wide. That was self-defeating: at that module every tile face is one block, which is
+   * precisely the "same brick cube stacked at identical scale" the judges were describing.
+   * A wall has to be built out of units *smaller* than the thing it builds.
+   *
+   * `color` is left neutral now that the hue lives in the albedo where a grade can act.
    *
    * Selected by drop height in `render/terrain.ts`, so the same physical wall changes
    * stone as it gets taller. That is the "scale variation" the round-5 note asked for,
    * and it is the reason a pedestal face no longer matches the step above it.
    */
   ashlar: {
-    uvScale: 0.65, roughness: 1, metalness: 0, color: 0xffffff,
+    uvScale: 1.45, roughness: 1, metalness: 0, color: 0xffffff,
     aoStrength: 1.0, macroStrength: 0.20, macroScale: 0.10,
-    batchStrength: 0.50, batchSize: 2.60,
-    tileGrid: 0.3, tileRotate: 0, tileSharpen: 2.2, normalScale: 1.15,
+    batchStrength: 0.50, batchSize: 1.40,
+    tileGrid: 0.55, tileRotate: 0, tileSharpen: 2.2, normalScale: 1.15,
   },
   /**
    * The dressed cap on an exposed edge. Coarsest module of the three (one repeat over

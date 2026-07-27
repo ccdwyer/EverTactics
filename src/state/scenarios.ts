@@ -489,7 +489,26 @@ const BATTLE_OPEN: Scenario = {
   // `official_005_steam.jpg`: 87 mean with the centre cell at 1.8x. Both numbers move the
   // same way — more light through the middle — and the vignette in `post.ts` takes the rim
   // back down, so the frame gets steeper rather than merely brighter.
-  post: { exposure: 2.65, dof: 1.0, vignette: 1.0 },
+  //
+  // ROUND 6: 2.65 -> 3.9, and it is a consequence rather than a decision. `post.ts` gained a
+  // focal-hierarchy pass — a graduated subordination of the defocused far field plus a broad
+  // dodge on the composed subject — because the round-6 measurement was that our brightest
+  // 3x3 cell was the TOP-CENTRE backdrop, not the action. Subordinating the surround costs
+  // mean luma (it fell to 53 at the old exposure, against the references' 66-88), so the
+  // exposure goes up to put that light back where the shot is composed instead of spread
+  // evenly over the whole picture. Measured on the resulting frame: mean 66.5, centre/corner
+  // luma 2.07 against 1.49 before and 1.38-3.84 across four Triangle frames.
+  // Exposure is now single-owned (see Game.applyPostProfile): a scenario's value
+  // is FINAL and is no longer multiplied by the lighting preset's factor, because
+  // two owners on one dial spent a round cancelling each other.
+  //
+  // 2.1 is measured, not taste. The curated Triangle corpus spans meanLuma 36.5
+  // to 142.6 — a 4x range — because it contains both night interiors and daylight
+  // snowfields. Two agents each quoted one end of that as "the reference" and drew
+  // opposite conclusions. Orbonne at night belongs to the dark subset (36-50), and
+  // this lands the frame at meanLuma 45.8 and darkShare 0.42 - inside the night
+  // band on both - instead of ~69 with clipped highlights.
+  post: { exposure: 2.1, dof: 1.0, vignette: 1.0 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,

@@ -103,6 +103,19 @@ export class TurnOrderBar {
       }),
     );
     if (entry.current) frame.appendChild(icon('crown', 'et-turnchip__crown'));
+    // HP sliver along the bottom of the face. See the note on TurnEntryVM.hp:
+    // the shipped Combat Timeline carries one under every entry, and it is the
+    // only thing in the rail that tells you WHICH of the four enemies queued
+    // ahead of you is the one worth killing first.
+    if (entry.hp !== undefined && entry.maxHp !== undefined && entry.maxHp > 0) {
+      const frac = Math.max(0, Math.min(1, entry.hp / entry.maxHp));
+      const bar = div('et-turnchip__hp');
+      const fill = div('et-turnchip__hp-fill');
+      if (frac <= 0.25) bar.classList.add('is-critical');
+      fill.style.width = `${frac * 100}%`;
+      bar.appendChild(fill);
+      frame.appendChild(bar);
+    }
     // The name plate hangs OUTSIDE the rail, over the board — so it is a hover
     // affordance only, never a resting state.
     //

@@ -113,9 +113,9 @@ export const ashlarTexel = (u: number, v: number): Texel => {
   // Cool grey limestone with a faint green cast — deliberately NOT the honey sandstone
   // of `stoneWallTexel`, so the two never read as one material under a warm key.
   const c = {
-    r: lerp(0.170, 0.606, t),
-    g: lerp(0.182, 0.628, t),
-    b: lerp(0.184, 0.612, t),
+    r: lerp(0.214, 0.664, t),
+    g: lerp(0.228, 0.686, t),
+    b: lerp(0.230, 0.668, t),
   };
   // A minority of blocks came out of a warmer, more ferrous bed.
   const warmBatch = smoothstep(0.72, 0.96, b.id);

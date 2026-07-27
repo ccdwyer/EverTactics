@@ -210,6 +210,14 @@ export interface VignetteSettings {
    * darkest. A single symmetric weight cannot pull one down without crushing the other.
    */
   edgeWeights: [number, number, number];
+  /**
+   * How far the radial falloff's centre follows the composed subject, 0..1.
+   *
+   * 0 keeps it on the geometric centre of the frame (which subordinates the wrong side when
+   * the shot is composed off-centre); 1 tracks the subject exactly (which takes twice as much
+   * light out of one edge as the other, and one of those edges is playable board).
+   */
+  follow: number;
   /** The colour the darkened region multiplies toward. Never neutral. */
   color: [number, number, number];
 }
@@ -670,7 +678,12 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // 130/255 against a centre of 89 — the defocused backdrop was the best-lit region in the
       // picture — while the bottom band was already at 32-45 and did not need more. The old
       // symmetric weighting was [1.0, 1.0, 0.55].
-      edgeWeights: [1.6, 0.6, 0.5],
+      edgeWeights: [1.8, 0.6, 0.5],
+      // Just over half. At 1.0 (a falloff centred exactly on the subject at u = 0.425) the
+      // right edge lost twice the light the left did, and the right edge is a third of the
+      // playable board — the darkest corner should be the one furthest from the action, not
+      // a wall of shadow over countable tiles.
+      follow: 0.55,
       // ROUND 4 — "the blacks are lifted into a flat purple", filed twice, plus "the blacks
       // are lifted into blue so there is no true anchor point". The grade's own black point
       // was only half the story: the vignette multiplies the outer third of the frame toward
@@ -683,22 +696,27 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
     focusGrade: {
       enabled: true,
       // Sized against the measurement, not to taste. Ours ran centre/corner luma at 1.49
-      // where four Triangle frames sit at 1.38-3.84 with a median near 2.4; the vignette
-      // pull-back above costs some of that back, so the dodge has to supply about 1.5x
-      // through the middle. Above ~1.7 the ACES shoulder stops rolling and the centre
-      // clips, which trades one named defect for another.
-      lift: 1.55,
-      // Starts falling only past 40% of the way to the far corner and takes 55% to get
-      // there — i.e. it is a gradient across essentially the whole frame. A tighter falloff
-      // than this reads as a vignette's inverse, which is a lens artefact, not a composition.
-      radius: 0.18,
-      softness: 0.46,
+      // where four Triangle frames sit at 1.38-3.84; the vignette pull-back above gives some
+      // of that back, so the dodge has to make up the rest. Stepped 1.5 -> 1.55 -> 1.85 on
+      // rendered frames: 1.5 moved the ratio to 1.51 (i.e. nothing — see `radius` below for
+      // why), 1.55 to 1.90, 1.85 to 2.08 with lumaP95 still at 199/255, so the ACES shoulder
+      // is still rolling rather than clipping. Past ~2 it stops rolling and the centre plates
+      // out, which trades one named defect for another.
+      lift: 1.85,
+      // Starts falling at 16% of the way to the frame edge and takes 62% to get there, so it
+      // is still a gradient over most of the picture — but a much tighter one than the first
+      // attempt, which started at 0.40. That version measured as a no-op (ratio 1.49 -> 1.51)
+      // for a reason worth recording: a falloff this broad lifts the surround as much as the
+      // subject, so it brightens the frame without composing it. A dodge only builds
+      // hierarchy where it has somewhere to fall off TO.
+      radius: 0.16,
+      softness: 0.62,
       farAmount: 1.0,
       // Distance costs chroma before it costs light, so the desaturation is the bigger term.
       // Both are keyed to the FAR half of the CoC only: the near rim at the bottom of frame
       // is defocused as well and must stay dense and dark, because it is foreground.
-      farDesaturate: 0.50,
-      farDarken: 0.38,
+      farDesaturate: 0.44,
+      farDarken: 0.30,
       // The cool end of the map's own split. A neutral grey haze is a listed fail condition.
       farTint: [0.78, 0.88, 1.16],
     },
@@ -1543,8 +1561,18 @@ export class PostStack implements PostEffectsHost {
     const fg = this.settings.focusGrade;
     const fgOn = fg.enabled;
     const subject = dof.tiltCenter;
-    (cu['uVignetteCenter']!.value as Vector2).set(subject[0], subject[1]);
     (cu['uSubjectCenter']!.value as Vector2).set(subject[0], subject[1]);
+    // The vignette follows the subject only PART of the way. It is a frame, and a frame that
+    // slides fully off-centre stops framing and starts cropping: with the subject at u = 0.425
+    // a fully-tracked falloff took twice as much light out of the right edge as the left, and
+    // the right edge is where a third of the playable board is. `vignetteFollow` is the
+    // fraction of the offset it inherits — enough that the darkest corner is the one furthest
+    // from the action, not enough to darken countable tiles.
+    const follow = vig.follow;
+    (cu['uVignetteCenter']!.value as Vector2).set(
+      0.5 + (subject[0] - 0.5) * follow,
+      0.5 + (subject[1] - 0.5) * follow,
+    );
     cu['uSubjectLift']!.value = fgOn ? Math.max(1, fg.lift) : 1;
     cu['uSubjectRadius']!.value = fg.radius;
     cu['uSubjectSoftness']!.value = Math.max(1e-3, fg.softness);

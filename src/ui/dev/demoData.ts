@@ -147,13 +147,16 @@ export const RAPHA: UnitVM = {
 
 export const ROSTER: UnitVM[] = [RAMZA, AGRIAS, MUSTADIO, RAPHA];
 
+/* The HP figures are not decoration: they are the harness's coverage of the
+   rail's health sliver, including one enemy under the 25% critical threshold so
+   the ember treatment is exercised on every preview render. */
 export const TURN_ORDER: TurnEntryVM[] = [
-  { unitId: RAMZA.id, name: 'Ramza', team: 'player', portrait: RAMZA.portrait, current: true, ticksUntil: 0 },
-  { unitId: WIZARD.id, name: 'Gaffgarion', team: 'enemy', portrait: WIZARD.portrait, current: false, ticksUntil: 2, note: 'Night Sword' },
-  { unitId: AGRIAS.id, name: 'Agrias', team: 'player', portrait: AGRIAS.portrait, current: false, ticksUntil: 5 },
-  { unitId: RAPHA.id, name: 'Rapha', team: 'ally', portrait: RAPHA.portrait, current: false, ticksUntil: 7 },
-  { unitId: MUSTADIO.id, name: 'Mustadio', team: 'player', portrait: MUSTADIO.portrait, current: false, ticksUntil: 11 },
-  { unitId: 'e_archer', name: 'Archer', team: 'enemy', portrait: 'wldface_012_08_uitx.png', current: false, ticksUntil: 14 },
+  { unitId: RAMZA.id, name: 'Ramza', team: 'player', portrait: RAMZA.portrait, current: true, ticksUntil: 0, hp: 158, maxHp: 182 },
+  { unitId: WIZARD.id, name: 'Gaffgarion', team: 'enemy', portrait: WIZARD.portrait, current: false, ticksUntil: 2, note: 'Night Sword', hp: 61, maxHp: 240 },
+  { unitId: AGRIAS.id, name: 'Agrias', team: 'player', portrait: AGRIAS.portrait, current: false, ticksUntil: 5, hp: 194, maxHp: 194 },
+  { unitId: RAPHA.id, name: 'Rapha', team: 'ally', portrait: RAPHA.portrait, current: false, ticksUntil: 7, hp: 88, maxHp: 141 },
+  { unitId: MUSTADIO.id, name: 'Mustadio', team: 'player', portrait: MUSTADIO.portrait, current: false, ticksUntil: 11, hp: 120, maxHp: 166 },
+  { unitId: 'e_archer', name: 'Archer', team: 'enemy', portrait: 'wldface_012_08_uitx.png', current: false, ticksUntil: 14, hp: 31, maxHp: 155 },
 ];
 
 export const COMMANDS: CommandItemVM[] = [

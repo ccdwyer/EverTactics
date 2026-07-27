@@ -233,7 +233,12 @@ void main() {
     // Normalised against the far ceiling, NOT against 1.0. The CoC's far half is clamped at
     // uFarClamp (0.6), so a raw smoothstep against 1.0 tops out around 0.7 and the authored
     // amounts silently deliver two thirds of what they say.
-    float far = smoothstep(0.12, 0.95, max(gCoC, 0.0) / max(uFarClamp, 1e-3)) * uFarSubordinate;
+    // Starts at 40% of the far ceiling, not at zero. Below that the pixel is still a
+    // countable gameplay tile a couple of rows behind the focal plane, and washing chroma out
+    // of the mid-board is the "depth of field or vignette obscuring tiles the player must
+    // count" fail condition wearing a different hat. Everything past it is skirt, backdrop
+    // and surround.
+    float far = smoothstep(0.40, 1.0, max(gCoC, 0.0) / max(uFarClamp, 1e-3)) * uFarSubordinate;
     vec3 flat_ = mix(color, vec3(luma(color)) * uFarTint, uFarDesat) * (1.0 - uFarDarken);
     color = mix(color, flat_, far);
   }
@@ -244,12 +249,14 @@ void main() {
   // the references' desaturated centre: it is the tonemap doing it, not a saturation knob,
   // so the hue survives and only the value rolls.
   if (uSubjectLift > 1.0001) {
-    vec2 sc = (uv - uSubjectCenter) * vec2(uAspect, 1.0);
-    // Normalise against the FURTHEST corner from the subject, so an off-centre composition
-    // still reaches 1.0 at the frame edge rather than saturating early on the near side.
-    vec2 far0 = max(abs(vec2(0.0, 0.0) - uSubjectCenter), abs(vec2(1.0, 1.0) - uSubjectCenter));
-    float maxLen = max(length(far0 * vec2(uAspect, 1.0)), 1e-4);
-    float rn = length(sc) / maxLen;
+    // Normalised PER AXIS, not by the frame diagonal. A 16:9 frame is 1.78 units wide and 1
+    // unit tall, so a diagonal normalisation makes vertical distance count for barely half of
+    // horizontal — the first round-6 attempt did that and the falloff was still at 94% of
+    // full strength at the top edge of frame, which is precisely the region (defocused
+    // backdrop) the term exists to subordinate. Per-axis, rn reaches 1.0 at every frame edge,
+    // so the dodge is an ellipse inscribed in the picture rather than in its diagonal.
+    vec2 ext = max(max(abs(uSubjectCenter), abs(vec2(1.0) - uSubjectCenter)), vec2(1e-3));
+    float rn = length((uv - uSubjectCenter) / ext);
     float w = 1.0 - smoothstep(uSubjectRadius, uSubjectRadius + uSubjectSoftness, rn);
     color *= mix(1.0, uSubjectLift, w);
   }
@@ -296,7 +303,12 @@ void main() {
     // near rim and the water channel and already sits at luma 32-45, while the top is
     // defocused backdrop at 130 and was the brightest region in the picture. One number
     // cannot both hold the bottom up and pull the top down.
-    float eTop = 1.0 - clamp((1.0 - uv.y) * 4.0, 0.0, 1.0);
+    // The TOP band also reaches further in — 38% of frame height against 25% for the other
+    // three. That is not a taste call: the top third of this composition is defocused
+    // backdrop and haze, which is scenery, while the bottom third is the near rim of the
+    // board, which is subject. A graduated ND is the standard answer to a sky that outruns
+    // the ground, and it is dragged down to where the sky actually ends.
+    float eTop = 1.0 - clamp((1.0 - uv.y) * 2.6, 0.0, 1.0);
     float eBottom = 1.0 - clamp(uv.y * 4.0, 0.0, 1.0);
     float eSide = 1.0 - clamp(min(uv.x, 1.0 - uv.x) * 4.0, 0.0, 1.0);
     float edge = max(

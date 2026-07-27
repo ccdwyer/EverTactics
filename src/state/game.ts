@@ -252,7 +252,22 @@ export class Game {
     const stack = this.post?.stack;
     if (!stack) return;
     const profile = this.scenario.post ?? {};
-    stack.settings.exposure = (profile.exposure ?? 1) * this.lighting.current.exposure;
+
+    // Exposure has ONE owner, not two.
+    //
+    // This used to be `scenario.post.exposure * lightingPreset.exposure`, a product
+    // of two numbers owned by two different people. During one polish round the
+    // scenario value went 2.65 -> 3.4 -> 3.9 while the preset factor was cut
+    // 1.4 -> 0.95: each change was real, the product barely moved, and both parties
+    // concluded their edit "wasn't reaching the frame". Two agents cancelled each
+    // other twice on the same dial.
+    //
+    // So: when a scenario states an exposure it is FINAL — it is the composition's
+    // call, which is where a DP would set it. A preset's own exposure applies only
+    // to scenarios that decline to specify one. The lighting rig keeps everything
+    // else (key/fill ratio, chroma, colour split, bounce), all of which is
+    // ratio-based and survives whatever absolute exposure lands on.
+    stack.settings.exposure = profile.exposure ?? this.lighting.current.exposure;
 
     // `post.ts` derives its defocus shape from a measured reference rubric
     // (`REFERENCE_FLOOR`). A scenario should be able to say "less of that" without

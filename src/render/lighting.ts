@@ -576,7 +576,22 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // dawn that reads as a moonless night has deep shadow but no key, and the
     // reference frames always give you one clearly readable lit band to look at.
     //
-    // ROUND-6: 1.4 → 1.18. Measured mean luma on the round-5 frame is 69/255
+    // READ THIS BEFORE CHANGING THE NUMBER: it is one factor of a product, and
+    // on the shipping scenario it is the *smaller* factor.
+    //
+    // With post on — which every battle scene is — `renderer.toneMappingExposure`
+    // is dead and `Game.applyPostProfile` computes
+    // `PostStack.settings.exposure = scenario.post.exposure × preset.exposure`.
+    // `battle-open` carries 3.4 on its side, so the value here is a trim on a
+    // dial somebody else owns, not the exposure. Judge it by the product (≈3.2)
+    // and by `tools/metrics.mjs`, never by how it reads on the page.
+    //
+    // The other factor moved twice while this round was being measured (2.65 →
+    // 3.4 → 3.9), which cancelled two cuts here exactly. If the frame ever reads
+    // a stop hot again, check the PRODUCT before touching this — the bug will be
+    // that two files are steering one dial, not that this number is wrong.
+    //
+    // ROUND-6: 1.4 → 0.78. Measured mean luma on the round-5 frame is 69/255
     // against 38 on `press_002` and 44 on the throne room — we were not "a
     // brighter time of day", we were a stop and a half over every frame in the
     // corpus, which is what puts 70% of the picture in one tan band and takes
@@ -584,7 +599,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // for the last part of that correction because it moves the *whole* curve:
     // the ratio work above widens the histogram, this slides it down to where
     // the shoulder stops eating the mortar lines out of lit stone.
-    exposure: 1.18,
+    exposure: 0.78,
     shadowRadius: 2.0,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 1.35,
@@ -609,7 +624,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // What comes back is the fill — the sky, the ground bounce and the flat
     // term — which is the half of the split that was reading as grey slate.
     chroma: 1.44,
-    colorSplit: 0.36,
+    colorSplit: 0.42,
     // 0.85 → 0.76. Measured: round 4 put 28.7% of the board in the darkest
     // luminance decile against 8–11% in both Triangle references, i.e. we were
     // not "dramatic", we were bimodal — clipped gold or black, with the mid-tones
@@ -658,7 +673,15 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     practicalDecay: 1.12,
     // The pool's peak lands just past the ACES shoulder's knee rather than a
     // factor of five beyond it, so the stone beside a fire keeps its masonry.
-    practicalPeak: 3.9,
+    //
+    // ROUND-6: 3.9 → 4.5. The ceiling was set in round 5 against an exposure
+    // product of 3.71; this round's contrast and exposure work took roughly a
+    // fifth off that, which handed the ceiling back the headroom it had been
+    // spending. Raising it with the frame darkened is not the same decision as
+    // raising it before — the fire gets hotter *relative to* the stone around it
+    // and lands in the same place on the tone curve, which is the difference
+    // between a brighter picture and a picture with a fire in it.
+    practicalPeak: 4.5,
     sourceBounce: 1.15,
   },
 
@@ -1763,12 +1786,34 @@ export class LightingRig {
     }
 
     this.bounceColor.setRGB(wr / total, wg / total, wb / total);
-    // Renormalise to unit luminance: brightness is the level's job, hue is the
-    // colour's, and letting a 4-candela fire and a 40-candela one deliver
-    // different *hues* of bounce is a bug rather than a feature.
-    const luma =
+
+    // Bounce is DESATURATED relative to its source, and this is not a taste call.
+    //
+    // Light returning off a stone courtyard has been multiplied by masonry
+    // albedo, which is broad and near-neutral; only the part of the flame's
+    // chroma that survives that multiply comes back. Skipping the step produced
+    // a visibly wrong frame — the first render of this term normalised the
+    // weighted flame hue straight to unit luminance, which for a saturated
+    // 0xff9440 means a red channel around 1.7, and the whole diorama picked up a
+    // crimson cast: banners went pure red, sprite silhouettes grew red fringes,
+    // and the cool half of the complementary split was overwritten by second-
+    // order light that had no business being the strongest hue in the frame.
+    //
+    // 0.42 toward grey, then normalised on the *max* channel rather than on
+    // luminance. Normalising on max is the conservative choice: a saturated
+    // source ends up delivering slightly less total bounce than a neutral one of
+    // the same flux, which is both physically right (a narrow-band emitter
+    // reflects less off a broadband surface) and the safe direction to be wrong
+    // in.
+    const grey =
       this.bounceColor.r * 0.2126 + this.bounceColor.g * 0.7152 + this.bounceColor.b * 0.0722;
-    if (luma > 1e-5) this.bounceColor.multiplyScalar(1 / luma);
+    this.bounceColor.setRGB(
+      MathUtils.lerp(this.bounceColor.r, grey, 0.42),
+      MathUtils.lerp(this.bounceColor.g, grey, 0.42),
+      MathUtils.lerp(this.bounceColor.b, grey, 0.42),
+    );
+    const peak = Math.max(this.bounceColor.r, this.bounceColor.g, this.bounceColor.b);
+    if (peak > 1e-5) this.bounceColor.multiplyScalar(1 / peak);
 
     // Flux over the diorama's cross-section. The 4π is the sphere the flux would
     // spread over if nothing absorbed it; the rest is the fraction a stone
@@ -1781,7 +1826,7 @@ export class LightingRig {
     // key it stops reading as return light off a lit floor and starts reading as
     // the flat ambient wash `applyContrast` exists to remove. For scale, the
     // dawn cloister's key lobe enters the same SH at roughly 0.45.
-    this.bounceLevel = Math.min(0.3, raw);
+    this.bounceLevel = Math.min(0.2, raw);
 
     const ox = dx / total;
     const oz = dz / total;

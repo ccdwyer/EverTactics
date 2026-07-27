@@ -157,6 +157,15 @@ export interface PaletteTuning {
   horizonWarmth?: number;
   /** Gain on the haze colour that distant geometry fades into. */
   hazeGain?: number;
+  /**
+   * Chroma floor applied to the cool bands (haze / zenith / ground) after the
+   * tint mixing, 0…1. This is what keeps the aerial perspective a *colour*
+   * rather than a grey; see `saturateTo`. 0 restores the pre-round-6 behaviour.
+   */
+  coolSaturation?: number;
+  /** Chroma floor for the warm horizon band. Held under `coolSaturation` so the
+   * split reads as "cool air, warm light" rather than as two equal poster tones. */
+  warmSaturation?: number;
 }
 
 /**
@@ -180,6 +189,59 @@ function tintOf(c: Color, out = new Color()): Color {
   const m = Math.max(c.r, c.g, c.b);
   if (m < 1e-5) return out.setRGB(0.5, 0.55, 0.7);
   return out.setRGB(c.r / m, c.g / m, c.b / m);
+}
+
+/** Max-channel saturation of a tint, i.e. `(max − min) / max`. */
+function chromaOf(c: Color): number {
+  const mx = Math.max(c.r, c.g, c.b);
+  if (mx < 1e-5) return 0;
+  return (mx - Math.min(c.r, c.g, c.b)) / mx;
+}
+
+/**
+ * Push a tint away from the achromatic axis until it reaches `target` chroma,
+ * preserving hue. Never *desaturates* — a preset that already commits harder
+ * than the floor keeps its own colour.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────────────
+ * `tintOf` normalises by the max channel, which fixes brightness and does
+ * nothing at all to saturation. That is fine on its own, but every band below
+ * is built by *mixing* two tints, and the cool fog and the warm key sit on
+ * opposite sides of the colour wheel — so the mix lands near grey and `tintOf`
+ * faithfully preserves the grey.
+ *
+ * Measured on the round-6 frame, that is exactly what shipped: the derived haze
+ * came out `#303132` at chroma 0.075 — achromatic to three significant figures —
+ * and haze is what *all* distant geometry is mixed toward in `STRUCT_FRAG`. So
+ * the entire surround was fading into neutral grey, against a `scene.background`
+ * that was a committed `#0a1424` at chroma 0.828. That is the "no neutral greys"
+ * and "crush blacks toward the map's cool tone" rule in `VISUAL_TARGET.md`
+ * broken by arithmetic rather than by intent, and it measured as a far-field
+ * saturation of 0.44–0.57 against 0.61–0.80 across the Triangle references.
+ *
+ * The fix is a floor, not a multiplier: multiplying chroma that is already ~0
+ * still gives ~0. Restoring toward an absolute target is the only operation that
+ * recovers a hue the mix destroyed.
+ */
+function saturateTo(c: Color, target: number, out = new Color()): Color {
+  out.copy(c);
+  const mx = Math.max(out.r, out.g, out.b);
+  if (mx < 1e-5) return out;
+  const mn = Math.min(out.r, out.g, out.b);
+  const have = (mx - mn) / mx;
+  if (have >= target || target <= 0) return out;
+  // Scale the distance of each channel below the max. `have → target` is exact:
+  // the new min becomes mx * (1 − target), and hue (the ordering and the ratios
+  // between the two non-max channels) is preserved because every channel is
+  // moved by the same factor of its own deficit.
+  const k = have > 1e-5 ? target / have : 0;
+  if (k === 0) {
+    // Fully achromatic input carries no hue to preserve. Fall back to the cool
+    // anchor rather than inventing one, so the result is still the map's tone.
+    return out.setRGB(mx * (1 - target), mx * (1 - target * 0.45), mx);
+  }
+  out.setRGB(mx - (mx - out.r) * k, mx - (mx - out.g) * k, mx - (mx - out.b) * k);
+  return out;
 }
 
 const DEFAULT_DEEP = new Color().setHex(0x080d18, 'srgb');
@@ -212,6 +274,8 @@ export function deriveEnvironmentPalette(scene: Scene, tuning: PaletteTuning = {
   const skyGain = tuning.skyGain ?? 1;
   const horizonWarmth = tuning.horizonWarmth ?? 0.36;
   const hazeGain = tuning.hazeGain ?? 1;
+  const coolSaturation = tuning.coolSaturation ?? 0.52;
+  const warmSaturation = tuning.warmSaturation ?? 0.38;
 
   const deep = new Color();
   if (scene.background instanceof Color) deep.copy(scene.background);
@@ -252,9 +316,27 @@ export function deriveEnvironmentPalette(scene: Scene, tuning: PaletteTuning = {
   const sunTint = tintOf(sun);
   const deepTint = tintOf(deep);
 
-  const hazeTint = tintOf(fogTint.clone().lerp(sunTint, 0.16));
-  const horizonTint = tintOf(hazeTint.clone().lerp(sunTint, horizonWarmth));
-  const zenithTint = tintOf(hazeTint.clone().lerp(deepTint, 0.7));
+  // ── keep the hue the mix throws away ────────────────────────────────────
+  //
+  // Order matters here. The warm mix happens first (it is what gives the air its
+  // slight key-light contamination, which is real and worth keeping), and the
+  // chroma floor is applied *after*, so the result is a saturated version of the
+  // mixed hue rather than an unmixed one.
+  //
+  // The cool bands are anchored back toward `deepTint` before saturating. The
+  // preset's `scene.background` is the one colour on the scene that was authored
+  // as "this map's tone" — deriving the air from it is what makes the surround
+  // belong to the same map as the crushed blacks, instead of being a grey the
+  // fog colour happened to average to.
+  const hazeTint = saturateTo(
+    tintOf(fogTint.clone().lerp(sunTint, 0.16)).lerp(deepTint, 0.3),
+    coolSaturation,
+  );
+  const horizonTint = saturateTo(
+    tintOf(hazeTint.clone().lerp(sunTint, horizonWarmth)),
+    warmSaturation,
+  );
+  const zenithTint = saturateTo(tintOf(hazeTint.clone().lerp(deepTint, 0.7)), coolSaturation);
 
   /** Distance haze — what far geometry desaturates into. */
   const haze = hazeTint.clone().multiplyScalar(HAZE_LEVEL * hazeGain);

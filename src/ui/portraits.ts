@@ -311,7 +311,21 @@ export type PortraitSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
  * portrait left 77px of bare navy below it, i.e. the same "empty region of flat
  * panel colour" the critics keep naming, only in the chrome instead of the map.
  */
-const SIZES: Record<PortraitSize, number> = { xs: 30, sm: 46, md: 60, lg: 104, xl: 130 };
+/*
+ * Round 6 — `sm` and `md` are the two rail sizes, and they were too small
+ * RELATIVE TO THEIR CHIP rather than in absolute terms.
+ *
+ * In refs/curated/fft/press-042310-...-mediakit-06.png a Combat Timeline entry
+ * is roughly 70px wide and the face inside it is roughly 62px: the portrait IS
+ * the chip, and the tick numeral lives in a narrow ~22px column outside it. Ours
+ * ran a 46px face inside a 116px chip — 40% face, 60% empty navy — so the rail
+ * read as a column of half-filled cards, which is the "ragged dead column"
+ * problem the round-3 note tried to fix by stretching the chips rather than by
+ * filling them. 54/64 puts the face at ~47% and ~55% of the chip and leaves the
+ * tick column at 50px and 39px respectively, both still comfortable for a
+ * two-digit numeral in the display face.
+ */
+const SIZES: Record<PortraitSize, number> = { xs: 30, sm: 54, md: 64, lg: 104, xl: 130 };
 
 export interface PortraitOptions {
   size?: PortraitSize;
