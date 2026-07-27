@@ -62,10 +62,13 @@
  *     face spans ±TILE_SIZE/2 about the *integer* coordinate. Anchoring a unit
  *     at (x + 0.5, y + 0.5) puts it on the corner where four tiles meet, which
  *     is what every unit was doing.
- *  2. **A real cast shadow.** See `shadowSide` in `materials/sprite.ts`: three
+ *  2. **A real cast shadow.** Two parts. `shadowSide` in `materials/sprite.ts`
+ *     gets the billboard's own silhouette into the shadow map at all — three
  *     renders the shadow pass back-faces-only for a `FrontSide` material, which
- *     silently discards a camera-facing billboard whenever the light is on the
- *     camera's side.
+ *     silently discards a camera-facing quad whenever the light is on the
+ *     camera's side. And `GROUND_CASTER_RADIUS` below adds the part a vertical
+ *     card physically cannot throw: a shadow on the ground the unit is standing
+ *     on. That is the round-6 change and it is the one that moved the axis.
  *  3. **Contact darkening** — a tight multiply patch on the tile, covering the
  *     hairline the shadow map cannot resolve at the feet.
  *  4. **Exposure parity.** A billboard presents a near-perfect normal to any
@@ -666,7 +669,16 @@ function canvasTexture(
 /** Shared constant for de-saturating authored light colours toward white. */
 const WHITE = new THREE.Color(0xffffff);
 
-/** How far the contact decal floats above the tile surface, in world units. */
+/**
+ * How far the contact decal floats above the tile surface, in world units.
+ *
+ * Round 6: 0.012 → 0.03. Rendering the decal in a signal colour and sweeping the
+ * lift, 0.012 lost the whole quad to the depth test on most units and 0.05 still
+ * lost it on some; the terrain around a unit is rarely a clean plane at exactly
+ * `cell.z * HEIGHT_UNIT`. 0.03 is about a third of a device pixel of parallax at
+ * this camera — invisible as detachment — and clears the joins that were eating
+ * the mark. It is not a fix on its own; see {@link GROUND_CASTER_RADIUS}.
+ */
 const CONTACT_SHADOW_LIFT = 0.03;
 
 /**
@@ -788,7 +800,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
       uTailDir: { value: new THREE.Vector2(0, 1) },
       /** How far the cast tail reaches, in world units. cot(elevation) driven. */
       uTailLength: { value: 0.7 },
-      uDensity: { value: 0.0 }, // AB
+      uDensity: { value: SHADOW_DENSITY },
     },
     vertexShader: /* glsl */ `
       varying vec2 vUvDecal;
@@ -931,6 +943,17 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
  * material when rendering shadows, and an up-facing disc under an overhead key
  * presents its *front*, so a single-sided one would be thrown away exactly like
  * the billboards were before `material.shadowSide` was set on them.
+ *
+ * **A flat disc, deliberately — a body-shaped proxy was tried and rejected.** The
+ * obvious "better" version of this is a squashed ellipsoid at knee height, which
+ * throws a longer shadow and reaches further onto adjacent blocks. Rendered, it
+ * is worse: the proxy occupies the same space as the billboard, the billboard is
+ * a shadow *receiver*, and every unit ended up standing inside its own shadow —
+ * the whole cast lost its internal modelling and the units went flat and dark,
+ * which is the exact defect `uSkyOcclusion` and the bounce term exist to avoid.
+ * The disc sits below the art, so it can only darken the lowest texel or two.
+ * Reach onto neighbouring geometry is bought instead by elongating the disc down
+ * the key's ground azimuth (see `update`), which costs nothing on the sprite.
  */
 const GROUND_CASTER_RADIUS = TILE_SIZE * 0.36;
 const GROUND_CASTER_LIFT = 0.055;

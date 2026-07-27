@@ -269,6 +269,37 @@ export class Game {
     // ratio-based and survives whatever absolute exposure lands on.
     stack.settings.exposure = profile.exposure ?? this.lighting.current.exposure;
 
+    // …and the surround has to be told, because post exposure multiplies the
+    // composited buffer and the backdrop sits at the bottom of its range.
+    //
+    // Halving exposure roughly halves the board's midtones — which is the point —
+    // but it pushes the distant town, its window practicals and the silhouette
+    // layer under the black point entirely, and the frame reverts to a lit island
+    // in a void. That is not a subtle regression: on `battle-open` the round-6
+    // exposure change took the connected-component void from 0.114 to 0.246
+    // against a reference band of 0.087–0.180 and a hard fail at 0.25, while
+    // background detail fell 13.58 -> 7.31.
+    //
+    // The surround's final luminance is a composition choice, not a lighting one:
+    // it should look the same however the board is exposed. So its gain is the
+    // inverse of the exposure, normalised so the shipped `battle-open` value of
+    // 2.1 produces a gain of 2.5 — measured, not guessed. That lands the void at
+    // 0.108 and background detail at 12.26, both back inside the band, with the
+    // board's own grade untouched. See `WorldEnvironment.setExposure`.
+    //
+    // This applies ONLY when the scenario states an exposure, because only then is
+    // the number on the same scale as the reference. A preset's own exposure is a
+    // mood weight in the low single digits (`dawn` is 0.78), not a composition
+    // value, and dividing by it produces a gain 4-5x too high: `mandalia-ford`
+    // declines to state an exposure, and running the formula on its fallback lit
+    // the distant town brighter than the board it frames. A scenario that wants a
+    // compensated surround should say what its exposure is.
+    const SURROUND_REFERENCE = 5.25;
+    if (profile.exposure !== undefined) {
+      const gain = SURROUND_REFERENCE / Math.max(0.35, profile.exposure);
+      this.stage.environment?.setExposure(Math.min(3.4, Math.max(0.6, gain)));
+    }
+
     // `post.ts` derives its defocus shape from a measured reference rubric
     // (`REFERENCE_FLOOR`). A scenario should be able to say "less of that" without
     // replacing the shape, so every term scales from whatever the stack chose —

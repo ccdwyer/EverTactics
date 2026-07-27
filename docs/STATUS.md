@@ -54,6 +54,23 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 4 | 6/6 | 5/6 | test found to be confounded — see below |
 | 5 | **4/6** (baseline, cropped) | 4/6 | first identification failure |
 | 5 | 5/6 (after fixes) | 5/6 | grounding 2.5 -> 4.5 |
+| 6 | 4/6 baseline, 5/6 after | 4/6 | **plateau** — see below |
+
+### The plateau, and what it probably is
+Rounds 5 and 6 both sit at 4–5 of 6 identified. Identification has broken twice but is not
+trending toward zero, while preference holds at 4–5 of 6. Per-axis scores keep climbing, so the
+renderer is still improving and the test has stopped responding to it.
+
+The likely irreducible part: **our units are literal FFT sprites.** Triangle Strategy's sprites are
+its own art. A judge who knows the genre recognises Ivalice character art regardless of how well it
+is lit or grounded — the same class of recognition cue as the character names and HUD vocabulary
+that forced the crop in round 5, and equally immune to shader work.
+
+The honest next experiment is a **sprite-free comparison** (terrain-only scenes both sides). If
+judges cannot separate our diorama rendering from theirs with units excluded, the rendering has
+arrived and the residual is an art-asset difference, not a quality gap. Running more rounds against
+the sprite-inclusive test without checking this risks optimising against a metric that has stopped
+measuring anything.
 
 Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
 

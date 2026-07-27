@@ -576,6 +576,26 @@ export class WorldEnvironment {
     this.group.visible = on;
   }
 
+  /**
+   * Overall brightness of the surround, independent of the board.
+   *
+   * `BackdropOptions.exposure` was always documented as "overall gain, matched
+   * to the map's exposure" — but nothing ever matched it, so the surround sat at
+   * a fixed gain of 1 while post exposure moved underneath it. Round 6 halved
+   * post exposure to put the board in the reference night band and the surround
+   * went with it: measured on `battle-open`, the connected-component void jumped
+   * 0.114 -> 0.246 (reference band 0.087–0.180, hard fail above 0.25) and
+   * background detail fell 13.58 -> 7.31. The distant town, its lit windows and
+   * the silhouette layer were all still being drawn; they had simply been
+   * crushed below the black point. `Game.applyPostProfile` now drives this from
+   * the scenario exposure so the surround holds its final luminance whatever
+   * absolute exposure the composition picks.
+   */
+  setExposure(v: number): void {
+    this.options.exposure = v;
+    this.backdrop.setExposure(v);
+  }
+
   setViewport(widthPx: number, heightPx: number, pixelRatio: number): void {
     this.aspect = widthPx / Math.max(1, heightPx);
     this.pixelRatio = pixelRatio;
