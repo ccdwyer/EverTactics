@@ -140,6 +140,14 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
          --query "lightdebug=keyIntensity:0,rimIntensity:0,hemiIntensity:0,ambientIntensity:0,\
    probeIntensity:0,cavity:0,practicalGain:0,sourceBounce:0"
 
+   **Independently re-verified by the lead, and the claim is only partly borne out.** That command
+   gives `meanLuma` **17.9**, not the "low single digits" reported. The fix is real and the
+   direction is right — the term is no longer the dominant emissive contributor — but something
+   still lights the frame with every light at zero. Most likely the environment layer (sky, glow
+   cards, motes), which is legitimately emissive and is **not** covered by `?lightdebug`. Before
+   concluding anything further here, disable the environment too (`StageOptions.environment: false`
+   or `stage.environment.setEnabled(false)`) and re-measure.
+
    With **every light at zero** the board must be black. Before the fix it was fully legible and its
    up-faces read cool blue: a flagstone finishing at rgb(127,121,118) still carried rgb(31,48,76),
    whose channel ratio 0.41:0.63:1.00 is the old `BOUNCE_COOL` constant to a rounding error. Not the
