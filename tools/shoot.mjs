@@ -18,7 +18,7 @@
  */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -89,12 +89,29 @@ page.on('console', (m) => {
 page.on('pageerror', (e) => errors.push(String(e)));
 
 let ready = false;
+let splashGone = false;
 try {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForFunction(() => window.__EVERTACTICS_READY__ === true, null, {
     timeout: maxWait,
   });
   ready = true;
+
+  // The READY flag fires on renderer convergence, but the opaque #boot splash is
+  // removed later, on a different event. Shooting between those two moments
+  // captures a black rectangle and reports success — so wait for the splash to
+  // actually be gone (or fully transparent) before believing the frame.
+  await page.waitForFunction(
+    () => {
+      const boot = document.getElementById('boot');
+      if (boot === null) return true;
+      const style = window.getComputedStyle(boot);
+      return style.display === 'none' || Number(style.opacity) < 0.02;
+    },
+    null,
+    { timeout: maxWait },
+  );
+  splashGone = true;
 } catch {
   // fall through — shoot anyway so the failure is visible
 }
@@ -105,11 +122,86 @@ await page.waitForTimeout(Number(arg('settle', 1200)));
 mkdirSync(dirname(out), { recursive: true });
 await page.screenshot({ path: out, type: 'png' });
 
+/**
+ * Verify the captured frame actually contains an image.
+ *
+ * A harness that green-lights a black frame invalidates every visual judgement
+ * made through it, so this is not optional bookkeeping — it is the check that
+ * makes `ok: true` mean something. Decoding happens in the same browser, on a
+ * downscaled draw, so it costs nothing and needs no image dependency.
+ */
+async function frameStats(pngPath) {
+  const probe = await browser.newPage({ viewport: { width: 160, height: 90 } });
+  try {
+    const b64 = readFileSync(pngPath).toString('base64');
+    const stats = await probe.evaluate(async (src) => {
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+        img.src = src;
+      });
+      const c = document.createElement('canvas');
+      c.width = 160;
+      c.height = 90;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, 160, 90);
+      const { data } = ctx.getImageData(0, 0, 160, 90);
+      // Bucket colours coarsely; a real frame spreads across many buckets, a
+      // splash or a clear-colour fill collapses into one.
+      const buckets = new Map();
+      let lum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i] >> 4, g = data[i + 1] >> 4, b = data[i + 2] >> 4;
+        const k = (r << 8) | (g << 4) | b;
+        buckets.set(k, (buckets.get(k) ?? 0) + 1);
+        lum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      }
+      const total = data.length / 4;
+      const modal = Math.max(...buckets.values()) / total;
+      return { modalShare: modal, distinct: buckets.size, meanLuma: lum / total };
+    }, `data:image/png;base64,${b64}`);
+    return stats;
+  } finally {
+    await probe.close();
+  }
+}
+
+let stats = null;
+try {
+  stats = await frameStats(out);
+} catch {
+  // Verification is best-effort; a failure to measure is not a failure to render.
+}
+
 await browser.close();
 if (child) child.kill();
 
-console.log(JSON.stringify({ ok: ready, scene, out, width, height, errors: errors.slice(0, 20) }, null, 2));
+// >92% of the frame in a single coarse colour bucket means we captured a flat
+// fill — the boot splash, a clear colour, or a crashed renderer.
+const blank = stats !== null && (stats.modalShare > 0.92 || stats.distinct < 12);
+const ok = ready && splashGone && !blank;
+
+console.log(JSON.stringify(
+  { ok, ready, splashGone, blank, stats, scene, out, width, height, errors: errors.slice(0, 20) },
+  null,
+  2,
+));
+
 if (!ready) {
-  console.error('WARN: page never signalled __EVERTACTICS_READY__ — screenshot may be incomplete.');
+  console.error('FAIL: page never signalled __EVERTACTICS_READY__.');
   process.exit(existsSync(out) ? 3 : 4);
+}
+if (!splashGone) {
+  console.error('FAIL: boot splash never cleared — the frame is the splash, not the game.');
+  process.exit(5);
+}
+if (blank) {
+  console.error(
+    `FAIL: captured frame is effectively blank ` +
+      `(modal colour ${(stats.modalShare * 100).toFixed(1)}% of pixels, ` +
+      `${stats.distinct} distinct buckets, mean luma ${stats.meanLuma.toFixed(1)}). ` +
+      `Do not judge this image.`,
+  );
+  process.exit(6);
 }
