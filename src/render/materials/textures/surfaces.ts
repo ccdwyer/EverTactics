@@ -150,19 +150,41 @@ export const grassTexel: TexelFn = (u, v) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const dirtTexel: TexelFn = (u, v) => {
+  // ROUND 9 — the sampling budget.
+  //
+  // The south apron of the courtyard was rendering as a black field carrying a
+  // dense scatter of one-pixel orange and blue specks (see 'shots/r9-dirt.png',
+  // a 7x crop of it). Judges have described that same thing twice, in two
+  // different frames, as "salt-and-pepper aliasing rather than stones — high
+  // frequency albedo at too-high UV repeat ... shimmers into noise instead of
+  // resolving", and it is a measurable defect rather than a taste call.
+  //
+  // Do the arithmetic. One repeat of this sheet covers 2 / 0.9 = 2.22 world
+  // units. The grit octave ran at 96 cycles across it, which is 43 cycles per
+  // world unit; the tilted-ortho camera resolves roughly 55 pixels per world
+  // unit. That is one full cycle every 1.3 pixels — below Nyquist, so it can
+  // only ever resolve as noise, and it is *bright* noise because the gravel sat
+  // pale against near-black earth with a hard-edged mask on it.
+  //
+  // Everything here is pulled back inside the budget: grit to 40 cycles (about
+  // one every three pixels), gravel cells from 30 to 16 (a stone every four or
+  // five), and both masks widened so a pebble has a shoulder instead of a cliff.
+  // The stones are now legible *as stones*, which is what the reference gravel
+  // does; the previous version had more information in it than the frame could
+  // carry, and the surplus came out as sparkle.
   const base = warpedFbm(u * 6, v * 6, 6, 501, 1.6, 4);
-  const grit = fbm(u * 96, v * 96, 96, 503, 2);
-  const gravel = worley(u, v, 30, 509, 1.0);
+  const grit = fbm(u * 40, v * 40, 40, 503, 2);
+  const gravel = worley(u, v, 16, 509, 1.0);
   // Gravel is *earth-coloured* earth. Tinting it toward pale grey turns a dirt path
   // into a field of polka dots the moment a key light hits it.
-  const pebbleMask = smoothstep(0.30, 0.06, gravel.f1) * smoothstep(0.30, 0.72, gravel.id);
-  const bigStone = worley(u, v, 11, 511, 0.9);
-  const cobble = smoothstep(0.17, 0.07, bigStone.f1) * smoothstep(0.88, 0.98, bigStone.id);
+  const pebbleMask = smoothstep(0.34, 0.13, gravel.f1) * smoothstep(0.30, 0.72, gravel.id);
+  const bigStone = worley(u, v, 9, 511, 0.9);
+  const cobble = smoothstep(0.20, 0.10, bigStone.f1) * smoothstep(0.88, 0.98, bigStone.id);
 
   const crack = smoothstep(0.60, 0.90, ridge(u * 8, v * 8, 8, 513, 3));
   const rut = smoothstep(0.42, 0.78, warpedFbm(u * 3, v * 3, 3, 517, 2.0, 3));
   // Dry scuffed streaks running with the traffic direction.
-  const scuff = fbm2p(u * 40, v * 5, 40, 6, 519, 3);
+  const scuff = fbm2p(u * 24, v * 5, 24, 6, 519, 3);
 
   const t = clamp01(base * 0.50 + grit * 0.26 + scuff * 0.16 + (1 - crack) * 0.10);
   // Desaturated, dusty earth. A rich chocolate brown reads as chocolate.
@@ -174,12 +196,14 @@ export const dirtTexel: TexelFn = (u, v) => {
   const iron = smoothstep(0.58, 0.88, base);
   tint(c, c.r * 1.16 + 0.02, c.g * 0.97, c.b * 0.82, iron * 0.42);
 
-  const pg = 0.30 + gravel.id * 0.26;
-  tint(c, pg, pg * 0.95, pg * 0.86, pebbleMask * 0.72);
+  const pg = 0.26 + gravel.id * 0.22;
+  tint(c, pg, pg * 0.95, pg * 0.86, pebbleMask * 0.66);
   // Grit shadow under each piece of aggregate — this is what makes a path read as
-  // loose material instead of a painted plane.
-  const bed = smoothstep(0.06, 0.24, gravel.f1) * smoothstep(0.30, 0.72, gravel.id);
-  tint(c, 0.058, 0.046, 0.034, bed * 0.45);
+  // loose material instead of a painted plane. Widened along with the pebble mask:
+  // a two-pixel bright disc sitting in a two-pixel black ring is the highest
+  // contrast a texture can present at the worst possible frequency.
+  const bed = smoothstep(0.10, 0.30, gravel.f1) * smoothstep(0.30, 0.72, gravel.id);
+  tint(c, 0.070, 0.056, 0.042, bed * 0.38);
   const cg = 0.28 + bigStone.id * 0.16;
   tint(c, cg, cg * 0.93, cg * 0.82, cobble * 0.6);
 
@@ -206,7 +230,15 @@ export const dirtTexel: TexelFn = (u, v) => {
  * neutral grey out by name.
  */
 export const stoneTexel: TexelFn = (u, v) => {
-  const b = masonry(u, v, 4, 4, 601, 0.44, 0.52);
+  // ROUND 9: 4×4 → 5×4, with 'TUNING.stone.uvScale' raised to match, so a flag
+  // is about 0.38 × 0.48 world units instead of 0.53 square. At the old module a
+  // flag and a *tile* were within a factor of two of each other, so the paving
+  // lattice and the gameplay lattice beat against one another and the floor read
+  // as one plate per tile — visible in 'shots/r9-terrain.png' and the reason the
+  // judges kept calling the top faces flat. The reference cloister floor
+  // (shots/ref-pave.png) runs closer to three flags across a tile. Non-square
+  // counts also make the repeat harder to count than a 4×4 grid does.
+  const b = masonry(u, v, 5, 4, 601, 0.44, 0.52);
 
   // Chipped corners: bite worley cells out of the slab wherever they straddle an edge.
   const chipCell = worley(u, v, 22, 607, 1.0);
@@ -240,19 +272,60 @@ export const stoneTexel: TexelFn = (u, v) => {
   // Pitching this cool against warm walls also drags the frame's value structure apart,
   // which is the other thing the critics measured ("~70% of the frame in one mid-tone
   // tan band").
+  // ROUND 9 raised the top of the ramp by about 12%. Dropping the paving's
+  // roughness floor from 0.38 to 0.56 removed a specular lobe that had been
+  // doing real work on the frame's exposure — meanLuma fell from 45.6 to 37.6,
+  // which is the bottom of the night band in docs/VISUAL_TARGET.md. Paying that
+  // back in *albedo* rather than by putting the gloss back is the right trade:
+  // the brightness returns as diffuse, so it lands on the texture instead of on
+  // a highlight that washed the texture out.
   const c = {
-    r: lerp(0.150, 0.516, t),
-    g: lerp(0.158, 0.532, t),
-    b: lerp(0.148, 0.484, t),
+    r: lerp(0.156, 0.582, t),
+    g: lerp(0.164, 0.600, t),
+    b: lerp(0.154, 0.546, t),
   };
   // Some slabs are a different quarry batch: warmer and more ferrous. Inverting which
   // way the odd slab strays (it used to stray cool from a warm field) keeps the paving
   // varied without ever landing back on the wall's hue.
   const warm = smoothstep(0.68, 0.94, b.id);
   tint(c, c.r * 1.24 + 0.02, c.g * 1.04, c.b * 0.80, warm * 0.62);
+  // …and a second, opposite batch. Round 9: baked side by side with the wall
+  // sheets ('shots/tex-probe.png') the paving is the one texture in the set
+  // whose slabs all sit within a couple of percent of each other in *hue* — the
+  // value spread is wide but every flag is the same grey-green, so at diorama
+  // distance the floor collapses into one plate per tile. The reference cloister
+  // floor (refs/curated/triangle/official_007_steam.jpg, cropped at 3× in
+  // shots/ref-pave.png) does the opposite: adjacent flags are visibly different
+  // stones, some lilac, some olive, some sandy, and *that* is what makes a
+  // dozen of them read as a dozen rather than as a surface.
+  const cool = smoothstep(0.34, 0.06, b.id);
+  tint(c, c.r * 0.86, c.g * 1.02, c.b * 1.20, cool * 0.55);
 
   // Calcite veins.
   tint(c, 0.780, 0.756, 0.690, vein * 0.42);
+
+  // ── figure inside the flag ───────────────────────────────────────────────
+  //
+  // The other half of that finding. A flag in the probe is a smooth mottle: all
+  // of the paving's information lives at its border. The reference flags each
+  // carry an internal figure — a weathered blotch roughly a third of the slab
+  // across, with a hard-ish edge — and because it is anchored to the slab it
+  // moves with the masonry rather than floating over it as macro noise does.
+  //
+  // Seeded off 'b.rot' so the figure is oriented per slab: two neighbouring
+  // flags never show the same blotch in the same corner, which is the specific
+  // thing that stops a lattice from reading as a stamp.
+  const figN = warpedFbm(
+    u * 7 + b.rot * 13.7,
+    v * 7 + b.tone * 9.1,
+    7, 653, 1.9, 3,
+  );
+  const figure = smoothstep(0.46, 0.72, figN) * (0.45 + b.id * 0.55);
+  tint(c, c.r * 0.74, c.g * 0.78, c.b * 0.80, figure * 0.55);
+  // Lime wash / efflorescence in the opposite patches — the pale counterpart, so
+  // the flag has both a dark and a light incident rather than one dirt layer.
+  const wash = smoothstep(0.34, 0.14, figN) * (0.4 + b.tone * 0.6);
+  tint(c, 0.560, 0.552, 0.516, wash * 0.34);
 
   // Traffic polish in the slab centre — lighter, smoother, slightly warmer.
   const centre = smoothstep(0.18, 0.42, b.edge) * (0.6 + b.tone * 0.4);
@@ -278,10 +351,14 @@ export const stoneTexel: TexelFn = (u, v) => {
     // the note on that function: a bare mortar cliff cancels itself out under mipping
     // and the joint degenerates into a painted line, which is what round 7 measured.
     h:
-      (1 - joint) * (0.42 + grain * 0.24 + b.tone * 0.13 + blockCrown(b.u, b.v) * 0.25) -
+      (1 - joint) * (0.42 + grain * 0.24 + b.tone * 0.13 + blockCrown(b.u, b.v) * 0.25 -
+        figure * 0.14 + wash * 0.06) -
       bevel * 0.22 -
       pitting * 0.10,
-    rough: 0.74 - centre * 0.30 + grime * 0.18 + moss * 0.1,
+    // The weathered blotch is genuinely rougher than the case-hardened flag
+    // around it, so the figure survives into the specular as well as the albedo
+    // — a flag lit at grazing angle then shows it as a matte patch in a sheen.
+    rough: 0.74 - centre * 0.30 + grime * 0.18 + moss * 0.1 + figure * 0.20,
   };
 };
 

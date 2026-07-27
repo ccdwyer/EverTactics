@@ -86,6 +86,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 import {
   DEFAULT_RECESSION,
+  GLSL_AIRLIGHT,
   GLSL_NOISE,
   GLSL_RECEDE,
   unitLuminance,
@@ -638,6 +639,13 @@ uniform vec3  uFade;
 uniform vec3  uDeepUnit;
 uniform float uViewH;
 
+// Warm practical pool, yaw-local. See 'GLSL_AIRLIGHT' in 'sky.ts'.
+uniform vec3  uAirColor;
+uniform vec3  uAirCentre;
+uniform float uAirRadius;
+/** Macro hue-variation strength, 0…1. 0 restores the single-hue surround. */
+uniform float uHueVary;
+
 varying vec3  vLocal;
 varying vec3  vNormalL;
 varying float vTint;
@@ -645,6 +653,7 @@ varying float vWindow;
 varying float vMat;
 
 ${GLSL_NOISE}
+${GLSL_AIRLIGHT}
 ${GLSL_RECEDE}
 
 void main() {
@@ -669,6 +678,42 @@ void main() {
   albedo = mix(albedo, uWood, isWood);
   albedo = mix(albedo, uFoliage, isLeaf);
   albedo *= 0.55 + 0.78 * vTint;
+
+  // ── Macro hue variation ─────────────────────────────────────────────────
+  //
+  // 'vTint' is a per-piece VALUE jitter and nothing in this shader varies HUE
+  // between pieces, so the whole surround — rubble, crates, walls, carts —
+  // resolves to one blue-grey. That is the most-repeated note in the critique
+  // set ("no per-instance hue jitter", "one grey cobble texture at one scale",
+  // "the entire town is one texture with no per-tile hue jitter").
+  //
+  // Frequency is the whole design here, and it is chosen against a constraint
+  // this file already learned the hard way: the near bands sit under a ~25px
+  // circle of confusion, so anything above a couple of cycles per world unit
+  // integrates to a constant and is simply deleted from the frame. A rubble
+  // piece is 0.15–1.2 units across, so there is no within-piece frequency that
+  // both resolves and survives — which is why this is a smooth field at 0.42
+  // cycles/unit (a ~2.4-unit period) rather than a per-piece hash. Each piece
+  // lands on one temperature, neighbours land on different ones, and because
+  // the field is continuous there is no seam where a piece straddles a cell.
+  //
+  // The two shifts are complementary and roughly luminance-matched, so this
+  // varies COLOUR without varying value — value is 'vTint''s job, and moving
+  // both from here would undo the tone balance the band table sets.
+  // The gain on the remap is load-bearing and was measured, not chosen. fbm
+  // output clusters hard around 0.5, so feeding it to the mix raw put every
+  // fragment within a few percent of the neutral midpoint: the first version of
+  // this block moved the rubble pile's hue spread from sd 32.79 to 32.47 — a
+  // no-op, and slightly the wrong way — and left the far surround identical to
+  // two decimal places. Expanding about the midpoint first is what turns the
+  // field into an actual swing between the two shifts. (This file records the
+  // same class of error once already, in the macro/detail block: the
+  // frequencies were right and the amplitudes were never checked.)
+  float hueField = etFbm(vLocal.xz * 0.42 + vLocal.y * 0.15, 2);
+  float hueT = clamp((hueField - 0.5) * 2.8 + 0.5, 0.0, 1.0);
+  vec3 coolShift = vec3(0.78, 0.95, 1.26);
+  vec3 warmShift = vec3(1.26, 1.02, 0.74);
+  albedo *= mix(vec3(1.0), mix(coolShift, warmShift, hueT), uHueVary);
 
   // Face-local coordinates: across the face, and up it. Deriving the pattern
   // from these rather than from world xz is what lets a wall carry courses and
@@ -829,6 +874,17 @@ void main() {
     lit += tone * spill * uWindowGain * 0.30;
     lit += tone * win * uWindowGain;
   }
+
+  // Warm practical pool: the brazier lighting the surround it stands in.
+  //
+  // Modulated by 'albedo', not added raw. That is the same lesson the sky-edge
+  // lift block above records the hard way — an additive term that is not
+  // albedo-modulated is a constant over the face, so it erases every pattern
+  // this shader just computed and renders a textured wall as a smooth cube. As
+  // a light it does the opposite: the masonry, timber and plank patterns all
+  // show up *more* on the lit side, because that is where there is enough
+  // energy to resolve them.
+  lit += albedo * etAirlight(vLocal, n, uAirCentre, uAirRadius, uAirColor);
 
   // Distance haze. Depth here is −z in the yaw-local frame, i.e. "away from the
   // camera along the ground", which is exactly the axis that reads as distance
@@ -1188,10 +1244,16 @@ uniform vec3  uFade;
 uniform vec3  uDeepUnit;
 uniform float uViewH;
 
+// Warm practical pool, yaw-local. See 'GLSL_AIRLIGHT' in 'sky.ts'.
+uniform vec3  uAirColor;
+uniform vec3  uAirCentre;
+uniform float uAirRadius;
+
 varying vec3 vLocal;
 varying vec3 vNormalL;
 
 ${GLSL_NOISE}
+${GLSL_AIRLIGHT}
 ${GLSL_RECEDE}
 
 /** Yaw-local (x, z) → world-axis offset from the board centre. */
@@ -1406,6 +1468,25 @@ void main() {
   float lateral = smoothstep(uHalfW * 0.55, uHalfW * 1.75, abs(vLocal.x));
   col *= mix(1.0, 0.30, lateral * lateral);
 
+  // ── Warm practical pool ──────────────────────────────────────────────────
+  //
+  // "The fire pit is emissive-only: it blooms but illuminates nothing" and
+  // "the grass at its base is the same value as grass ten tiles away" are the
+  // same defect seen twice, and on this surface it is at its most obvious:
+  // the plate is the largest continuous area in the lower half of the frame and
+  // the brazier stands directly on it, throwing nothing.
+  //
+  // Added AFTER the near-field crush and the lateral margin ramp, deliberately.
+  // Those two are composition — they keep the surround under the play space —
+  // and a light that a composition ramp can extinguish is not a light. The pool
+  // is centred on the brazier, which sits on the board, so it is already near
+  // zero by the time either ramp is doing real work; putting it here only
+  // guarantees that the glow immediately around the flame survives.
+  //
+  // Modulated by the plate's own albedo term so it lights the surface rather
+  // than painting over it — same rule as the struct shader.
+  col += col * etAirlight(vLocal, vec3(0.0, 1.0, 0.0), uAirCentre, uAirRadius, uAirColor);
+
   // Upward recession, on the same ramp every other environment layer uses. The
   // plate runs all the way to the horizon at 94% of frame height, so its far
   // third sits inside the measured band; grading it with the props standing on
@@ -1584,6 +1665,8 @@ export class Backdrop extends Group {
   private currentLayout: BackdropLayout | null = null;
 
   private readonly sunLocal = new Vector3();
+  /** Warm practical pool centre in the yaw-local frame. See 'update'. */
+  private readonly airLocal = new Vector3();
 
   /**
    * Upward-recession ramp and viewport height, held here so materials rebuilt
@@ -2338,6 +2421,10 @@ export class Backdrop extends Group {
         uFade: { value: this.fade.clone() },
         uDeepUnit: { value: this.deepUnit.clone() },
         uViewH: { value: this.viewH },
+        uAirColor: { value: new Color(0, 0, 0) },
+        uAirCentre: { value: new Vector3() },
+        uAirRadius: { value: 12 },
+        uHueVary: { value: 1 },
       },
       vertexShader: STRUCT_VERT,
       fragmentShader: STRUCT_FRAG,
@@ -2437,6 +2524,9 @@ export class Backdrop extends Group {
         uFade: { value: this.fade.clone() },
         uDeepUnit: { value: this.deepUnit.clone() },
         uViewH: { value: this.viewH },
+        uAirColor: { value: new Color(0, 0, 0) },
+        uAirCentre: { value: new Vector3() },
+        uAirRadius: { value: 12 },
       },
       vertexShader: GROUND_VERT,
       fragmentShader: GROUND_FRAG,
@@ -2473,13 +2563,35 @@ export class Backdrop extends Group {
     // Sun direction expressed in the yaw-local frame, so all the shading and
     // the ground shadow stay stable while the rig turns.
     this.sunLocal.copy(this.palette.sunDirection).applyAxisAngle(UP, -yaw);
+
+    // Practical pool centre, world → yaw-local. 'this.position' is the board
+    // centre (the orchestrator re-centres this group on it every frame), and
+    // the yawRig these meshes live under carries the yaw, so the same
+    // subtract-then-unrotate that puts the sun in local space puts the fire
+    // there too. Getting this wrong does not look like a bug — the pool simply
+    // lands somewhere else on the plate — so it is derived rather than tuned.
+    this.airLocal
+      .copy(this.palette.airlightCentre)
+      .sub(this.position)
+      .applyAxisAngle(UP, -yaw);
+
     for (const m of this.structMaterials) {
       (m.uniforms.uSunLocal!.value as Vector3).copy(this.sunLocal);
+      (m.uniforms.uAirCentre!.value as Vector3).copy(this.airLocal);
       m.uniforms.uTime!.value = elapsed;
     }
     if (this.glowMaterial) this.glowMaterial.uniforms.uTime!.value = elapsed;
     if (this.groundMaterial) {
       (this.groundMaterial.uniforms.uSunLocal!.value as Vector3).copy(this.sunLocal);
+      // The plate's geometry is authored flat at y = 0 and the MESH carries the
+      // ground height (−1.64 on this map), so 'vLocal.y' in GROUND_FRAG is zero
+      // everywhere and is not comparable to a world-height air centre. Lifting
+      // the centre by the mesh offset puts the two back in the same frame;
+      // without it the pool is computed a metre and a half too close to the
+      // plate and reads hotter than the falloff says it should.
+      (this.groundMaterial.uniforms.uAirCentre!.value as Vector3)
+        .copy(this.airLocal)
+        .setY(this.airLocal.y - (this.groundMesh?.position.y ?? 0));
       // Tracked from the LIVE yaw, not the layout's. 'relayoutIfNeeded' only
       // fires past a 0.05 rad threshold, and during the eased yaw snap the rig
       // spends about a second between slots; a footprint SDF built for the old
@@ -2558,6 +2670,30 @@ export class Backdrop extends Group {
     // rather than on two grades disagreeing about which crushed blue is the
     // map's.
     unitLuminance(deepTint, this.deepUnit);
+
+    /**
+     * The pool's radiance.
+     *
+     * 'p.airlight' is a HUE (unit peak channel), so the level is chosen here.
+     * 0.62 is high for this file — every other additive term in it is 0.03–0.30
+     * — and that is deliberate: the surround is dark, the pool is squared
+     * inverse-square, and by two radii out it has already dropped below a
+     * percent of this. What it buys is a genuinely hot patch of ground and
+     * clutter immediately around the flame, which is the thing the frame has
+     * never had. Scaled by 'airlightPower' so a map with no fire gets nothing
+     * rather than a mystery glow.
+     */
+    const airColor = p.airlight.clone().multiplyScalar(0.62 * p.airlightPower);
+    const airRadius = p.airlightRadius;
+
+    for (const m of this.structMaterials) {
+      (m.uniforms.uAirColor!.value as Color).copy(airColor);
+      m.uniforms.uAirRadius!.value = airRadius;
+    }
+    if (this.groundMaterial) {
+      (this.groundMaterial.uniforms.uAirColor!.value as Color).copy(airColor);
+      this.groundMaterial.uniforms.uAirRadius!.value = airRadius;
+    }
 
     for (const m of this.structMaterials) {
       (m.uniforms.uDeepUnit!.value as Color).copy(this.deepUnit);

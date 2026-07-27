@@ -166,7 +166,10 @@ function makeTexture(data: Uint8ClampedArray, size: number, srgb: boolean): THRE
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.generateMipmaps = true;
-  tex.anisotropy = 8;
+  // Terrain is seen at a 30-degree pitch, so every top face in the frame is
+  // sampled anisotropically by definition; 8 was leaving the far half of a long
+  // walkway crawling. 16 is the maximum every desktop GL implementation exposes.
+  tex.anisotropy = 16;
   tex.needsUpdate = true;
   return tex;
 }
@@ -280,11 +283,16 @@ const TILING_CHUNK = /* glsl */ `
 uniform float uTileGrid;
 uniform float uTileRotate;
 uniform float uTileSharpen;
+uniform vec2 uTileMirror;
 
 vec3 etTileW;
 vec2 etTileU1;
 vec2 etTileU2;
 vec2 etTileU3;
+vec3 etTileA;
+vec2 etTileF1;
+vec2 etTileF2;
+vec2 etTileF3;
 
 vec2 etHash22(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -292,11 +300,28 @@ vec2 etHash22(vec2 p) {
   return fract((p3.xx + p3.yz) * p3.zy);
 }
 
-vec2 etVariant(vec2 uv, vec2 h) {
-  float a = (h.x - 0.5) * 6.2831853 * uTileRotate;
-  float s = sin(a);
-  float c = cos(a);
+// Mirroring, per axis. Rotation is not available to masonry -- turning a coursed
+// wall 40 degrees makes the courses run diagonally -- so a brick sheet had exactly
+// one variant per grid cell: an offset. An axis mirror is the one transform that
+// keeps courses horizontal and beds level while producing a genuinely different
+// stone order, and it multiplies the variant count by four (two axes, on or off).
+// Round 7: "Tiling period is visible ... no decal breakup, no swapped variant
+// tiles, no rotation."
+//
+// The v axis is opt-out per material, because on a vertical face v runs downward
+// and the wall textures put their runoff staining, their salt bloom and their
+// lichen ledges on that axis. Mirroring v would send the rain up the wall.
+vec2 etVariant(vec2 uv, vec2 h, out float ang, out vec2 flip) {
+  ang = (h.x - 0.5) * 6.2831853 * uTileRotate;
+  float s = sin(ang);
+  float c = cos(ang);
   vec2 r = mat2(c, -s, s, c) * uv;
+  flip = vec2(
+    fract(h.x * 17.13) > 0.5 ? -uTileMirror.x : uTileMirror.x,
+    fract(h.y * 23.71) > 0.5 ? -uTileMirror.y : uTileMirror.y
+  );
+  flip = mix(vec2(1.0), flip, step(0.5, abs(flip)));
+  r *= flip;
   return r + h * 37.13 + vec2(h.y * 11.7, h.x * 7.3);
 }
 
@@ -325,15 +350,48 @@ void etPrepareTiling(vec2 uv) {
   etTileW = pow(max(etTileW, vec3(0.0)), vec3(uTileSharpen));
   etTileW /= max(etTileW.x + etTileW.y + etTileW.z, 1e-5);
 
-  etTileU1 = etVariant(uv, etHash22(n1));
-  etTileU2 = etVariant(uv, etHash22(n2));
-  etTileU3 = etVariant(uv, etHash22(n3));
+  float a1, a2, a3;
+  etTileU1 = etVariant(uv, etHash22(n1), a1, etTileF1);
+  etTileU2 = etVariant(uv, etHash22(n2), a2, etTileF2);
+  etTileU3 = etVariant(uv, etHash22(n3), a3, etTileF3);
+  etTileA = vec3(a1, a2, a3);
 }
 
 vec4 etSampleTiled(sampler2D tex) {
   return texture2D(tex, etTileU1) * etTileW.x
        + texture2D(tex, etTileU2) * etTileW.y
        + texture2D(tex, etTileU3) * etTileW.z;
+}
+
+// The normal map cannot go through etSampleTiled, and until round 9 it did.
+//
+// A tangent-space normal is a *direction expressed in the texture's own uv frame*.
+// Stochastic tiling deliberately rewrites that frame per grid cell -- it rotates
+// it by 'ang' and, now, mirrors it by 'flip' -- so the sampled xy has to be carried
+// back into the surface's frame before it can be blended or lit. It never was. The
+// consequence was not subtle: every surface with uTileRotate = 1 (turf, soil, sand,
+// snow, foliage, the coping, the water bed, rubble) had its bump direction rotated
+// by a different random angle in every triangle of the tiling grid, so the light
+// direction its relief implied was uncorrelated with the light direction in the
+// scene, patch by patch. That is the round-7 finding almost verbatim -- joints and
+// grain that "don't catch a highlight on the lit side or darken on the shadow side"
+// -- and no amount of authoring in the height field could have fixed it.
+//
+// The inverse of (rotate by a, then mirror by f) applied to a direction is
+// (mirror by f, then rotate by -a); f is its own inverse, so it is just a multiply.
+vec4 etSampleTiledNormal(sampler2D tex, vec2 uv, float ang, vec2 flip) {
+  vec4 s = texture2D(tex, uv);
+  vec2 n = (s.xy * 2.0 - 1.0) * flip;
+  float c = cos(-ang);
+  float si = sin(-ang);
+  s.xy = (mat2(c, -si, si, c) * n) * 0.5 + 0.5;
+  return s;
+}
+
+vec4 etSampleTiledN(sampler2D tex) {
+  return etSampleTiledNormal(tex, etTileU1, etTileA.x, etTileF1) * etTileW.x
+       + etSampleTiledNormal(tex, etTileU2, etTileA.y, etTileF2) * etTileW.y
+       + etSampleTiledNormal(tex, etTileU3, etTileA.z, etTileF3) * etTileW.z;
 }
 `;
 
@@ -368,6 +426,8 @@ interface PatchOptions {
   batchSize: number;
   tileGrid: number;
   tileRotate: number;
+  tileMirrorU: number;
+  tileMirrorV: number;
   tileSharpen: number;
   roughMin: number;
   roughMax: number;
@@ -479,6 +539,9 @@ function patchTerrainShader(mat: THREE.MeshStandardMaterial, opts: PatchOptions)
     shader.uniforms.uBatchSize = { value: opts.batchSize };
     shader.uniforms.uTileGrid = { value: opts.tileGrid };
     shader.uniforms.uTileRotate = { value: opts.tileRotate };
+    shader.uniforms.uTileMirror = {
+      value: new THREE.Vector2(opts.tileMirrorU, opts.tileMirrorV),
+    };
     shader.uniforms.uTileSharpen = { value: opts.tileSharpen };
     shader.uniforms.uRoughRange = { value: new THREE.Vector2(opts.roughMin, opts.roughMax) };
     shader.uniforms.uWeather = { value: opts.weather };
@@ -553,7 +616,7 @@ ${MACRO_CHUNK}`,
     if (opts.hasNormal) {
       shader.fragmentShader = shader.fragmentShader.replaceAll(
         'texture2D( normalMap, vNormalMapUv )',
-        'etSampleTiled( normalMap )',
+        'etSampleTiledN( normalMap )',
       );
     }
     if (opts.hasEmissive) {
@@ -811,7 +874,9 @@ roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.34, etWet);`,
   mat.customProgramCacheKey = () =>
     `et-terrain-${opts.aoStrength}-${opts.macroStrength}-${opts.macroScale}-${
       opts.batchStrength
-    }-${opts.batchSize}-${opts.tileGrid}-${opts.tileRotate}-${opts.tileSharpen}-${
+    }-${opts.batchSize}-${opts.tileGrid}-${opts.tileRotate}-${opts.tileMirrorU}-${
+      opts.tileMirrorV
+    }-${opts.tileSharpen}-${
       opts.roughMin
     }-${opts.roughMax}-${opts.weather}-${opts.tintJitter}-${opts.floral}-${
       opts.bounceFloor
@@ -860,6 +925,13 @@ interface SurfaceTuning {
   tileGrid?: number;
   /** How much each variant is rotated. Must be 0 for anything with a grain direction. */
   tileRotate?: number;
+  /**
+   * Whether a variant may be mirrored about the texture u / v axis. See the note
+   * on 'etVariant': u is safe for anything, v is only safe where the sheet has no
+   * up/down story in it (runoff, salt bloom, lichen ledges all live on v).
+   */
+  tileMirrorU?: number;
+  tileMirrorV?: number;
   /** Blend sharpness; higher = narrower cross-fade seams. */
   tileSharpen?: number;
   normalScale?: number;
@@ -930,11 +1002,19 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
    * than the module of the thing holding it up.
    */
   stone: {
-    roughRange: [0.38, 0.94], weather: 0.55,
-    uvScale: 0.95, roughness: 1, metalness: 0, color: 0xffffff,
+    // ROUND 9: was [0.38, 0.94]. A dry flagged floor is not a polished one, and
+    // at a 0.38 floor the paving carried a specular lobe wide enough that every
+    // top face inside the brazier's reach clipped to a smooth cream plate — the
+    // one place in the frame where the rubric's "any flat untextured surface"
+    // was actually true, and it was true on the largest surface class on screen.
+    // Gloss on paving is now earned rather than given: 'etWet' still multiplies
+    // roughness by 0.34 in the tide band, so wet stone is the only stone that
+    // shines and it is legible *because* the dry stone next to it does not.
+    roughRange: [0.56, 0.98], weather: 0.55,
+    uvScale: 1.06, roughness: 1, metalness: 0, color: 0xffffff,
     aoStrength: 1.0, macroStrength: 0.30, macroScale: 0.13,
     batchStrength: 0.50, batchSize: 2.40,
-    tileGrid: 0.52, tileRotate: 0, tileSharpen: 2.5, normalScale: 1.0,
+    tileGrid: 0.52, tileRotate: 0, tileMirrorV: 1, tileSharpen: 2.5, normalScale: 1.0,
   },
   /**
    * Coursed rubble. One repeat covers 1.6 world units over an 8×5 lattice, so a block
@@ -988,9 +1068,15 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
    * masonry. A coping has to be a run of separate stones or it is just an outline.
    */
   coping: {
-    roughRange: [0.34, 0.90], weather: 0.85, tintJitter: 0.42, bounceFloor: 0.15,
+    // Dressed stone is smoother than the flags it caps but it is still stone;
+    // at a 0.34 floor the kerb was picking up a specular hit along its whole
+    // length whichever way it faced, which is half of why it read as an outline.
+    roughRange: [0.50, 0.94], weather: 0.85, tintJitter: 0.42, bounceFloor: 0.15,
     uvScale: 0.45, roughness: 1, metalness: 0, color: 0xffffff,
-    aoStrength: 0.82, macroStrength: 0.16, macroScale: 0.15,
+    // Full AO like every other masonry: the reduced strength here was letting the
+    // kerb stay lit straight through inside corners where the wall it caps went dark,
+    // which is exactly the discontinuity that reads as an applied outline.
+    aoStrength: 1.0, macroStrength: 0.16, macroScale: 0.15,
     batchStrength: 0.55, batchSize: 3.20,
     tileGrid: 0.46, tileRotate: 1, tileSharpen: 2.6, normalScale: 0.8,
   },
@@ -1000,7 +1086,7 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
     uvScale: 0.7, roughness: 1, metalness: 0, color: 0xffffff,
     aoStrength: 1.0, macroStrength: 0.22, macroScale: 0.14,
     batchStrength: 0.50, batchSize: 2.40,
-    tileGrid: 0.4, tileRotate: 0, tileSharpen: 2.2, normalScale: 0.95,
+    tileGrid: 0.4, tileRotate: 0, tileMirrorV: 1, tileSharpen: 2.2, normalScale: 0.95,
   },
   /** Timber edge board capping a plank deck. */
   nosing: {
@@ -1181,6 +1267,10 @@ export function createSurfaceMaterial(kind: TerrainMaterialKind): THREE.MeshStan
     batchSize: tune.batchSize ?? 1,
     tileGrid: tune.tileGrid ?? 1,
     tileRotate: tune.tileRotate ?? 0,
+    // Anything that is not free to rotate mirrors instead, so no sheet in the
+    // map is left with a single variant per grid cell.
+    tileMirrorU: tune.tileMirrorU ?? (tune.tileRotate ? 0 : 1),
+    tileMirrorV: tune.tileMirrorV ?? 0,
     tileSharpen: tune.tileSharpen ?? 5,
     roughMin: tune.roughRange?.[0] ?? 0.55,
     roughMax: tune.roughRange?.[1] ?? 1,

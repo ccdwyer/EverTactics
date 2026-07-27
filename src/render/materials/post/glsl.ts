@@ -191,6 +191,7 @@ uniform vec2  uCoCAspect;       // vec2(width/height, 1.0)
 uniform float uFocusAuto;       // 1 = read the focal plane off the depth buffer at uTiltCenter
 uniform float uFarClamp;        // ceiling on POSITIVE (far-field) CoC, 0..1
 uniform float uNearRangeScale;  // multiplier on uFocusRange for the NEAR half only
+uniform float uNearClamp;       // asymptote on NEGATIVE (near-field) CoC, 0..1
 
 /**
  * Memo for {@link focalDistance}. The probe is five dependent depth taps and the composite
@@ -323,7 +324,24 @@ float computeCoC(vec2 uv, float d) {
   // same treatment against a ceiling of 1.0, which turns the abrupt sharp-to-fully-defocused
   // step the debug view showed along the near rim into the continuous falloff the references
   // carry.
-  float ceiling = coc > 0.0 ? uFarClamp : 1.0;
+  // ROUND 9 gives the NEAR half its own asymptote instead of the hardcoded 1.0.
+  //
+  // The near ceiling was written for a scene whose near field is ground: the bottom edge of an
+  // isometric frame, the rock skirt, foreground scenery. On this map it is not. Elevation is
+  // the mechanic, and on a 30° rig a block standing three units taller than the focal plane is
+  // 3·cos(30°) = 2.6 world units NEARER in view space — as much depth as the entire visible
+  // ground plane spans. So the tallest playable geometry in the middle of the picture reached
+  // the near ceiling before any actual foreground did, and '?postdebug=coc' showed exactly
+  // that: the pillar beside the party cluster was solid green at 0.85+ while the tiles around
+  // its base were sharp. A viewer reads that as a smear over gameplay, not as a lens.
+  //
+  // A lower asymptote is the right instrument rather than a wider near range, because the two
+  // regions want opposite things: the near range decides WHERE softness begins (and it must
+  // begin inside the frame, or the near field contributes nothing and the miniature read
+  // collapses to "sharp object, blurry sky"), while the ceiling decides HOW FAR it goes. The
+  // exponential keeps a real derivative under both, so a tall block still separates from the
+  // rock skirt in front of it — it just no longer dissolves.
+  float ceiling = coc > 0.0 ? uFarClamp : uNearClamp;
   coc = sign(coc) * ceiling * (1.0 - exp(-abs(coc) / max(ceiling, 1e-3)));
   return clamp(coc, -1.0, 1.0);
 }

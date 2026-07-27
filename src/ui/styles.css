@@ -1085,12 +1085,22 @@
    down a third of the frame height. The plate and the per-chip fill are both
    gone; what separates the faces from the board now is the card's own dark mat
    and drop shadow, which is what the reference uses. */
+/* ROUND 9 — THE COLUMN IS CONTIGUOUS IN THE REFERENCE, AND OURS WAS NOT.
+   ---------------------------------------------------------------------------
+   Measured on refs/curated/fft/press-042310-...-mediakit-06.png at 1080p: the
+   Combat Timeline cards TOUCH. There is no gap anywhere in the run of nine —
+   card bottom edge meets the next card's top edge, and the only thing that
+   separates them is each card's own dark keyline. That is what makes the rail
+   read as one instrument rather than as a stack of loose stamps, and it is why
+   the reference can carry nine faces down a third of the frame without the
+   column looking ragged.
+   Ours ran a 5px gap, so the eye counted eight separate objects. Zero. */
 .et-turnorder__track {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 5px;
+  gap: 0;
   padding: 2px 0 10px;
 }
 /* What is left of the plate: a soft pool of shade, no edges anywhere.
@@ -1126,7 +1136,9 @@
      element that is supposed to be a clean vertical run of digits. Now the
      digits share one column and the acting card is the thing that protrudes,
      which is the emphasis we actually want. */
-  grid-template-columns: 26px auto;
+  /* 28px: a two-digit tick ("14") in 21px tabular Cinzel measures 26px, and the
+     gutter has to clear it or the numeral crowds the card's keyline. */
+  grid-template-columns: 28px auto;
   align-items: center;
   gap: 6px;
   padding: 0;
@@ -1165,37 +1177,61 @@
    The mat is lifted to roughly the terrain's own value and carries a warm
    top-edge highlight, so the card reads as lit chrome rather than as a cutout —
    still inside the navy/gold palette, just no longer darker than the scene. */
+/* ROUND 9 — THE MAT IS LIGHT IN THE REFERENCE. OURS WAS STILL A DARK BOX.
+   ---------------------------------------------------------------------------
+   Round 8 lifted the mat "to roughly the terrain's own value" and that was still
+   two stops under the reference. In the shipped timeline the card mat is a PALE
+   team wash — cool blue-grey for allies, dusty rose for hostiles — with the
+   portrait sitting inside it behind a single dark keyline. Look at the crop: the
+   mat is the brightest thing in that corner of the frame, brighter than the
+   sunlit hillside behind it, which is precisely why nine small faces stay
+   legible over a busy map with no plate underneath them.
+   Ours was a navy gradient a shade off the board, so every card needed its own
+   drop shadow to be found at all, and the column read as holes rather than as
+   chrome. The mat is now a mid-light slate carrying the team hue; the face keeps
+   its dark keyline, so the card reads mat → keyline → portrait, the reference's
+   own three-part stack. */
 .et-turnchip__frame {
   position: relative;
   grid-column: 2;
   justify-self: start;
-  padding: 2px 2px 0;
+  /* 3px of mat on every side. Measured on the reference card the mat margin is
+     ~4px on a 62px face, i.e. it is VISIBLE as a mat rather than as a keyline —
+     at 2px ours read as a coloured outline and the card lost the inlaid look. */
+  padding: 3px 3px 4px;
+  border-radius: 3px;
   background: linear-gradient(
-    165deg,
-    color-mix(in srgb, var(--team-color) 46%, #26314e),
-    color-mix(in srgb, var(--team-color) 22%, #0b1020)
+    168deg,
+    color-mix(in srgb, var(--team-color) 26%, #ccd5e3) 0%,
+    color-mix(in srgb, var(--team-color) 38%, #9aa6bd) 64%,
+    color-mix(in srgb, var(--team-color) 44%, #77839c) 100%
   );
   box-shadow:
-    inset 0 1px 0 rgba(255, 246, 223, 0.22),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.6),
-    0 0 0 1px color-mix(in srgb, var(--team-color) 60%, rgba(214, 200, 160, 0.5)),
-    0 6px 16px -6px rgba(0, 0, 0, 0.95);
-  transition: box-shadow var(--dur) ease;
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(8, 11, 20, 0.9),
+    0 5px 13px -7px rgba(0, 0, 0, 0.95);
+  transition: box-shadow var(--dur) ease, filter var(--dur) ease;
 }
 .et-turnchip:hover .et-turnchip__frame {
+  filter: brightness(1.14);
   box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.72),
-    0 0 0 1px rgba(240, 221, 160, 0.8),
-    0 6px 16px -6px rgba(0, 0, 0, 0.95);
-}
-.et-turnchip.is-current .et-turnchip__frame {
-  padding: 3px 3px 0;
-  background: linear-gradient(165deg, #38487a, #10182c);
-  box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
     0 0 0 1px rgba(240, 221, 160, 0.9),
-    0 0 18px -4px rgba(240, 221, 160, 0.45),
-    0 7px 18px -7px rgba(0, 0, 0, 0.95);
+    0 5px 13px -7px rgba(0, 0, 0, 0.95);
+}
+/* The acting card is the one entry that leaves the team palette: it takes the
+   HUD's gold, so the head of the queue is the same colour as the panel titles
+   and the menu cursor rather than a slightly larger blue card. */
+.et-turnchip.is-current .et-turnchip__frame {
+  padding: 4px 4px 5px;
+  background: linear-gradient(168deg, #f6ecd0 0%, #d6c28e 58%, #a89055 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.66),
+    0 0 0 1px rgba(12, 16, 26, 0.9),
+    0 0 0 2px rgba(240, 221, 160, 0.55),
+    0 0 20px -4px rgba(240, 221, 160, 0.5),
+    0 6px 16px -8px rgba(0, 0, 0, 0.95);
 }
 .et-turnchip__crown {
   position: absolute;
@@ -1295,16 +1331,27 @@
    shadows do what the shipped game does with an outline: a tight near-black
    halo that hugs the letterform plus a wide soft one that darkens whatever it
    is standing on. */
+/* ROUND 9 — the numeral lost saturation once the cards went pale.
+   At 56% white the tick read as a tint of the mat beside it rather than as its
+   own signal; in the reference the numeral is a SATURATED team colour with a
+   near-white core and a hard dark outline, and it is the one element in that
+   corner that is more chromatic than the card. 38% white keeps it legible on
+   dark stone while letting the hue stay the thing the eye sorts by, and the
+   outline is now a real 1px ring (four offset shadows) rather than a blur that
+   goes translucent over a bright tile. */
 .et-turnchip__delta {
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 700;
   line-height: 1;
-  color: color-mix(in srgb, var(--team-color) 100%, white 56%);
+  color: color-mix(in srgb, var(--team-color) 100%, white 38%);
   font-variant-numeric: lining-nums tabular-nums;
   text-shadow:
-    0 0 3px rgba(0, 0, 0, 1),
-    0 1px 2px rgba(0, 0, 0, 1),
+    1px 0 0 rgba(3, 5, 11, 0.95),
+    -1px 0 0 rgba(3, 5, 11, 0.95),
+    0 1px 0 rgba(3, 5, 11, 0.95),
+    0 -1px 0 rgba(3, 5, 11, 0.95),
+    0 2px 3px rgba(0, 0, 0, 1),
     0 0 12px rgba(0, 0, 0, 0.9);
 }
 /* Printed ONCE, under the first queued numeral, and nowhere else.
@@ -1342,25 +1389,38 @@
    of the frame, outside the image — it is the base the face stands on. At our
    card size that is 5px, and it is the single loudest allegiance cue in the
    rail, which is why it takes the flat team colour rather than a tint of it. */
+/* ROUND 9 — the bar is a PILL SITTING IN the mat, not a band welded under it.
+   In the reference the health gauge is a rounded capsule with a hard dark
+   outline, floating in the card's lower mat band with mat visible on all four
+   sides of it; it even overhangs the portrait slightly. A square-cornered strip
+   flush to the card's bottom edge (round 8) reads as a progress bar bolted on;
+   the capsule reads as an inlaid gauge, which is the difference between chrome
+   that was designed and chrome that was appended. */
 .et-turnchip__hp {
   position: relative;
   display: block;
   /* One ninth of the card, as measured on the shipped chip — at a 66-78px card
      that is 7px, not the 5 the round-6 note derived from a smaller face. */
-  height: 7px;
-  margin-top: 2px;
+  height: 6px;
+  margin: 3px 1px 0;
   z-index: 2;
-  background: rgba(3, 5, 11, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgba(9, 12, 21, 0.94);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.85),
+    inset 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 .et-turnchip__hp-fill {
   height: 100%;
+  border-radius: 3px;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--team-color) 55%, #ffffff) 0%,
-    var(--team-color) 55%,
-    color-mix(in srgb, var(--team-color) 78%, #000000) 100%
+    color-mix(in srgb, var(--team-color) 42%, #ffffff) 0%,
+    var(--team-color) 52%,
+    color-mix(in srgb, var(--team-color) 72%, #000000) 100%
   );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
   transition: width var(--dur) var(--ease-soft);
 }
 .et-turnchip__hp.is-critical .et-turnchip__hp-fill {
@@ -1419,9 +1479,14 @@
 /* Inside the rail the CARD MAT is the frame, so the portrait drops its own gold
    rule entirely. Two concentric bevels on a 54px chip is 4px of ornament around
    a 46px face — the reference chips carry exactly one keyline. */
+/* Round 9: against a pale mat the keyline is the only thing holding the face in,
+   so it is a full-strength black rule plus a hairline of the mat's own shadow. */
 .et-turnchip .et-portrait,
 .et-turnchip.is-current .et-portrait {
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.8);
+  border-radius: 2px;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.92),
+    inset 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 /* Every displayed size is a DOWNSCALE of the 128px source (104 / 60 / 46 / 30),
    and nearest-neighbour decimation on a downscale drops pixel rows — it makes
@@ -1818,7 +1883,27 @@
 .et-unitinfo--band.et-unitinfo--compact .et-bf__label { font-size: 9px; letter-spacing: 0.14em; }
 .et-unitinfo--band.et-unitinfo--compact .et-bf__value { font-size: 14px; }
 
-.et-unitinfo__stats { display: flex; flex-wrap: nowrap; gap: 4px; }
+/* ROUND 9 — ONE STRIP, NOT SIX BOXES.
+   ---------------------------------------------------------------------------
+   "The UI forms a picture frame" and "everything is a rounded rect" are both
+   really the same note: count the rectangles. This row alone put SIX gold-ruled
+   boxes along the bottom of the active-unit panel, inside a panel that is itself
+   a gold-ruled box, and at 38px wide each one was mostly rule and padding — a
+   spreadsheet cell rendered in Cinzel.
+   Neither reference game does this. FFT's card ends in a single continuous strip
+   ("Holy Knight | Lv.6 Next 46 | JP 654") divided by hairlines, one object with
+   internal structure. That is what this is now: one field, one keyline, and a
+   1px gold rule between columns drawn as an inset shadow so the flex track is
+   unchanged and nothing reflows. */
+.et-unitinfo__stats {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  background: linear-gradient(180deg, rgba(36, 48, 79, 0.58), rgba(10, 15, 29, 0.66));
+  box-shadow:
+    inset 0 0 0 1px rgba(201, 162, 39, 0.22),
+    inset 0 1px 0 rgba(255, 246, 223, 0.07);
+}
 .et-statcell {
   flex: 1 1 38px;
   display: flex;
@@ -1826,9 +1911,14 @@
   align-items: center;
   gap: 1px;
   padding: 3px 3px 2px;
-  background: linear-gradient(180deg, rgba(36, 48, 79, 0.6), rgba(10, 15, 29, 0.6));
-  box-shadow: inset 0 0 0 1px rgba(201, 162, 39, 0.18);
+  /* Column divider. Inset so it costs no layout, and a two-stop rule (dark
+     groove + gold highlight) so it reads as an engraved separator rather than
+     as a border someone forgot to remove. */
+  box-shadow:
+    inset 1px 0 0 rgba(201, 162, 39, 0.2),
+    inset 2px 0 0 rgba(4, 7, 14, 0.5);
 }
+.et-statcell:first-child { box-shadow: none; }
 .et-statcell__label { font-size: 8px; letter-spacing: 0.14em; color: var(--ink-muted); }
 .et-statcell__value {
   font-family: var(--font-display);
@@ -1838,7 +1928,14 @@
   color: var(--ink-bright);
   font-variant-numeric: lining-nums tabular-nums;
 }
-.et-statcell--jp { flex: 0 0 auto; min-width: 54px; }
+/* JP closes the strip, so it takes a warm field of its own — the same move the
+   reference makes with its JP counter, which is the one number on that row a
+   player is saving toward rather than reading off. */
+.et-statcell--jp {
+  flex: 0 0 auto;
+  min-width: 54px;
+  background: linear-gradient(180deg, rgba(122, 98, 38, 0.34), rgba(46, 36, 14, 0.4));
+}
 .et-statcell--jp .et-statcell__value { color: var(--gold-bright); }
 
 .et-unitinfo__statuses { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 9px; }

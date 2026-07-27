@@ -57,6 +57,19 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 6 | 4/6 baseline, 5/6 after | 4/6 | |
 | 7 | 5/6 baseline, 5/6 after | 5/6 | |
 | 8 | **2/6** baseline, 5/6 after | **6/6** baseline | see the variance note |
+| 9 | 5/12 baseline, 9/12 after | **11/12** and **10/12** | first n=12 round |
+
+### Round 9, the first round with enough samples to say anything
+Identification: 5 of 12 then 9 of 12. Tested against a pooled rate of 0.58, P(<=5 of 12)=0.19 and
+P(>=9 of 12)=0.19 — so even at n=12 that swing is NOT significant. Do not read it as a regression.
+
+Preference IS significant. Judges preferred our frame 11 of 12 and 10 of 12.
+P(>=10 of 12 | a true coin flip) = **0.019**.
+
+So the defensible statement, as of round 9, is:
+**judges reliably prefer our frame to a shipped commercial SRPG frame (p ~ 0.02), while still
+identifying which is the prototype more often than chance.** Those are different claims and only
+the first is established. The user's bar is the second, and it is not met.
 
 ### n=6 was never enough to read a single round
 Rounds 7 and 8 scored essentially the same build at 5/6, then 2/6, then 5/6 identified. That is not

@@ -112,6 +112,23 @@
  *     under every unit. Measured off a same-build A/B on 'battle-open', ground
  *     at the boots now reads **1.27x to 2.06x** darker than the same ground with
  *     the caster off, across five units — the reference band is 1.45–2.02x.
+ *  3b. **Round 9 — the decal was never reaching the framebuffer at all.** Every
+ *     round from 5 to 8 tuned the decal's *shape* without checking whether the
+ *     shape survived rasterisation. It did not. Forcing the fragment to a signal
+ *     colour and shooting 'battle-open' three ways settled it: with the shipped
+ *     0.055 lift a few stray pixels near two of twelve units cleared the depth
+ *     test; with 'depthTest: false' a bold, correctly-placed, ~0.7-tile mark
+ *     appeared under *every* unit; raising the lift to 0.30 recovered a thin band
+ *     at the boot line and nothing else. Position, orientation, size and shader
+ *     were all fine — the depth test was eating the work.
+ *
+ *     A world-Y lift cannot fix that: under a 30° camera it buys 'h·sin(30°)' of
+ *     depth and spends 'h·cos(30°)' — nearly twice as much — displacing the mark
+ *     up the screen, which is peter-panning. The camera is **orthographic**, so
+ *     the correct lever is a translation along the camera's own view axis: screen
+ *     x and y come out bit-identical and only the written depth moves. See
+ *     {@link CONTACT_DEPTH_BIAS}. Measured after, at the pale-haired unit's boots:
+ *     ground that read 44/44/30 with the decal off reads 11/5/10 with it on.
  *  4. **Exposure parity.** A billboard presents a near-perfect normal to any
  *     light it faces and therefore over-collects direct light compared with the
  *     terrain around it; 'uDirectGain' discounts that back down.
@@ -711,25 +728,52 @@ function canvasTexture(
 const WHITE = new THREE.Color(0xffffff);
 
 /**
- * How far the contact decal floats above the tile surface, in world units.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ROUND 9 — the decal was losing the depth test almost everywhere, and a lift
+ * cannot fix that without peter-panning
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Grounding scored 2.8/10 for a fifth round. Measured, not guessed: the decal's
+ * fragment was forced to a signal colour and 'battle-open' shot three ways.
  *
- * Round 6: 0.012 → 0.03. Rendering the decal in a signal colour and sweeping the
- * lift, 0.012 lost the whole quad to the depth test on most units and 0.05 still
- * lost it on some; the terrain around a unit is rarely a clean plane at exactly
- * 'cell.z * HEIGHT_UNIT'. 0.03 is about a third of a device pixel of parallax at
- * this camera — invisible as detachment — and clears the joins that were eating
- * the mark. It is not a fix on its own; see {@link GROUND_CASTER_RADIUS}.
+ *   a. As shipped ('lift' 0.055, polygon offset −2.5/−6): essentially no signal
+ *      reaches the framebuffer. A few stray pixels near two of twelve units.
+ *   b. Same frame with 'depthTest: false': a bold, correctly-placed, roughly
+ *      0.7-tile mark under *every* unit. So the quad's position, orientation,
+ *      size and shader were all fine — the depth test was eating all of it.
+ *   c. Lift raised to 0.30: a thin band survives at the boot line and nothing
+ *      else.
  *
- * Round 8: 0.03 → 0.055, together with a larger polygon offset. Shooting the
- * decal's own 'occ' as a signal colour again, the surviving mark was a crescent
- * a few pixels deep — the terrain has picked up bevels and per-tile height
- * variance since round 6, and a 0.03 lift no longer clears them. Depth is where
- * this fight is lost, so most of the correction goes into the polygon offset
- * (which moves depth without moving the quad on screen) and only a little into
- * the lift (which does move it: at 30° pitch, 0.055 world units is ~2.5 device
- * pixels of parallax, and past about 0.1 the mark visibly detaches).
+ * The old lever was wrong in kind. Lifting a *horizontal* quad by 'h' under a
+ * 30° camera moves it 'h·cos(30°)' up the screen — at 56 device px per world
+ * unit, a lift big enough to clear the terrain (≥0.3) displaces the mark 15 px
+ * off the boots, which is textbook peter-panning. So the lift buys depth and
+ * spends it immediately on the exact artefact the brief bans.
+ *
+ * The camera is **orthographic**. That makes the correct lever exact: translate
+ * the quad along the camera's own view axis. A pure view-Z shift under an
+ * orthographic projection leaves screen x and y *bit-identical* and changes only
+ * the depth written — it is a depth bias expressed as geometry. The quad stays
+ * horizontal, stays welded to the boots, and wins the depth test against its own
+ * tile by exactly {@link CONTACT_DEPTH_BIAS} world units.
+ *
+ * The price is bounded and known: terrain standing *between* the camera and the
+ * unit's tile is overdrawn if it is nearer by less than the bias. Swept on the
+ * frame, 0.30 recovers the boot line and little else and 0.60 starts eating the
+ * near lip of blocks the unit stands behind; 0.45 — about half a tile of forward
+ * clearance — covers chamfers, kerbs and the tile's own front edge and nothing
+ * taller. The footprint is still clamped to the unit's own tile (see
+ * 'uTileHalf'), so there is no way for the mark to land on a neighbour.
  */
-const CONTACT_SHADOW_LIFT = 0.055;
+const CONTACT_DEPTH_BIAS = 0.45;
+
+/**
+ * Residual world-Y lift, kept small on purpose.
+ *
+ * {@link CONTACT_DEPTH_BIAS} now carries the depth fight, so this only has to
+ * clear the sub-millimetre coplanarity case. At 30° pitch 0.02 world units is
+ * under one device pixel of displacement.
+ */
+const CONTACT_SHADOW_LIFT = 0.02;
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -823,7 +867,7 @@ const SHADOW_SIZE = TILE_SIZE * 1.6;
  * 2.0x drop (129 → 64) on lit ground; bloom and the DOF resolve downstream lift
  * a soft mark back up, so the source has to be a little past the target.
  */
-const SHADOW_DENSITY = 0.84;
+const SHADOW_DENSITY = 0.78;
 
 /**
  * Procedural grounding decal.
@@ -950,17 +994,30 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // points at the camera, so that strip is 0.7 tiles deep, not 0.5 — and
         // the peak is pushed a little further into it so the densest part of the
         // mark lands on visible ground rather than under the figure.
+        //
+        // ── ROUND 9 ────────────────────────────────────────────────────────────
+        // With the depth fight finally won (see CONTACT_DEPTH_BIAS) the lobes are
+        // re-measured against 'refs/curated/fft/press-311722-…-mediakit-03' at 4x,
+        // the blonde unit standing on the carpet. What that frame draws is a soft
+        // ellipse welded to the boot line, about **1.4 boot-widths across and one
+        // boot-height deep**, leaning away from the key, dying out completely
+        // inside two boot-widths. It is not a pool and it is not a hard blob.
+        //
+        // Our boots are ~14 device px wide against a 96 px tile, so 1.4 boot-widths
+        // is 0.20 tiles — but a gaussian's *visible* extent is roughly 1.5 sigma,
+        // so sigma lands near 0.40 across and 0.30 deep once the 30° foreshortening
+        // is undone (a mark that is round on the ground is half as tall on screen).
         float fwd = -q.y;
-        float yc = fwd - 0.10;
-        float coreSy = yc > 0.0 ? 0.34 : 0.13;
-        vec2 c = vec2(q.x / 0.33, yc / coreSy);
+        float yc = fwd - 0.14;
+        float coreSy = yc > 0.0 ? 0.40 : 0.15;
+        vec2 c = vec2(q.x / 0.40, yc / coreSy);
         float core = exp(-dot(c, c));
 
         // Skirt: the 1.45x band. Wider and weaker, carrying the mark out to the
         // half-tile the reference measures before it dies.
-        float skirtSy = yc > 0.0 ? 0.66 : 0.26;
-        vec2 k = vec2(q.x / 0.58, yc / skirtSy);
-        float skirt = exp(-dot(k, k)) * 0.52;
+        float skirtSy = yc > 0.0 ? 0.74 : 0.30;
+        vec2 k = vec2(q.x / 0.66, yc / skirtSy);
+        float skirt = exp(-dot(k, k)) * 0.56;
         float contact = max(core, skirt);
 
         // ── tile pool ──────────────────────────────────────────────────────────
@@ -970,7 +1027,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // tile-wide multiply reads as fog, so it stays around a quarter. Now
         // genuinely a tile wide, because the quad finally is.
         vec2 p = vec2(q.x / 0.60, q.y * mix(1.0, 1.25, step(0.0, q.y)) / 0.60);
-        float pool = exp(-dot(p, p) * 0.9) * 0.36;
+        float pool = exp(-dot(p, p) * 0.9) * 0.44;
 
         // ── directional cast ───────────────────────────────────────────────────
         // Projects onto the key's ground heading.
@@ -989,9 +1046,16 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         float t = clamp(along / max(uTailLength, 1e-3), 0.0, 1.0);
         float halfWidth = 0.19 + 0.10 * t;
         float lobe = exp(-(across / halfWidth) * (across / halfWidth));
-        float tail = lobe * pow(1.0 - t, 2.4) * step(-0.02, along) * 0.26;
+        float tail = lobe * pow(1.0 - t, 2.2) * step(-0.02, along) * 0.34;
 
-        float occ = max(contact, max(pool, tail));
+        // Composite rather than 'max'. Round 8 took the maximum of the three lobes,
+        // which meant the broad tile pool contributed *nothing* wherever the tight
+        // contact core was already denser than it — i.e. everywhere the mark is
+        // actually visible. Occlusion terms multiply: two occluders in series pass
+        // (1−a)(1−b) of the light, so composite that way and the pool finally does
+        // the job the critics asked it for ("no darkening of the tile they occupy")
+        // instead of being masked out by the term next to it.
+        float occ = 1.0 - (1.0 - contact) * (1.0 - pool) * (1.0 - tail);
 
         // Window to zero at the quad boundary. Without this a lobe that is still
         // non-zero at the edge cuts off on a straight line, which is exactly the
@@ -1008,7 +1072,11 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
           -q.x * uYaw.y - q.y * uYaw.x
         );
         vec2 tile = abs(w) / max(uTileHalf, 1e-3);
-        occ *= (1.0 - smoothstep(0.80, 0.99, tile.x)) * (1.0 - smoothstep(0.80, 0.99, tile.y));
+        // Round 9: the taper started at 0.80 of the tile half-extent, which is
+        // 0.4 tiles — inside the contact core's own sigma, so the clamp was eating
+        // the mark it exists to protect. It only has to stop the quad reaching
+        // *past* the tile, so it now begins at 0.90 and still closes before 1.0.
+        occ *= (1.0 - smoothstep(0.90, 1.0, tile.x)) * (1.0 - smoothstep(0.90, 1.0, tile.y));
 
         occ = clamp(occ, 0.0, 1.0) * uDensity * clamp(uStrength, 0.0, 1.0);
 
@@ -1117,8 +1185,21 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
  * The disc sits below the art, so it can only darken the lowest texel or two.
  * Reach onto neighbouring geometry is bought instead by elongating the disc down
  * the key's ground azimuth (see 'update'), which costs nothing on the sprite.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ROUND 9 — 0.38 → 0.55
+ * ─────────────────────────────────────────────────────────────────────────────
+ * "No cast shadow onto adjacent blocks" was named by a judge in those words, and
+ * the caster is the only term that can put one there — the contact decal is
+ * windowed to the unit's own tile by construction. Swept on the frame: at 0.38
+ * the mark reads on the occupied tile and dies before it crosses onto anything
+ * else; at 0.90 it darkens most of the neighbouring terrace, which reads as the
+ * whole quarter being in shade rather than as one figure casting, and 0.55 with
+ * the round-8 elongation still threw a mark over two tiles long. 0.48 with the
+ * elongation pulled back to 1.34x + stretch is the largest pairing where the
+ * shadow crosses onto the next block and still resolves as one figure's.
  */
-const GROUND_CASTER_RADIUS = TILE_SIZE * 0.38;
+const GROUND_CASTER_RADIUS = TILE_SIZE * 0.48;
 
 /**
  * How far above the receiving surface the caster disc floats, in world units.
@@ -2019,6 +2100,8 @@ export class UnitSprite {
 
   private readonly scratchWorld = new THREE.Vector3();
   private readonly scratchView = new THREE.Vector3();
+  /** Camera forward direction, for the contact decal's view-axis depth bias. */
+  private readonly scratchDecal = new THREE.Vector3();
 
   constructor(unitId: UnitId, sheet: SpriteSheet, options: UnitSpriteOptions = {}) {
     this.unitId = unitId;
@@ -2597,7 +2680,18 @@ export class UnitSprite {
       // the classic "sticker on the screen" giveaway.
       const spread = 1 + lift * 0.9;
       const fade = 1 / (1 + lift * 2.2);
-      this.contactShadow.position.set(groundX, shadowY + CONTACT_SHADOW_LIFT, groundZ);
+      // Sit on the surface, then slide the whole quad toward the lens along the
+      // camera's view axis. Under an orthographic projection that is a pure depth
+      // bias — screen position is unchanged, so the mark cannot peter-pan — and it
+      // is the only thing that gets the decal past the terrain's own depth. See
+      // CONTACT_DEPTH_BIAS for the measurement that forced this.
+      const fwd = this.scratchDecal;
+      camera.getWorldDirection(fwd);
+      this.contactShadow.position.set(
+        groundX - fwd.x * CONTACT_DEPTH_BIAS,
+        shadowY + CONTACT_SHADOW_LIFT - fwd.y * CONTACT_DEPTH_BIAS,
+        groundZ - fwd.z * CONTACT_DEPTH_BIAS,
+      );
 
       // Yaw the decal to the **camera**, not to the light. Its local +Z then
       // points at the lens, so the shader can place the dense contact core on the
@@ -2662,7 +2756,7 @@ export class UnitSprite {
       // mark is welded to the silhouette rather than starting a pixel clear of
       // it. Solving for 'lean' gives the line below, clamped at zero for the
       // degenerate case of a near-overhead key on a short ellipse.
-      const elongate = 1 + (this.ko ? 0.1 : 0.5 + this.shadowStretch * 0.95);
+      const elongate = 1 + (this.ko ? 0.1 : 0.34 + this.shadowStretch * 0.7);
       const dx = this.shadowGroundDir.x;
       const dz = this.shadowGroundDir.y;
       const halfLength = radius * elongate;

@@ -206,21 +206,61 @@ export const copingTexel = (u: number, v: number): Texel => {
   // rather than a uniform pale ribbon. At this spread roughly one stone in four drops
   // below the field value, which is what breaks the ribbon into pieces.
   const t = clamp01(0.5 + (b.tone - 0.5) * 0.78 + (tool - 0.5) * 0.2 + (grit - 0.5) * 0.08);
-  // Sun-bleached limestone, pitched near-neutral with the barest warm lean. It caps cool
-  // paving and sits above honey rubble, so committing it to either hue would merge it
-  // with one of them; staying between the two is what keeps the kerb reading as its own
-  // stone from both sides. Still only about a stop lighter than the paving it caps — any
-  // more and the kerb stops being stone and becomes a highlight pass.
+  // ROUND 9. Baking the four stone textures out side by side
+  // ('shots/tex-probe.png') settled an argument that four rounds of judges had
+  // been making and three rounds of tuning had failed to hear. Against paving,
+  // coursed rubble and ashlar, the coping panel is **both the palest and by a
+  // long way the flattest** sheet in the set: a near-white field with a faint
+  // speckle on it. That is why the kerb still reads as a drawn outline. The
+  // per-stone spread added in round 6 was real but it was spread about a mean
+  // that was far too high, so the *darkest* coping stone still landed above the
+  // brightest paving flag and the ribbon survived intact.
+  //
+  // The ramp now sits with its mean **at** the paving's mean rather than a stop
+  // over it (paving is lerp(0.150, 0.516) about t≈0.44). With the ±0.39 spread
+  // untouched, roughly half the stones in a run now fall below the floor they
+  // cap instead of a quarter, and the band stops being continuous in value at
+  // all — which is the only thing that stops the eye reading it as a shader
+  // edge term. It is still the *lightest stone on average*, so a lip is still
+  // legible; it is no longer a light *line*.
+  //
+  // Second pass, after looking at the frame: matching the paving's *albedo*
+  // mean is not enough, because the kerb is not a horizontal surface. The ring
+  // is a 37° facet turned up and outward ('chamferAtPerim' in render/terrain.ts
+  // builds it from CHAMFER 0.1 wide by CHAMFER_DROP 0.075 deep), so it collects
+  // markedly more of both the key and the sky than the flat top face beside it
+  // does, and an equal albedo therefore still renders a stop and a half brighter.
+  // The ramp is pitched below the paving's to pay for the geometry.
   const c = {
-    r: lerp(0.232, 0.622, t),
-    g: lerp(0.226, 0.606, t),
-    b: lerp(0.208, 0.560, t),
+    r: lerp(0.142, 0.462, t),
+    g: lerp(0.139, 0.451, t),
+    b: lerp(0.128, 0.416, t),
   };
 
-  mixTo(c, 0.882, 0.866, 0.812, vein * 0.35);
+  mixTo(c, 0.560, 0.548, 0.512, vein * 0.26);
+
+  // ── figure ────────────────────────────────────────────────────────────────
+  //
+  // The other half of the same finding: a coping stone in the probe carries
+  // almost no detail *inside* its face, so at the two-to-six pixel width the
+  // band occupies on screen there is nothing for the eye to resolve except its
+  // value. Real dressed limestone is bedded, and a saw cut across the bed
+  // exposes those beds as fine parallel bands of slightly different stone —
+  // which is the one piece of internal figure that survives being sampled along
+  // a single strip of texels, because it runs *across* the strip.
+  const bedding = fbm2p(u * 3.2 + b.col * 4.3, v * 26, 3, 26, 863, 3);
+  mixTo(c, c.r * 0.80, c.g * 0.82, c.b * 0.86, smoothstep(0.42, 0.74, bedding) * 0.30);
+  // Shelly inclusions: little pale ovals scattered through the bed.
+  const shell = worley(u, v, 26, 867, 1.0);
+  const shelly = smoothstep(0.13, 0.03, shell.f1) * smoothstep(0.40, 0.78, shell.id);
+  mixTo(c, 0.640, 0.622, 0.560, shelly * 0.5);
+  // Weathering pockets — where frost has taken the surface off in patches, the
+  // stone under it is darker and rougher than the case-hardened skin around it.
+  const pocket = smoothstep(0.54, 0.86, warpedFbm(u * 9, v * 9, 9, 869, 1.8, 3));
+  mixTo(c, c.r * 0.72, c.g * 0.74, c.b * 0.76, pocket * 0.42);
 
   // The polish a coping gets from hands and boots: brighter and smoother mid-stone.
-  const polish = smoothstep(0.10, 0.34, b.edge) * (0.55 + b.tone * 0.45);
+  const polish = smoothstep(0.10, 0.34, b.edge) * (0.55 + b.tone * 0.45) * (1 - pocket * 0.8);
   mixTo(c, c.r * 1.06 + 0.02, c.g * 1.04 + 0.018, c.b * 1.0 + 0.014, polish * 0.4);
 
   // Weathering that is *not* symmetric about the stone. A coping sheds water off one
@@ -242,9 +282,14 @@ export const copingTexel = (u: number, v: number): Texel => {
     r: c.r,
     g: c.g,
     b: c.b,
-    h: (1 - jointRaw) * (0.50 + tool * 0.2 + blockCrown(b.u, b.v) * 0.28) -
-      bevel * 0.2 - chip * 0.34,
-    rough: 0.66 - polish * 0.26 + grime * 0.2,
+    // Relief carries the bedding and the frost pockets too, so the band shades
+    // with the key rather than only tinting: the judge's complaint was that the
+    // joints "stay the same relative value as the light direction changes",
+    // which is what happens when detail is albedo-only.
+    h: (1 - jointRaw) * (0.50 + tool * 0.2 + blockCrown(b.u, b.v) * 0.28 +
+      (bedding - 0.5) * 0.22 + shelly * 0.16) -
+      bevel * 0.2 - chip * 0.34 - pocket * 0.20,
+    rough: 0.66 - polish * 0.26 + grime * 0.2 + pocket * 0.22,
   };
 };
 

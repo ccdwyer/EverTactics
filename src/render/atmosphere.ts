@@ -372,6 +372,8 @@ export class HazeBanks extends Group {
   /** Held across 'layout()' rebuilds; see the same field on 'Backdrop'. */
   private readonly fade = new Vector3(...DEFAULT_RECESSION);
   private viewH = 1080;
+  /** Warm practical pool centre in this group's frame. See 'setAirLocal'. */
+  private readonly airLocal = new Vector3();
 
   constructor(palette: EnvironmentPalette) {
     super();
@@ -462,13 +464,58 @@ export class HazeBanks extends Group {
     this.applyPalette();
   }
 
+  /**
+   * Where the warm practical pool is, in this group's (board-centred, yaw-local)
+   * frame. The orchestrator supplies it because it is the thing that knows the
+   * yaw. Re-tints the banks immediately.
+   */
+  setAirLocal(centre: Vector3): void {
+    this.airLocal.copy(centre);
+    this.applyPalette();
+  }
+
   private applyPalette(): void {
-    for (const m of this.materials) {
-      const warm = (m.userData.warm as number) ?? 0;
-      (m.uniforms.uColor!.value as Color)
-        .copy(this.palette.haze)
-        .lerp(this.palette.horizon, warm)
-        .multiplyScalar(1.6);
+    const p = this.palette;
+    const r = Math.max(p.airlightRadius, 1e-3);
+    for (let i = 0; i < this.materials.length; i += 1) {
+      const m = this.materials[i]!;
+      const authored = (m.userData.warm as number) ?? 0;
+
+      // ── Fog near a fire is the colour of the fire ────────────────────────
+      //
+      // The authored per-bank 'warm' is a fixed number in the spec table: bank
+      // 3 is warm because someone decided bank 3 should be warm. That is
+      // precisely the construction the critique calls "a global two-tone grade
+      // masquerading as light" — the warmth does not move when the fire does,
+      // and a bank on the far side of the map is lit exactly like the one
+      // beside the brazier.
+      //
+      // Distance from the pool, on the same squared-inverse-square curve every
+      // other layer uses, replaces most of that. The authored value is kept as
+      // a floor rather than discarded: it encodes real compositional intent
+      // (the deep banks are meant to catch the horizon) and a map with no
+      // practicals at all still needs it.
+      const mesh = this.meshes[i];
+      let pool = 0;
+      if (mesh && p.airlightPower > 0) {
+        const dx = mesh.position.x - this.airLocal.x;
+        const dy = mesh.position.y - this.airLocal.y;
+        const dz = mesh.position.z - this.airLocal.z;
+        const f = 1 / (1 + (dx * dx + dy * dy + dz * dz) / (r * r));
+        pool = f * f * p.airlightPower;
+      }
+
+      const colour = m.uniforms.uColor!.value as Color;
+      colour.copy(p.haze).lerp(p.horizon, authored).multiplyScalar(1.6);
+      // Additive, and modest: haze is a large low-frequency wash and this file
+      // already records that lifting it over a wide area is how the blacks got
+      // milky. A pool that is only strong within about a radius of the flame
+      // cannot do that, and it is the term that makes the air around the fire
+      // read as air rather than as a grey card.
+      const k = 0.055 * pool;
+      colour.r += p.airlight.r * k;
+      colour.g += p.airlight.g * k;
+      colour.b += p.airlight.b * k;
     }
   }
 
@@ -524,6 +571,8 @@ const FORWARD = new Vector3();
 const TMP_A = new Vector3();
 const TMP_B = new Vector3();
 const TMP_C = new Vector3();
+const AIR_LOCAL = new Vector3();
+const UP_AXIS = new Vector3(0, 1, 0);
 
 /**
  * Everything behind, below and around the board.
@@ -592,6 +641,11 @@ export class WorldEnvironment {
       sunDirection: new Vector3(-0.5, -0.7, -0.5).normalize(),
       sunIntensity: 3,
       hasKey: false,
+      // No practicals until the rig publishes one; 'refresh()' surveys for real.
+      airlight: new Color().setHex(0xff9e4d, 'srgb'),
+      airlightPower: 0,
+      airlightCentre: new Vector3(),
+      airlightRadius: 12,
     };
 
     this.sky = new Sky(this.palette);
@@ -653,6 +707,33 @@ export class WorldEnvironment {
   /** Force a palette re-read and relayout on the next update. */
   refresh(): void {
     this.lastBoardRadius = -1;
+    this.framesSinceMeasure = 1e9;
+  }
+
+  /**
+   * The live derived palette, for tooling and for the other fixers.
+   *
+   * Read-only by convention — mutating the returned colours mutates the
+   * uniforms every layer is sharing. It exists because "is the airlight
+   * actually firing" is otherwise only answerable by eyeballing a frame, and a
+   * round was nearly lost to exactly that kind of guess.
+   */
+  get environmentPalette(): Readonly<EnvironmentPalette> {
+    return this.palette;
+  }
+
+  /**
+   * Patch the palette tuning and re-derive on the next update.
+   *
+   * The reason this exists is methodological. Five agents edit this repo at
+   * once, so "render before my change, render after my change" compares my work
+   * plus four other people's — a round was very nearly mis-reported on exactly
+   * that confound. Toggling a term on and off inside a SINGLE build is the only
+   * honest A/B available. 'setPaletteTuning({ airlightGain: 0 })' reverts the
+   * practical airlight and nothing else.
+   */
+  setPaletteTuning(patch: Partial<PaletteTuning>): void {
+    Object.assign(this.options.palette, patch);
     this.framesSinceMeasure = 1e9;
   }
 
@@ -737,6 +818,17 @@ export class WorldEnvironment {
     this.backdrop.update(FORWARD, elapsed);
     this.yawGroup.position.set(TMP_C.x, 0, TMP_C.z);
     this.yawGroup.rotation.y = yaw;
+
+    // Warm practical pool, world → the yaw group's own frame, so the haze banks
+    // can weigh themselves against the fire. Same subtract-then-unrotate the
+    // backdrop does; recomputed every frame because the yaw eases between snap
+    // positions and a stale heading swings the pool off the map for a whole
+    // second of that transition.
+    AIR_LOCAL.copy(this.palette.airlightCentre)
+      .sub(this.yawGroup.position)
+      .applyAxisAngle(UP_AXIS, -yaw);
+    this.haze.setAirLocal(AIR_LOCAL);
+
     this.haze.setPitch(pitch);
     this.haze.update(elapsed);
     this.motes.update(elapsed);
