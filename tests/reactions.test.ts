@@ -353,6 +353,23 @@ describe('Blade Grasp', () => {
   });
 });
 
+describe('Arrow Guard', () => {
+  it('turns aside a physical attack made from range', () => {
+    const { s, events } = strikeUntilReaction(
+      'arrow-guard', { defenderBrave: 100, gap: 4 }, 't-arrow',
+    );
+    expect(damageTo(events, 'def')).toBe(0);
+    expect(s.defender.stats.hp).toBe(deriveStats(s.defender).maxHp);
+  });
+
+  it('does nothing against a blow from an adjacent attacker', () => {
+    const s = setup({ reaction: 'arrow-guard', defenderBrave: 100, gap: 1 });
+    const events = strike(s);
+    expect(reactionsIn(events)).not.toContain('arrow-guard');
+    expect(damageTo(events, 'def')).toBeGreaterThan(0);
+  });
+});
+
 describe('Hamedo', () => {
   it('pre-empts: it strikes first and the original attack never lands', () => {
     // Hamedo is authored at accuracy 75 and its strike then rolls to hit like any
