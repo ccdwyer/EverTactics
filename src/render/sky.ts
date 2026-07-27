@@ -106,6 +106,131 @@ float etFbm(vec2 p, int octaves) {
 }
 `;
 
+/**
+ * The upward recession. Shared by every environment layer so they recede as one
+ * surface rather than as four independently-tuned ones.
+ *
+ * ── Why a SCREEN-SPACE grade and not more depth haze ────────────────────────
+ *
+ * Measured on the round-7 frozen build with 'tools/_scratch/fartop.mjs':
+ *
+ *     farTop / board luminance      ours 1.30      references 0.34 - 0.57
+ *     farTop p95                    ours 173       references  78 - 113
+ *
+ * The top fifteen percent of our frame — the band that carries no gameplay and
+ * almost no subject — was the BRIGHTEST region in the image. A frame whose
+ * brightest region is its emptiest has no focal hierarchy by construction, and
+ * that is the composition axis in one number.
+ *
+ * Runtime layer attribution (see 'tools/_scratch/envprobe.mjs') put it on this
+ * module rather than on terrain or post: hiding the sky plate left the band at
+ * 70.8, hiding the backdrop left it at 70.2, hiding BOTH dropped it to 49.7.
+ * Both layers independently fill the band at the same value, so neither shows
+ * up when toggled alone and the defect looks unattributable. It is ours.
+ *
+ * Depth haze cannot fix it. Under a tilted-orthographic rig screen height is
+ * *not* depth: a ridge tower's base and its roofline are the same distance from
+ * the lens, so any purely depth-driven term grades them identically — and it is
+ * the rooflines, cropping against the top edge, that carry the band. Height
+ * above the horizon is the axis the defect actually lives on, so it is the axis
+ * the grade has to run on.
+ *
+ * Open 'refs/curated/triangle/official_003_steam.jpg': the world runs to the
+ * top edge (no sky at all), and the architecture up there is graded to near
+ * black while the board two thirds down is the brightest thing in frame. That
+ * is the target this reproduces.
+ *
+ * ── Why value AND chroma ────────────────────────────────────────────────────
+ *
+ * Cutting value alone is what round 7 established does not work: every
+ * value-only variant of the near-field margin grade traded luminance for
+ * 'backgroundFraction' one-for-one, because a flat dark region is
+ * indistinguishable from no geometry — to the metric and to a critic. So value
+ * is cut, and the remainder is bound toward the map's crushed tone at CONSTANT
+ * luminance, which buys back the separation without spending any of the
+ * variance that keeps the band reading as scenery.
+ */
+export const GLSL_RECEDE = /* glsl */ `
+/**
+ * 'fade' = (startY, endY, floor) with Y as a 0..1 screen fraction from the
+ * bottom; 'deepUnit' is the map's crushed tone normalised to unit luminance so
+ * the chroma bind cannot move value; 'brk' is a per-layer patchiness factor,
+ * nominally around 1, that modulates the FLOOR.
+ *
+ * ── Why 'brk' exists ────────────────────────────────────────────────────────
+ *
+ * The first version had no break: one smoothstep, one multiply. It fixed the
+ * ratio (farTop/board 1.30 -> 0.61) and immediately re-created the defect it
+ * was fixing, one axis over — 'backgroundFraction' went 0.139 -> 0.180 and
+ * 'backgroundDetail' 14.08 -> 10.60, because a uniform multiply scales a
+ * region's standard deviation by exactly the same factor it scales its mean.
+ * Pull a textured band to a quarter of its value and you get a quarter of its
+ * texture, which is to say a flat card, which is to say the void.
+ *
+ * That is the identical trap the near-field margin grade fell into in round 7
+ * (see the measurement table in 'backdrop.ts'), and the answer is the same:
+ * remove luminance without removing variance. A spatially varying floor does
+ * that directly — the mean falls, the spread does not, because neighbouring
+ * fragments are now being scaled by materially different factors.
+ *
+ * It is also physically the honest version. Distance haze is patchy; the
+ * plate's own 'hazeBreak' already makes this argument for the same reason.
+ */
+vec3 etRecede(vec3 col, float screenY, vec3 fade, vec3 deepUnit, float brk) {
+  float t = smoothstep(fade.x, fade.y, screenY);
+  if (t <= 0.0) return col;
+  vec3 c = col * mix(1.0, clamp(fade.z * brk, 0.03, 1.35), t);
+  const vec3 W = vec3(0.2126, 0.7152, 0.0722);
+  float lum = dot(c, W);
+  // 0.40, down from 0.55. The bind is what makes the receded band belong to the
+  // map's grade rather than drifting to grey, but every point of it is a point
+  // of per-pixel HUE variance spent, and hue variance is half of what keeps the
+  // band from matching a single corner colour.
+  return mix(c, deepUnit * lum, t * 0.40);
+}
+vec3 etRecede(vec3 col, float screenY, vec3 fade, vec3 deepUnit) {
+  return etRecede(col, screenY, fade, deepUnit, 1.0);
+}
+`;
+
+/** Normalise a colour to unit luminance; safe on black. Matches 'deepUnit' in GLSL. */
+export function unitLuminance(c: Color, out = new Color()): Color {
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  if (lum < 1e-4) return out.setRGB(0.62, 0.78, 1.35);
+  return out.copy(c).multiplyScalar(1 / lum);
+}
+
+/**
+ * Default recession: (start, end, floor) in screen fractions from the bottom.
+ *
+ * 0.44 rather than "just the top band" on purpose. The grade has to be a ramp
+ * the eye reads as air, not a bar across the top of the image; starting it below
+ * the board's own upper edge means the transition happens *behind* geometry,
+ * where there is no clean line for it to draw. Ends short of 1.0 so the very
+ * top rows are not a separate flat plateau.
+ */
+export const DEFAULT_RECESSION: [number, number, number] = [0.44, 0.99, 0.26];
+
+/**
+ * The sky recedes HARDER than the geometry standing in front of it.
+ *
+ * Applying one floor to everything is the obvious reading of "the frame recedes
+ * upward", and it is wrong in a way that is only visible once it is on screen:
+ * a uniform multiply preserves the ratio between a roofline and the sky behind
+ * it, so the whole upper band gets darker together and the architecture up there
+ * stops being architecture and becomes one dark mass. Measured, that showed up
+ * as 'backgroundDetail' 14.08 -> 10.60 and, in the frame, as a top-left quadrant
+ * with nothing legible in it — the void again, now black instead of navy.
+ *
+ * Open 'refs/curated/triangle/press_002_gematsu_1920x1080.jpg': the top of that
+ * frame is very dark AND completely legible, because the gap between the
+ * buildings and the air behind them WIDENS as both go down. Biasing the sky's
+ * floor under the geometry's reproduces that: silhouettes gain contrast exactly
+ * where the grade is strongest, which is the opposite of what a single floor
+ * does.
+ */
+export const SKY_RECESSION_BIAS = 0.55;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,10 +517,13 @@ uniform float uSunGlow;
 uniform float uBandStrength;
 uniform float uAspect;
 uniform float uTime;
+uniform vec3  uFade;
+uniform vec3  uDeepUnit;
 
 varying vec2 vUv;
 
 ${GLSL_NOISE}
+${GLSL_RECEDE}
 
 void main() {
   float y = vUv.y;
@@ -410,8 +538,15 @@ void main() {
 
   // Horizon glow — a thin bright band, the single strongest "there is a world
   // out there" cue in a still frame.
-  float band = exp(-abs(y - uHorizonY) * 26.0);
-  col += uHorizon * band * 0.28;
+  //
+  // Tightened from 26/0.28 to 44/0.17. The orchestrator puts uHorizonY at the
+  // screen fraction where the ground plate vanishes, which on the shipping
+  // camera is 0.94 — i.e. this band sits INSIDE the top-15% window that
+  // 'fartop.mjs' measures, and at the old width it spread across most of it.
+  // A horizon glow is a landscape-vista cue; at a 30-degree pitch over a
+  // courtyard it is a thin line of town light, not a dawn.
+  float band = exp(-abs(y - uHorizonY) * 44.0);
+  col += uHorizon * band * 0.17;
 
   // Cloud banding. Stretched hard in x so it reads as strata, not as blobs, and
   // masked out near the horizon so it never fights the band.
@@ -425,6 +560,19 @@ void main() {
   vec2 d = (vUv - uSunScreen) * vec2(uAspect, 1.0);
   float r = length(d);
   col += uSun * (exp(-r * 7.5) * 0.85 + exp(-r * 1.9) * 0.22) * uSunGlow;
+
+  // The upward recession, applied before the dither so the dither stays at full
+  // amplitude in the darkened band — that is the whole reason it is last. A
+  // graded region that has been pulled to a quarter of its value has a quarter
+  // of its quantisation headroom too, and a flat plateau across the top of the
+  // frame is the void by another name.
+  //
+  // The break runs on its own noise basis at a different scale from the cloud
+  // banding above, so the two never line up into one visible feature. Wide in x,
+  // because this is air over a town, and the eye reads horizontal strata as
+  // depth and vertical ones as a curtain.
+  float recBreak = 0.42 + 1.10 * etFbm(vec2(vUv.x * 2.2 - uTime * 0.002, y * 4.4) + 41.7, 4);
+  col = etRecede(col, y, uFade, uDeepUnit, recBreak);
 
   // A very small amount of noise. An 8-bit display cannot resolve a smooth
   // gradient across 1080 rows and will band; the grain in post helps but the
@@ -457,6 +605,8 @@ export class Sky {
         uBandStrength: { value: options.bandStrength ?? 0.42 },
         uAspect: { value: 16 / 9 },
         uTime: { value: 0 },
+        uFade: { value: new Vector3(...DEFAULT_RECESSION) },
+        uDeepUnit: { value: unitLuminance(palette.deep) },
       },
       vertexShader: SKY_VERT,
       fragmentShader: SKY_FRAG,
@@ -479,6 +629,12 @@ export class Sky {
     (u.uHorizon!.value as Color).copy(palette.horizon);
     (u.uGround!.value as Color).copy(palette.ground);
     (u.uSun!.value as Color).copy(palette.sun);
+    unitLuminance(palette.deep, u.uDeepUnit!.value as Color);
+  }
+
+  /** '(startY, endY, floor)' screen fractions from the bottom. See {@link GLSL_RECEDE}. */
+  setRecession(start: number, end: number, floor: number): void {
+    (this.material.uniforms.uFade!.value as Vector3).set(start, end, floor);
   }
 
   /** Screen fraction, 0 = bottom of frame. */

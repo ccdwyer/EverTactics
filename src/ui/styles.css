@@ -126,7 +126,7 @@
      portrait card beside it, so the rail is card-width plus a numeral, not a row
      of half-filled boxes. 26px numeral + 6px gap + 68px card (the acting one;
      the rest are 58) = 100. */
-  --hud-rail: 104px;
+  --hud-rail: 112px;
   /* Acting unit, bottom-left. Round 4 ran 362x389 — a near-square block eating
      36% of the frame height in the corner. Measured off the shipped frame
      (refs/curated/fft/press-042310-...-mediakit-06.png at 1920x1080) the acting
@@ -629,20 +629,32 @@
    the row, dark at the left and warm at the right, inside a hairline keyline.
    Round 2's 0.22-alpha wash over 62% of the row was a hover state, not a
    selection — the critics' "no highlight fill on the selected MOVE row". */
+/* ROUND 8 — the gradient ran the wrong way and the mid-stop went olive.
+   Dark at the left put the murkiest value of the plate directly under the label,
+   which is where the eye lands; and rgba(122,96,30,0.72) composited over the
+   panel's navy resolves to a desaturated olive that belongs to neither the gold
+   nor the blue. The plate now brightens toward the label and falls away to the
+   right (matching the reference's lit-from-the-name read), stays on the amber
+   axis at every stop, and carries a bright hairline on the top edge with a dark
+   one on the bottom so the bar reads as a lit lozenge with thickness rather than
+   as a translucent wash. */
 .et-menu__row.is-active {
   color: var(--ink-bright);
-  background: linear-gradient(
-    90deg,
-    rgba(56, 46, 18, 0.86) 0%,
-    rgba(122, 96, 30, 0.72) 46%,
-    rgba(201, 162, 39, 0.5) 88%,
-    rgba(201, 162, 39, 0.16) 100%
-  );
+  background:
+    linear-gradient(
+      90deg,
+      rgba(196, 152, 52, 0.62) 0%,
+      rgba(178, 136, 44, 0.5) 40%,
+      rgba(150, 112, 34, 0.3) 76%,
+      rgba(150, 112, 34, 0.06) 100%
+    ),
+    linear-gradient(180deg, rgba(255, 238, 196, 0.16), rgba(26, 20, 6, 0.42));
   transform: translateX(3px);
   box-shadow:
-    inset 0 0 0 1px rgba(240, 221, 160, 0.34),
-    inset 0 1px 0 rgba(255, 246, 223, 0.2),
-    inset 0 -8px 12px -8px rgba(0, 0, 0, 0.8);
+    inset 0 0 0 1px rgba(247, 233, 187, 0.4),
+    inset 0 1px 0 rgba(255, 250, 232, 0.5),
+    inset 0 -1px 0 rgba(20, 14, 4, 0.6),
+    0 2px 10px -4px rgba(201, 162, 39, 0.35);
 }
 .et-menu__row.is-active::before { opacity: 1; transform: scaleY(1); }
 .et-menu__row.is-disabled { color: rgba(169, 157, 128, 0.5); cursor: not-allowed; }
@@ -863,11 +875,14 @@
 }
 /* On the gold highlight the muted grey detail dropped to about 1.6:1 against the
    plate — the "3" beside MOVE was effectively invisible in every frame we shot.
-   Dark ink on gold, the way an illuminated rubric works. */
+   Round 8 reversed the plate's gradient so its BRIGHT end is now under the label
+   and its dark end under this numeral, which inverted the problem: dark ink on
+   what is now a dark tail. Light warm ink with a hard black shadow reads on both
+   ends of the run, so it no longer depends on where the gradient happens to be. */
 .et-menu__row.is-active .et-command__detail {
-  color: rgba(24, 17, 4, 0.92);
+  color: var(--gold-bright);
   font-weight: 700;
-  text-shadow: 0 1px 0 rgba(255, 246, 223, 0.3);
+  text-shadow: 0 1px 2px rgba(12, 8, 2, 0.95), 0 0 6px rgba(12, 8, 2, 0.7);
 }
 .et-command__chevron { width: 16px; height: 16px; flex: none; color: var(--gold-dim); margin-left: 4px; }
 .et-command__chevron.is-empty { visibility: hidden; }
@@ -1139,6 +1154,17 @@
    2px ring of team colour reads faster at rail scale than a wash behind a face,
    because it is adjacent to the neutral navy of the mat rather than mixed into
    it. */
+/* ROUND 8 — the mat was darker than the board it stood on.
+   ---------------------------------------------------------------------------
+   Shot against `battle-open`, the queued cards measured darker than the terrace
+   behind them, so the column read as eight holes punched in the map rather than
+   as eight cards laid on it. In the shipped timeline the card is the BRIGHTEST
+   thing in that corner: a pale team-tinted mat (cool for allies, rose for
+   hostiles) with a light keyline, which is what makes nine faces legible over a
+   sunlit hillside without any plate behind them.
+   The mat is lifted to roughly the terrain's own value and carries a warm
+   top-edge highlight, so the card reads as lit chrome rather than as a cutout —
+   still inside the navy/gold palette, just no longer darker than the scene. */
 .et-turnchip__frame {
   position: relative;
   grid-column: 2;
@@ -1146,13 +1172,14 @@
   padding: 2px 2px 0;
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, var(--team-color) 30%, #0a0f1d),
-    color-mix(in srgb, var(--team-color) 10%, #05070d)
+    color-mix(in srgb, var(--team-color) 46%, #26314e),
+    color-mix(in srgb, var(--team-color) 22%, #0b1020)
   );
   box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.72),
-    0 0 0 1px color-mix(in srgb, var(--team-color) 46%, rgba(6, 9, 15, 0.9)),
-    0 5px 14px -6px rgba(0, 0, 0, 0.95);
+    inset 0 1px 0 rgba(255, 246, 223, 0.22),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 0 0 1px color-mix(in srgb, var(--team-color) 60%, rgba(214, 200, 160, 0.5)),
+    0 6px 16px -6px rgba(0, 0, 0, 0.95);
   transition: box-shadow var(--dur) ease;
 }
 .et-turnchip:hover .et-turnchip__frame {
@@ -1318,7 +1345,9 @@
 .et-turnchip__hp {
   position: relative;
   display: block;
-  height: 5px;
+  /* One ninth of the card, as measured on the shipped chip — at a 66-78px card
+     that is 7px, not the 5 the round-6 note derived from a smaller face. */
+  height: 7px;
   margin-top: 2px;
   z-index: 2;
   background: rgba(3, 5, 11, 0.9);
@@ -1367,10 +1396,15 @@
   z-index: 2;
   background: radial-gradient(115% 85% at 50% 34%, transparent 42%, rgba(4, 7, 14, 0.62) 100%);
 }
+/* At chip scale the vignette is centred at 30% height, which puts its darkest
+   ring across the BOTTOM of the crop — i.e. over the eye line of every plate
+   that hides its face under a hat or hood (Black Mage, Ninja). Those two lit
+   eyes are the entire read on those cards. Pulled to a wider, weaker falloff
+   centred lower so the frame edge still darkens but the face does not. */
 .et-portrait--xs::after,
 .et-portrait--sm::after,
 .et-portrait--md::after {
-  background: radial-gradient(130% 100% at 50% 30%, transparent 62%, rgba(4, 7, 14, 0.34) 100%);
+  background: radial-gradient(140% 118% at 50% 44%, transparent 68%, rgba(4, 7, 14, 0.28) 100%);
 }
 /* The 4px gold bevel is right at panel scale and eats a third of a rail chip. */
 .et-portrait--xs,
@@ -1432,7 +1466,13 @@
 /* Pull the faces into the scene grade rather than leaving them in their own
    colour space: slightly cooled, slightly desaturated, blacks lifted toward the
    map's navy so a portrait is never the brightest thing on screen. */
-.et-portrait__img { filter: saturate(0.86) contrast(1.06) brightness(0.94); }
+/* Grading the faces into the scene must not bury them.
+   The 0.94 brightness reads as "sits in the grade" on a 130px panel portrait and
+   as "underexposed" on a 60px chip, because the chip is mostly hair and shadow
+   to begin with and there is no large lit area left to carry the face. The rail
+   sizes get their exposure back — measured against the shipped timeline, whose
+   chip faces are brighter than the terrain, not dimmer. */
+.et-portrait__img { filter: saturate(0.92) contrast(1.05) brightness(1.06); }
 .et-portrait--lg .et-portrait__img,
 .et-portrait--xl .et-portrait__img { filter: saturate(0.88) contrast(1.04) brightness(0.96); }
 
@@ -2744,7 +2784,7 @@
 @media (max-width: 1600px) {
   .et-root {
     --hud-safe: 26px;
-    --hud-rail: 92px;
+    --hud-rail: 100px;
     --hud-col-left: 320px;
     --hud-col-right: 262px;
   }
@@ -2755,7 +2795,7 @@
 @media (max-width: 1280px) {
   .et-root {
     --hud-safe: 20px;
-    --hud-rail: 78px;
+    --hud-rail: 86px;
     --hud-col-left: 274px;
     --hud-col-right: 232px;
   }

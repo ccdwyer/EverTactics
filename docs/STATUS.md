@@ -106,6 +106,24 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
 
 ## Known open items
 
+0. **THE COOL EDGE/TOP-FACE WASH IS A TERRAIN SHADER BUG, NOT LIGHTING — highest-value open fix.**
+   Critics have named this across four rounds ("a bright cyan-white edge strip on nearly every
+   block's top-front edge regardless of orientation — it fires identically on faces turned toward
+   and away from the key light, and inside the shadowed pit"). It was attributed conclusively in
+   round 8 by rendering with every light off except a warm key:
+
+       node tools/shoot.mjs --scene battle-open --port 4173 --out shots/keyonly.png \
+         --query "lightdebug=keyIntensity:3.5,rimIntensity:0,hemiIntensity:0,ambientIntensity:0,\
+   probeIntensity:0,cavity:0,practicalGain:0,sourceBounce:0"
+
+   The cool wash survives at full strength under a key whose colour is #ffd588. A warm light cannot
+   produce a cool highlight, so the term is additive/emissive in the terrain shader
+   (src/render/materials/terrain.ts). I reproduced this and confirmed it visually.
+   It is also the main contributor to our lumaP95 of ~158 against a reference band of 116-136.
+   Fix: gate it by dot(N,L) and scale it by local light contribution.
+
+
+
 1. **Composition (4.3) and geometry craft (4.5)** are the lowest axes. Round 6 targets them.
    The critique is no longer "wrong framing" — it is **no focal hierarchy**: everything equally
    detailed, lit and sharp, so the eye has nowhere to land.
@@ -126,6 +144,18 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
    Onion Knight are re-pointed at Knight/Squire sheets; `chocobo` has zero whole-body frames.
 
 ---
+
+## Diagnostic hooks worth knowing
+
+- `?lightdebug=<field>:<value>,...` overrides any LightingPreset field, applied last in `commit()`
+  so it beats a scenario's `tune()`. `?lightdebug=shadows:0` kills every shadow map.
+  Pass it through the harness with `--query`. This is how the cool-wash bug above was attributed to
+  a layer, and it is far faster than reasoning about the shader.
+- `window.__EVERTACTICS_STAGE__.environment` exposes `setEnabled`, `refresh`, `setBoardBounds`, and
+  named children (`env-ground`, `env-glow`, `env-backdrop-<band>`). Toggling layers and re-measuring
+  is how several defects were attributed to the right owner.
+- **Do NOT per-pixel diff two screenshots.** Two identical `tools/shoot.mjs` runs differ by
+  meanAbsDiff ~25/255. Sample regions of a few thousand pixels instead.
 
 ## The loop
 

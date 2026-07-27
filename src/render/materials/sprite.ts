@@ -1148,10 +1148,20 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     // so for the first time the whole ramp lands on boot. Squared in the shader,
     // which puts the bulk of the darkening in the lowest three or four texels —
     // the reference's transition is fast, not a gradient up the shins.
+    // Round 8: 0.72/11 -> 0.82/9. The brief's wording is precise — the pinch has
+    // to be "tighter and darker than the cast shadow", and now that the cast
+    // shadow finally exists (the ground caster's lift was under the receiver's
+    // normal bias for four rounds, see 'sprites.ts') it is soft and reaches most
+    // of a tile. An in-art ramp of the same softness competes with it instead of
+    // reading as the seam where boot meets stone. Nine texels squared puts
+    // essentially all of the darkening in the lowest three or four rows of art,
+    // which is where 'refs/curated/fft/press-311722-…-03' puts it: the blue-clad
+    // unit's boots run luma 60-75 against a torso at ~150 and the transition is
+    // over within a boot-height.
     uFootBaseTexels: { value: 0 },
     uBodyTexels: { value: options.frameHeight },
-    uFootShade: { value: 0.72 },
-    uFootShadeTexels: { value: 11 },
+    uFootShade: { value: 0.82 },
+    uFootShadeTexels: { value: 9 },
     uGrounded: { value: 1 },
 
     uFlashColor: { value: new THREE.Color(0xffffff) },

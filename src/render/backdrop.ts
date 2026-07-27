@@ -84,7 +84,13 @@ import {
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-import { GLSL_NOISE, type EnvironmentPalette } from './sky.js';
+import {
+  DEFAULT_RECESSION,
+  GLSL_NOISE,
+  GLSL_RECEDE,
+  unitLuminance,
+  type EnvironmentPalette,
+} from './sky.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Layout contract
@@ -626,6 +632,12 @@ uniform float uHalfW;
 uniform vec3  uWood;
 uniform vec3  uFoliage;
 
+// Upward recession. See 'GLSL_RECEDE' in 'sky.ts' for the measurement that
+// motivates it; 'uDeepUnit' is 'uDeep' normalised to unit luminance.
+uniform vec3  uFade;
+uniform vec3  uDeepUnit;
+uniform float uViewH;
+
 varying vec3  vLocal;
 varying vec3  vNormalL;
 varying float vTint;
@@ -633,6 +645,7 @@ varying float vWindow;
 varying float vMat;
 
 ${GLSL_NOISE}
+${GLSL_RECEDE}
 
 void main() {
   vec3 n = normalize(vNormalL);
@@ -987,6 +1000,24 @@ void main() {
     col = mix(vec3(lum), col, 1.0 + 0.5 * s);
   }
 
+  // ── Upward recession ──────────────────────────────────────────────────────
+  //
+  // The lateral/near grade above handles the margins; this handles the top.
+  // They are separate axes and both are needed: measured, the near-field grade
+  // fixed 'botRatio' (bottom band / board) to 0.57 while 'farTop/board' stayed
+  // at 1.30, because nothing in this shader knew how high up the frame a
+  // fragment landed. The ridge band's rooflines are the same DEPTH as their
+  // bases, so no haze term can separate them — only screen height can.
+  //
+  // The break reuses this fragment's own macro/detail noise rather than a fresh
+  // basis: on a structure the patchiness should follow the surface (this wall is
+  // in air, that gable is catching a little more), not float across it as an
+  // independent pattern. 'grain' is deliberately in the mix at low weight so the
+  // variation survives at the pixel scale the background-fraction test samples
+  // at, not just at the massing scale.
+  float recBreak = 0.40 + 0.72 * macro + 0.34 * detail + 0.18 * grain;
+  col = etRecede(col, gl_FragCoord.y / max(uViewH, 1.0), uFade, uDeepUnit, recBreak);
+
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
 `;
@@ -1033,6 +1064,8 @@ uniform vec3  uWarmColor;
 uniform vec3  uCoolColor;
 uniform float uGain;
 uniform float uTime;
+uniform vec3  uFade;
+uniform float uViewH;
 varying vec2  vOffset;
 varying float vSeed;
 varying float vWarm;
@@ -1051,6 +1084,19 @@ void main() {
   float f = 0.82 + 0.18 * sin(uTime * (1.6 + vSeed * 3.1) + vSeed * 31.0)
                  * (0.5 + 0.5 * sin(uTime * (0.7 + vSeed * 1.3)));
   vec3 col = mix(uCoolColor, uWarmColor, vWarm);
+
+  // Upward recession, VALUE ONLY — an additive halo carries no albedo to bind,
+  // and a lantern that has been rotated toward the map's crushed blue is not a
+  // dimmer lantern, it is a broken one. Measured, these cards are what put
+  // 'farTopP95' at 173 against a reference 78-113: a couple of hundred
+  // practicals scattered through the ridge and apron bands all render at the
+  // same intensity whether they are beside the board or cropping against the
+  // top edge, which is the "uniform-radius circles at uniform opacity, one
+  // billboard emitted with a single config" note verbatim. They stay warm and
+  // they stay visible; they stop being the brightest thing in an empty band.
+  float t = smoothstep(uFade.x, uFade.y, gl_FragCoord.y / max(uViewH, 1.0));
+  col *= mix(1.0, uFade.z, t);
+
   gl_FragColor = vec4(col * a * f * uGain * vGain, 1.0);
 }
 `;
@@ -1138,11 +1184,15 @@ uniform float uHalfW;
 uniform float uNearDepth;
 uniform float uExposure;
 uniform float uShadowStrength;
+uniform vec3  uFade;
+uniform vec3  uDeepUnit;
+uniform float uViewH;
 
 varying vec3 vLocal;
 varying vec3 vNormalL;
 
 ${GLSL_NOISE}
+${GLSL_RECEDE}
 
 /** Yaw-local (x, z) → world-axis offset from the board centre. */
 vec2 toWorldXZ(vec2 l) {
@@ -1356,6 +1406,20 @@ void main() {
   float lateral = smoothstep(uHalfW * 0.55, uHalfW * 1.75, abs(vLocal.x));
   col *= mix(1.0, 0.30, lateral * lateral);
 
+  // Upward recession, on the same ramp every other environment layer uses. The
+  // plate runs all the way to the horizon at 94% of frame height, so its far
+  // third sits inside the measured band; grading it with the props standing on
+  // it is what keeps the two receding together instead of the plate staying
+  // pale behind darkened clutter.
+  //
+  // Two octave sets: a wide one that reads as banks of air and a tighter one so
+  // the band still carries variation at the pixel scale. 'hazeBreak' above is
+  // deliberately NOT reused — it is keyed to depth and this is keyed to screen
+  // height, and having the two agree would collapse them into one visible edge.
+  float recBreak = 0.34 + 0.86 * etFbm(vLocal.xz * 0.085 + 13.4, 3)
+                        + 0.40 * etFbm(vLocal.xz * 0.62 - 4.1, 2);
+  col = etRecede(col, gl_FragCoord.y / max(uViewH, 1.0), uFade, uDeepUnit, recBreak);
+
   gl_FragColor = vec4(max(col, 0.0) * uExposure, alpha);
 }
 `;
@@ -1521,6 +1585,16 @@ export class Backdrop extends Group {
 
   private readonly sunLocal = new Vector3();
 
+  /**
+   * Upward-recession ramp and viewport height, held here so materials rebuilt
+   * by 'layout()' pick up whatever the orchestrator last set rather than
+   * silently reverting to the defaults. Getting this wrong is invisible until a
+   * yaw snap triggers a relayout and half the grade disappears mid-battle.
+   */
+  private readonly fade = new Vector3(...DEFAULT_RECESSION);
+  private viewH = 1080;
+  private readonly deepUnit = new Color(0.62, 0.78, 1.35);
+
   constructor(palette: EnvironmentPalette, options: BackdropOptions = {}) {
     super();
     this.name = 'env-backdrop';
@@ -1579,7 +1653,12 @@ export class Backdrop extends Group {
         // The equivalent surround band in the Triangle references sits at 60-110.
         tone: 0.95,
         windows: 1,
-        kinds: ['house', 'wall', 'tree', 'lantern', 'rock', 'bush', 'bush', 'crates', 'cart', 'fence', 'barrel', 'rubble'],
+        // 'rock' dropped here too. The flank band straddles the board's own
+        // depth out to twice the visible half-width, i.e. it owns the left and
+        // right frame margins — the same near-field the scatter band's rocks
+        // were spoiling, reached from the side instead of from below. Buildings,
+        // walls and timber props all carry a surface pattern; the cone does not.
+        kinds: ['house', 'wall', 'tree', 'lantern', 'crates', 'bush', 'rubble', 'crates', 'cart', 'fence', 'barrel', 'rubble'],
       },
       {
         // The ring hugging the board. This is the band that kills the hard
@@ -1733,7 +1812,25 @@ export class Backdrop extends Group {
         // 0 for anything at or beyond the board, so only the pieces that
         // actually crowd the camera are touched.
         silhouette: 0.7,
-        kinds: ['bush', 'rubble', 'rock', 'bush', 'crates', 'fence', 'barrel', 'tree', 'cart', 'rubble'],
+        // No 'rock', and 'bush' down from two slots to one.
+        //
+        // This band was the last place 'rock()' still ran in the near field, and
+        // it is the one that shows: hiding the backdrop and re-shooting puts the
+        // entire bottom-right cluster — big smooth pale-blue wedges with mint
+        // facets, no masonry pattern, no cavity darkening — on this band and no
+        // other. It is verbatim the "near-white flat-faceted low-poly chunks
+        // with no texture, no AO and no colour tie to the scene, placeholder
+        // geometry left in frame" note, and the "olive-green rock props" note is
+        // the same generator wearing the foliage albedo.
+        //
+        // The same removal was already made on 'verge' and 'skirt' for the same
+        // measured reason, and the reasoning transfers exactly: 'rock()' is one
+        // large smooth cone, the near-field circle of confusion erases what
+        // facet detail it has, and a smooth pale value blob is what is left.
+        // 'rubble' does the identical silhouette-breaking job as a cluster of
+        // small pieces that survives the blur AS TEXTURE, and it takes the
+        // masonry pattern in STRUCT_FRAG where a cone's UVs do not.
+        kinds: ['rubble', 'rubble', 'crates', 'bush', 'fence', 'barrel', 'tree', 'cart', 'rubble', 'crates'],
       },
       {
         // Immediately behind the board: low outbuildings, walls, scrub.
@@ -1921,6 +2018,8 @@ export class Backdrop extends Group {
         uCoolColor: { value: new Color() },
         uGain: { value: this.opts.exposure },
         uTime: { value: 0 },
+        uFade: { value: this.fade.clone() },
+        uViewH: { value: this.viewH },
       },
       vertexShader: GLOW_VERT,
       fragmentShader: GLOW_FRAG,
@@ -2048,7 +2147,50 @@ export class Backdrop extends Group {
       // Keep the play space clear.
       if (footprintDistance(x, depth) < clearance) continue;
 
-      const kind = band.kinds[Math.floor(rng() * band.kinds.length)]!;
+      let kind = band.kinds[Math.floor(rng() * band.kinds.length)]!;
+
+      // ── No massing in front of the subject ────────────────────────────────
+      //
+      // 'house', 'tower' and 'wall' are the three generators that produce a
+      // single large flat face, and a large flat face is only ever an asset when
+      // it is BEHIND the board. Placed at negative depth — between the lens and
+      // the play space — it renders as a slab: measured on the round-8 frame the
+      // flank band dropped a house against the lower-right frame edge covering
+      // roughly a seventh of the image in one blue-grey plane with one lit
+      // window on it, which is the flat-untextured-surface fail condition at the
+      // largest scale anything in this file can produce it.
+      //
+      // The bands cannot express this themselves. 'flank' deliberately straddles
+      // the board's depth (that is its whole job — it fills the left and right
+      // margins alongside the play space, not behind it), so its kind list has
+      // to contain buildings for the two thirds of its range where they belong.
+      // Substituting at placement time is the only place that knows which third
+      // a given piece landed in.
+      //
+      // Demoted rather than rejected: rejecting would thin the band exactly
+      // where the void used to live. Clutter fills the same silhouette without
+      // the flat plane.
+      //
+      // 'tree' and 'rock' get a MORE generous exclusion than the buildings do,
+      // and the reason is a shape argument rather than a placement one. A
+      // conifer is three stacked six-segment cones 2.2-5.6 units tall and a
+      // boulder is a displaced icosahedron; both are large, smooth and
+      // low-facet-count, so the near-field circle of confusion reduces them to
+      // untextured value blobs — the "near-white flat-faceted low-poly chunks
+      // with no texture and no colour tie to the scene" and "olive-green rock
+      // props" notes are both this. A building at least keeps a lit window and a
+      // masonry course. So the cones have to clear the board's midline by half a
+      // radius, not merely sit behind its centre.
+      //
+      // This is the same conclusion 'rock()' own comment reached about spikes,
+      // generalised: the fix is not to make the generator lumpier, it is to stop
+      // putting a two-metre smooth mass between the lens and the subject.
+      const nearLimit =
+        kind === 'tree' || kind === 'rock' ? layout.boardRadius * 0.55 : 0;
+      if (depth < nearLimit && NEAR_DEMOTED.has(kind)) {
+        kind = NEAR_SUBSTITUTES[Math.floor(rng() * NEAR_SUBSTITUTES.length)]!;
+      }
+
       let parts: BufferGeometry[];
       switch (kind) {
         case 'house':
@@ -2193,6 +2335,9 @@ export class Backdrop extends Group {
         uWindowGain: { value: (band.windows > 0 ? 1 : 0) * this.opts.windowGain },
         uExposure: { value: this.opts.exposure },
         uTime: { value: 0 },
+        uFade: { value: this.fade.clone() },
+        uDeepUnit: { value: this.deepUnit.clone() },
+        uViewH: { value: this.viewH },
       },
       vertexShader: STRUCT_VERT,
       fragmentShader: STRUCT_FRAG,
@@ -2289,6 +2434,9 @@ export class Backdrop extends Group {
         uUndulate: { value: Math.min(3.2, Math.max(1.2, layout.boardRadius * 0.24)) },
         uExposure: { value: this.opts.exposure },
         uShadowStrength: { value: 0.42 },
+        uFade: { value: this.fade.clone() },
+        uDeepUnit: { value: this.deepUnit.clone() },
+        uViewH: { value: this.viewH },
       },
       vertexShader: GROUND_VERT,
       fragmentShader: GROUND_FRAG,
@@ -2405,7 +2553,14 @@ export class Backdrop extends Group {
     // what neutralised the walls.
     const sunLight = p.sun.clone().multiplyScalar(0.30);
 
+    // The recession's chroma anchor. Same tint the near-field grade binds to, so
+    // a piece that is both low in frame and out at the edge lands on one colour
+    // rather than on two grades disagreeing about which crushed blue is the
+    // map's.
+    unitLuminance(deepTint, this.deepUnit);
+
     for (const m of this.structMaterials) {
+      (m.uniforms.uDeepUnit!.value as Color).copy(this.deepUnit);
       (m.uniforms.uBase!.value as Color).copy(wallBase);
       (m.uniforms.uRoof!.value as Color).copy(roof);
       (m.uniforms.uWood!.value as Color).copy(wood);
@@ -2464,6 +2619,7 @@ export class Backdrop extends Group {
       (u.uHaze!.value as Color).copy(p.haze);
       (u.uSunColor!.value as Color).copy(sunLight);
       (u.uSkyColor!.value as Color).copy(sky);
+      (u.uDeepUnit!.value as Color).copy(this.deepUnit);
     }
   }
 
@@ -2473,6 +2629,25 @@ export class Backdrop extends Group {
     for (const m of this.structMaterials) m.uniforms.uExposure!.value = v;
     if (this.groundMaterial) this.groundMaterial.uniforms.uExposure!.value = v;
     if (this.glowMaterial) this.glowMaterial.uniforms.uGain!.value = v;
+  }
+
+  /**
+   * Upward recession ramp, '(startY, endY, floor)' as screen fractions from the
+   * bottom of frame. See {@link GLSL_RECEDE}.
+   */
+  setRecession(start: number, end: number, floor: number): void {
+    this.fade.set(start, end, floor);
+    for (const m of this.structMaterials) (m.uniforms.uFade!.value as Vector3).copy(this.fade);
+    if (this.groundMaterial) (this.groundMaterial.uniforms.uFade!.value as Vector3).copy(this.fade);
+    if (this.glowMaterial) (this.glowMaterial.uniforms.uFade!.value as Vector3).copy(this.fade);
+  }
+
+  /** Drawing-buffer height in device pixels; the recession divides 'gl_FragCoord.y' by it. */
+  setViewportHeight(heightPx: number): void {
+    this.viewH = Math.max(1, heightPx);
+    for (const m of this.structMaterials) m.uniforms.uViewH!.value = this.viewH;
+    if (this.groundMaterial) this.groundMaterial.uniforms.uViewH!.value = this.viewH;
+    if (this.glowMaterial) this.glowMaterial.uniforms.uViewH!.value = this.viewH;
   }
 
   get layoutSpec(): BackdropLayout | null {
@@ -2510,6 +2685,20 @@ export class Backdrop extends Group {
     this.clearContents();
   }
 }
+
+/**
+ * Generators that must not run between the lens and the board: the three that
+ * produce a single large flat face, and the two that produce a large smooth
+ * mass. See the substitution block in 'buildBand' for the per-kind distance.
+ */
+const NEAR_DEMOTED = new Set<PropKind>(['house', 'tower', 'wall', 'tree', 'rock']);
+
+/**
+ * What one of those becomes instead. Small, faceted, pattern-bearing props only
+ * — every entry here takes either the masonry or the plank pattern in
+ * 'STRUCT_FRAG', so it survives the near-field defocus as texture.
+ */
+const NEAR_SUBSTITUTES: PropKind[] = ['crates', 'rubble', 'barrel', 'fence', 'cart', 'rubble'];
 
 const UP = new Vector3(0, 1, 0);
 

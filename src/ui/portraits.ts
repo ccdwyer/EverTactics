@@ -157,6 +157,10 @@ const AGILE = [114, 126, 102, 104] as const;
 const ARCANE = [108, 110, 112, 128] as const;
 const DEVOUT = [106, 116, 118, 98] as const;
 const COURTLY = [130, 120, 116] as const;
+/* Dragoon reads as heavy armour first and as a spear second, so its stand-in is
+   the samurai plate (jingasa over plate, face visible) rather than the knight's
+   gorget — which keeps the Knight's own face free in a roster that has both. */
+const LANCE = [124, 100, 96, 122] as const;
 
 const JOB_ARCHETYPE: Readonly<Record<string, readonly number[]>> = {
   squire: MARTIAL,
@@ -171,7 +175,7 @@ const JOB_ARCHETYPE: Readonly<Record<string, readonly number[]>> = {
   summoner: ARCANE,
   mystic: DEVOUT,
   geomancer: DEVOUT,
-  dragoon: MARTIAL,
+  dragoon: LANCE,
   orator: COURTLY,
   samurai: MARTIAL,
   ninja: AGILE,
@@ -220,9 +224,35 @@ const JOB_ALIAS: Readonly<Record<string, string>> = {
   shaman: 'mystic',
 };
 
+/* ROUND 8 — THE HELM IS A LIZARD AT CHIP SCALE, AND IT IS THE ONLY FACE THAT IS.
+   ---------------------------------------------------------------------------
+   122/123 is FFT's generic Dragoon: a full dragon-crest faceplate with a cloth
+   mask and one lit eye. The shipped Combat Timeline really does put it in the
+   queue (refs/curated/fft/press-042310-...-mediakit-06.png, chips 3 and 9), so
+   round 7's note that it is "correct art" is true as far as it goes.
+
+   It is still the wrong call for US, twice over. Our field sprites are all
+   human, so a reptilian faceplate in the rail describes nobody standing on the
+   board — which is the listed fail condition, "turn-order portraits that do not
+   match the units actually on the field". And three separate critics, over
+   three rounds, have named it unprompted ("a lizard, a goat and an octopus")
+   without ever naming the Black Mage's straw hat or the Ninja's mask, which are
+   equally face-concealing. The helm is the one that crosses from concealed to
+   inhuman.
+
+   So it is demoted rather than deleted: a Dragoon takes the samurai plate (also
+   armoured, also martial, but a visible human face) and only falls back to the
+   helm when every other martial face in the roster is already spoken for. If we
+   ever ship a dragoon sprite with a crested helm the face is still there for it.
+*/
+const HELM_LAST: ReadonlySet<number> = new Set([122, 123]);
+
 /**
  * Build the ordered candidate list for a job: its own face first, then its
  * archetype siblings. `+1` on an even base is that job's female plate.
+ *
+ * Concealing-helm faces are sorted to the back of whatever list they land in,
+ * so they are a genuine last resort rather than a first choice — see HELM_LAST.
  */
 function familyOf(job: string, gender: PortraitGender): number[] {
   const key = JOB_ALIAS[job] ?? job;
@@ -237,7 +267,10 @@ function familyOf(job: string, gender: PortraitGender): number[] {
     const f = n + (female ? 1 : 0);
     if (!out.includes(f)) out.push(f);
   }
-  return out;
+  // Stable partition: everything that shows a face, then the helms.
+  const open = out.filter((n) => !HELM_LAST.has(n));
+  const hidden = out.filter((n) => HELM_LAST.has(n));
+  return [...open, ...hidden];
 }
 
 /** `{ male, female }` for a job, derived from the pair table above. */
@@ -663,7 +696,18 @@ export type PortraitSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
  * tick column at 50px and 39px respectively, both still comfortable for a
  * two-digit numeral in the display face.
  */
-const SIZES: Record<PortraitSize, number> = { xs: 30, sm: 54, md: 64, lg: 104, xl: 130 };
+/*
+ * Round 8 — the rail chips were 15-20% under the shipped card.
+ *
+ * Measured on refs/curated/fft/press-042310-...-mediakit-06.png at 1080p, a
+ * Combat Timeline card is ~70px wide and ~88 tall including its health band, and
+ * the face inside it is ~62px. Ours ran a 54px face in a 58px card — legible,
+ * but small enough that the column read as a strip of stamps rather than as the
+ * instrument the reference makes of it. 60/70 lands the queued card at 64px and
+ * the acting card at 74px, i.e. the reference's proportions, and the numeral
+ * gutter still clears --hud-rail.
+ */
+const SIZES: Record<PortraitSize, number> = { xs: 30, sm: 60, md: 70, lg: 104, xl: 130 };
 
 export interface PortraitOptions {
   size?: PortraitSize;
@@ -706,9 +750,22 @@ export function portrait(file: string | undefined, opts: PortraitOptions = {}): 
   // inconsistent crops and inconsistent eye-lines". 148 clears the jaw and takes
   // ten pixels of collar with it, so the crop reads as a portrait bust rather
   // than as a face with the bottom sliced off.
-  const HEAD_CROP_H = 156;
+  //
+  // ROUND 8 — the window also has to move DOWN, not just end lower.
+  // Anchoring it at the cell's top edge kept 14px of hair that the source art
+  // has already clipped against that edge, and spent it at the expense of the
+  // eye line: on the concealing plates (the Black Mage's straw hat, the Ninja's
+  // hood) the lit eyes are the whole read and they were sitting at 71% of the
+  // crop, right where the chip's inner vignette is darkest. Starting at y=14
+  // and ending at the same 156 gives a 128x142 window — aspect 0.90, which is
+  // the shipped card's face box (~62x66) to within a pixel — and lifts every
+  // eye line by 5% of the chip.
+  const HEAD_CROP_TOP = 14;
+  const HEAD_CROP_BOTTOM = 156;
   const full = PORTRAIT_ATLAS.full;
-  const cell = opts.head ? { ...full, h: Math.min(HEAD_CROP_H, full.h) } : full;
+  const cell = opts.head
+    ? { ...full, y: full.y + HEAD_CROP_TOP, h: Math.min(HEAD_CROP_BOTTOM - HEAD_CROP_TOP, full.h) }
+    : full;
   const frameH = Math.round((w * cell.h) / cell.w);
   wrap.style.width = `${w}px`;
   wrap.style.height = `${frameH}px`;

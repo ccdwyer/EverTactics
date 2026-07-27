@@ -212,9 +212,9 @@ export const copingTexel = (u: number, v: number): Texel => {
   // stone from both sides. Still only about a stop lighter than the paving it caps — any
   // more and the kerb stops being stone and becomes a highlight pass.
   const c = {
-    r: lerp(0.212, 0.722, t),
-    g: lerp(0.206, 0.702, t),
-    b: lerp(0.188, 0.646, t),
+    r: lerp(0.232, 0.622, t),
+    g: lerp(0.226, 0.606, t),
+    b: lerp(0.208, 0.560, t),
   };
 
   mixTo(c, 0.882, 0.866, 0.812, vein * 0.35);

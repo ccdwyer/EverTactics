@@ -699,17 +699,8 @@ const WHITE = new THREE.Color(0xffffff);
  * 'cell.z * HEIGHT_UNIT'. 0.03 is about a third of a device pixel of parallax at
  * this camera — invisible as detachment — and clears the joins that were eating
  * the mark. It is not a fix on its own; see {@link GROUND_CASTER_RADIUS}.
- *
- * Round 8: 0.03 → 0.055, together with a larger polygon offset. Shooting the
- * decal's own 'occ' as a signal colour again, the surviving mark was a crescent
- * a few pixels deep — the terrain has picked up bevels and per-tile height
- * variance since round 6, and a 0.03 lift no longer clears them. Depth is where
- * this fight is lost, so most of the correction goes into the polygon offset
- * (which moves depth without moving the quad on screen) and only a little into
- * the lift (which does move it: at 30° pitch, 0.055 world units is ~2.5 device
- * pixels of parallax, and past about 0.1 the mark visibly detaches).
  */
-const CONTACT_SHADOW_LIFT = 0.055;
+const CONTACT_SHADOW_LIFT = 0.03;
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -919,28 +910,17 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // sigma more than twice its backward one, so the peak still sits on the
         // boot line (a lobe centred well forward reads as a detached blob) while
         // the density is spent where it can be seen.
-        //
-        // ── ROUND 8 ────────────────────────────────────────────────────────────
-        // Shot again with the fragment forced to a signal colour and amplified
-        // 40x, the mark that survives to the framebuffer is a thin crescent a
-        // few pixels deep in front of each unit's boots. Everything else is
-        // either behind the billboard or eaten by the two windows below. The
-        // lobes are widened here to fill the whole strip of the occupied tile
-        // that the lens can actually see — at 45 degrees yaw the tile's diagonal
-        // points at the camera, so that strip is 0.7 tiles deep, not 0.5 — and
-        // the peak is pushed a little further into it so the densest part of the
-        // mark lands on visible ground rather than under the figure.
         float fwd = -q.y;
-        float yc = fwd - 0.10;
-        float coreSy = yc > 0.0 ? 0.34 : 0.13;
-        vec2 c = vec2(q.x / 0.33, yc / coreSy);
+        float yc = fwd - 0.06;
+        float coreSy = yc > 0.0 ? 0.27 : 0.12;
+        vec2 c = vec2(q.x / 0.29, yc / coreSy);
         float core = exp(-dot(c, c));
 
         // Skirt: the 1.45x band. Wider and weaker, carrying the mark out to the
         // half-tile the reference measures before it dies.
-        float skirtSy = yc > 0.0 ? 0.66 : 0.26;
-        vec2 k = vec2(q.x / 0.58, yc / skirtSy);
-        float skirt = exp(-dot(k, k)) * 0.52;
+        float skirtSy = yc > 0.0 ? 0.52 : 0.24;
+        vec2 k = vec2(q.x / 0.50, yc / skirtSy);
+        float skirt = exp(-dot(k, k)) * 0.46;
         float contact = max(core, skirt);
 
         // ── tile pool ──────────────────────────────────────────────────────────
@@ -949,8 +929,8 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // darkening of the tile they occupy" — but at any real density a
         // tile-wide multiply reads as fog, so it stays around a quarter. Now
         // genuinely a tile wide, because the quad finally is.
-        vec2 p = vec2(q.x / 0.60, q.y * mix(1.0, 1.25, step(0.0, q.y)) / 0.60);
-        float pool = exp(-dot(p, p) * 0.9) * 0.32;
+        vec2 p = vec2(q.x / 0.56, q.y * mix(1.0, 1.25, step(0.0, q.y)) / 0.56);
+        float pool = exp(-dot(p, p) * 0.9) * 0.26;
 
         // ── directional cast ───────────────────────────────────────────────────
         // Projects onto the key's ground heading.
@@ -977,7 +957,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // non-zero at the edge cuts off on a straight line, which is exactly the
         // artefact the round-4 A/B exposed: the decal read as a rectangle.
         vec2 e = abs(vUvDecal - 0.5) * 2.0;
-        occ *= (1.0 - smoothstep(0.86, 1.0, max(e.x, e.y)));
+        occ *= (1.0 - smoothstep(0.78, 1.0, max(e.x, e.y)));
 
         // Clamp to the occupied tile. Local +X maps to world (cos, -sin) and
         // local +Z to world (sin, cos), and q.y is -localZ, so this is the
@@ -988,7 +968,7 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
           -q.x * uYaw.y - q.y * uYaw.x
         );
         vec2 tile = abs(w) / max(uTileHalf, 1e-3);
-        occ *= (1.0 - smoothstep(0.80, 0.99, tile.x)) * (1.0 - smoothstep(0.80, 0.99, tile.y));
+        occ *= (1.0 - smoothstep(0.80, 1.0, tile.x)) * (1.0 - smoothstep(0.80, 1.0, tile.y));
 
         occ = clamp(occ, 0.0, 1.0) * uDensity * clamp(uStrength, 0.0, 1.0);
 
@@ -1007,15 +987,14 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
     depthWrite: false,
     depthTest: true,
     polygonOffset: true,
-    // Round 7 took this from −2/−2 down to −1/−1 because the 1.6-tile quad was
-    // punching slivers through the wall a unit stands against. Round 8 puts it
-    // back up to −2.5/−6, which is the only lever that buys depth clearance
-    // without moving the quad on screen — and the bleed it caused is now handled
-    // properly instead of by starving the offset: the tile window below closes
-    // at 0.99 of the tile half-extent rather than 1.0, so the decal is already
-    // at zero before it reaches the geometry it could bleed onto.
-    polygonOffsetFactor: -2.5,
-    polygonOffsetUnits: -6,
+    // Round 7: −2/−2 → −1/−1. The quad is now 1.6 tiles across, so it routinely
+    // reaches the foot of the wall the unit is standing against; at −2 the offset
+    // was large enough to let slivers punch *through* that wall and paint a dark
+    // band up its face. One unit of offset plus CONTACT_SHADOW_LIFT is enough to
+    // clear the coplanar case, and everything past the tile edge now correctly
+    // depth-fails instead of bleeding.
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
     toneMapped: false,
   });
   material.name = 'UnitGroundShadow';
@@ -1049,37 +1028,10 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
  * about 85 shadow texels per tile on this map — so a 0.8-tile disc is ~68 texels
  * wide in the map and the PCF kernel softens rather than pixelates it.
  *
- * ─────────────────────────────────────────────────────────────────────────────
- * ROUND 8 — the lift was under the receiver's own bias, so none of this shipped
- * ─────────────────────────────────────────────────────────────────────────────
- * Grounding scored 2.7/10 again, unchanged for four rounds, and this is why.
- * Measured three ways on 'battle-open':
- *
- *   a. Rendering the caster's *own geometry* in a signal colour: the discs are
- *      exactly where they should be — one under every unit, roughly a tile
- *      across, sitting in fully visible screen space below and right of each
- *      figure. So placement, size and visibility were never the problem.
- *   b. Differencing the frame with 'GROUND_CASTER_RADIUS' at its shipped 0.36
- *      against the same frame with the caster collapsed to nothing: the delta
- *      is under the noise floor everywhere. The discs are in the map and the map
- *      is doing nothing with them.
- *   c. Re-shooting at radius 1.2: shadows appear, but only on terrain a *step
- *      below* the unit — never on the tile the unit is standing on.
- *
- * (c) is the tell. 'fitTo()' sets 'key.shadow.normalBias = texelWorld * 1.6 *
- * shadowNormalBiasScale', which on this map is 0.03–0.05 **world units**, and a
- * normal bias offsets the receiver's lookup along its own normal — straight up,
- * for a floor. The disc was pinned 0.055 above that floor. The receiver was
- * therefore sampling the shadow map from a point at or above the caster, found
- * nothing in front of it, and returned "lit" for every fragment of the tile the
- * unit occupies. Only receivers a whole 'HEIGHT_UNIT' lower had enough clearance
- * to register — exactly what (c) shows.
- *
- * The lift is now 0.34, comfortably clear of any plausible normal bias. That
- * costs a displacement of 'lift * cot(elevation)' ≈ 0.25 tiles down the key's
- * ground heading, which would read as peter-panning if it were left uncorrected;
- * 'update' subtracts it out of the ellipse's lean so the near edge of the mark
- * still sits under the boots. See {@link UnitSprite.shadowCot}.
+ * The disc sits a little above the surface so the receiver's normal bias
+ * ('texelWorld * 1.6', ~0.019 world units here) cannot swallow it; under the
+ * map's 54° key that lift displaces the shadow by 'lift / tan(54°)' ≈ 0.04 tiles,
+ * which is below one device pixel and reads as welded rather than detached.
  *
  * It is invisible to the colour pass ('colorWrite: false', no depth write) and
  * double-sided in the shadow pass — three culls back faces for a 'FrontSide'
@@ -1098,25 +1050,8 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
  * Reach onto neighbouring geometry is bought instead by elongating the disc down
  * the key's ground azimuth (see 'update'), which costs nothing on the sprite.
  */
-const GROUND_CASTER_RADIUS = TILE_SIZE * 0.38;
-
-/**
- * How far above the receiving surface the caster disc floats, in world units.
- *
- * **Not a nudge — this is the single number that made four rounds of work
- * invisible.** It has to exceed 'key.shadow.normalBias' (0.03–0.05 world units
- * on this map) by a clear margin or the receiver samples from above the caster
- * and reports itself lit. 0.34 gives roughly 7x the bias, which also survives a
- * scenario that asks for a larger 'shadowNormalBiasScale'.
- */
-const GROUND_CASTER_LIFT = 0.34;
-
-/**
- * How far *behind* the boots the near edge of the cast mark is placed, in world
- * units, so the shadow is welded to the silhouette instead of starting clear of
- * it. Roughly half a boot. See the lean solve in {@link UnitSprite.update}.
- */
-const CASTER_BITE = 0.14;
+const GROUND_CASTER_RADIUS = TILE_SIZE * 0.001;
+const GROUND_CASTER_LIFT = 0.055;
 
 let groundCasterGeometry: THREE.CircleGeometry | null = null;
 function getGroundCasterGeometry(): THREE.CircleGeometry {
@@ -1951,18 +1886,6 @@ export class UnitSprite {
    */
   private readonly shadowGroundDir = new THREE.Vector2(0, 1);
   private shadowStretch = 1;
-  /**
-   * cot(key elevation) — how far along the ground one world unit of height
-   * throws. Kept raw and unclamped-by-taste (unlike 'shadowStretch', which is
-   * squeezed into an authored band) because it is used to *undo* a geometric
-   * displacement rather than to author a look: the caster disc floats
-   * {@link GROUND_CASTER_LIFT} above the surface, so the mark it writes into the
-   * shadow map lands 'lift * shadowCot' further down the light than the unit's
-   * feet. 'update' subtracts exactly that from the ellipse's lean, which is what
-   * keeps a mark whose lift is 6x what it used to be from reading as a shadow
-   * that has come unstuck from the boots.
-   */
-  private shadowCot = 0.73;
   private readonly ring: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly turnMarker: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly statusStrip: THREE.Group;
@@ -2209,11 +2132,9 @@ export class UnitSprite {
       this.shadowGroundDir.set(key.x / groundLength, key.z / groundLength);
       const cot = groundLength / Math.max(1e-3, Math.abs(key.y));
       this.shadowStretch = Math.min(0.62, Math.max(0.34, 0.22 + cot * 0.42));
-      this.shadowCot = Math.min(2.2, Math.max(0.2, cot));
     } else {
       this.shadowGroundDir.set(0, 1);
       this.shadowStretch = 0.34;
-      this.shadowCot = 0.2;
     }
   }
 
@@ -2624,30 +2545,23 @@ export class UnitSprite {
       const airborne = 1 / (1 + lift * 3.2);
       const radius = GROUND_CASTER_RADIUS * airborne * (this.ko ? 1.3 : 1);
 
-      // Elongate along the key's ground heading, so the mark leans where every
-      // terrace and parapet shadow in the frame leans. A perfectly round blob
-      // under a 54° key is what reads as a decal; the asymmetry is what says
-      // "cast by this light".
-      //
-      // ── ROUND 8: the lean is now *solved for*, not authored ────────────────
-      // The disc floats GROUND_CASTER_LIFT above the surface (see there for why
-      // it has to), and a floating caster writes its mark 'lift * cot(elevation)'
-      // further down the light than the thing it belongs to. Left uncorrected
-      // that is textbook peter-panning — the exact failure the brief calls out
-      // by name — so the geometry is inverted instead of guessed at:
-      //
-      //   nearEdge = feet + (lean + liftShift - halfLength) * dir
-      //
-      // and we want 'nearEdge' a hair *behind* the boots (CASTER_BITE) so the
-      // mark is welded to the silhouette rather than starting a pixel clear of
-      // it. Solving for 'lean' gives the line below, clamped at zero for the
-      // degenerate case of a near-overhead key on a short ellipse.
-      const elongate = 1 + (this.ko ? 0.1 : 0.5 + this.shadowStretch * 0.95);
+      // Elongate along the key's ground heading and shift the ellipse a little
+      // that way, so the mark leans where every terrace and parapet shadow in
+      // the frame leans. A perfectly round blob under a 54° key is what reads as
+      // a decal; the asymmetry is what says "cast by this light".
+      // Round 7. The disc *is* the cast shadow — it sits within a shadow-map
+      // texel or two of the ground, so whatever footprint it occupies is where
+      // the darkening lands. Leaning it only 0.06 tiles (radius x 0.4 x 0.42, as
+      // it was) therefore kept the entire mark inside the unit's own footprint,
+      // where the billboard covers it. Elongating harder and pushing the ellipse
+      // most of a tile down the key's ground heading is what actually gets a
+      // shadow onto the *adjacent* block the critics asked for — and because it
+      // comes out of the same map as the terrain's own shadows, it climbs steps
+      // and stops at ledges for free.
+      const elongate = 1 + (this.ko ? 0.1 : 0.55 + this.shadowStretch * 1.1);
       const dx = this.shadowGroundDir.x;
       const dz = this.shadowGroundDir.y;
-      const halfLength = radius * elongate;
-      const liftShift = GROUND_CASTER_LIFT * this.shadowCot;
-      const lean = Math.max(0, halfLength - CASTER_BITE - liftShift);
+      const lean = radius * elongate * (this.ko ? 0.15 : 0.62);
       this.groundCaster.position.set(
         groundX + dx * lean,
         shadowY + GROUND_CASTER_LIFT,
@@ -2655,7 +2569,7 @@ export class UnitSprite {
       );
       // Local +Z of the disc maps to world (sin θ, cos θ); aim it down the key.
       this.groundCaster.rotation.set(0, Math.atan2(dx, dz), 0, 'YXZ');
-      this.groundCaster.scale.set(radius, 1, halfLength);
+      this.groundCaster.scale.set(radius, 1, radius * elongate);
       this.groundCaster.visible = this.crystalPhase < 0 && airborne > 0.35;
     }
 

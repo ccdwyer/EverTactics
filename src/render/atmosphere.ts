@@ -54,9 +54,11 @@ import {
 
 import { Backdrop, type BackdropLayout, type BoardFootprint } from './backdrop.js';
 import {
+  DEFAULT_RECESSION,
   deriveEnvironmentPalette,
   GLSL_NOISE,
   Sky,
+  SKY_RECESSION_BIAS,
   type EnvironmentPalette,
   type PaletteTuning,
 } from './sky.js';
@@ -123,6 +125,8 @@ precision highp float;
 uniform vec3  uCool;
 uniform vec3  uWarmColor;
 uniform float uIntensity;
+uniform vec3  uFade;
+uniform float uViewH;
 varying float vAlpha;
 varying float vWarm;
 void main() {
@@ -132,6 +136,11 @@ void main() {
   float a = exp(-r * r * 3.4) * 0.85 + exp(-r * 1.6) * 0.25;
   a *= smoothstep(1.0, 0.55, r);
   vec3 col = mix(uCool, uWarmColor, vWarm);
+  // Upward recession. Additive, so value only — see the same note in GLOW_FRAG.
+  // Motes high in the frame are the ones with nothing behind them to read
+  // against, so at full intensity they are the exact "uniform white flecks
+  // sitting on top of the image rather than inside it" note.
+  a *= mix(1.0, uFade.z, smoothstep(uFade.x, uFade.y, gl_FragCoord.y / max(uViewH, 1.0)));
   gl_FragColor = vec4(col * a * vAlpha * uIntensity, 1.0);
 }
 `;
@@ -174,6 +183,8 @@ export class MoteField {
         uCool: { value: new Color() },
         uWarmColor: { value: new Color() },
         uIntensity: { value: 1 },
+        uFade: { value: new Vector3(...DEFAULT_RECESSION) },
+        uViewH: { value: 1080 },
       },
       vertexShader: MOTE_VERT,
       fragmentShader: MOTE_FRAG,
@@ -250,6 +261,15 @@ export class MoteField {
     (this.material.uniforms.uWarmColor!.value as Color).copy(palette.sun).multiplyScalar(0.42);
   }
 
+  /** '(startY, endY, floor)' screen fractions from the bottom. See {@link GLSL_RECEDE}. */
+  setRecession(start: number, end: number, floor: number): void {
+    (this.material.uniforms.uFade!.value as Vector3).set(start, end, floor);
+  }
+
+  setViewportHeight(heightPx: number): void {
+    this.material.uniforms.uViewH!.value = Math.max(1, heightPx);
+  }
+
   setPointScale(v: number): void {
     this.material.uniforms.uPointScale!.value = v;
   }
@@ -289,6 +309,8 @@ uniform float uOpacity;
 uniform float uTime;
 uniform float uDrift;
 uniform float uSoftBottom;
+uniform vec3  uFade;
+uniform float uViewH;
 varying vec2 vUv;
 varying vec3 vLocal;
 
@@ -313,6 +335,15 @@ void main() {
   float vertical = mix(1.0, smoothstep(1.0, 0.05, vUv.y), uSoftBottom);
 
   float a = fall * body * vertical * uOpacity;
+
+  // Upward recession. Haze is the layer with the most to lose here: it is a
+  // large, low-frequency, PALE wash, so wherever it reaches the upper frame it
+  // lifts the blacks over the widest area of any environment layer — the
+  // "blacks lifted by an untextured fog layer, the deepest value in the frame
+  // is a mid-grey" note. Fading its alpha rather than its colour keeps whatever
+  // it sits in front of intact instead of tinting it darker.
+  a *= mix(1.0, uFade.z, smoothstep(uFade.x, uFade.y, gl_FragCoord.y / max(uViewH, 1.0)));
+
   if (a < 0.002) discard;
   gl_FragColor = vec4(uColor * a, a);
 }
@@ -338,11 +369,25 @@ export class HazeBanks extends Group {
   private readonly materials: ShaderMaterial[] = [];
   private readonly meshes: Mesh[] = [];
   private palette: EnvironmentPalette;
+  /** Held across 'layout()' rebuilds; see the same field on 'Backdrop'. */
+  private readonly fade = new Vector3(...DEFAULT_RECESSION);
+  private viewH = 1080;
 
   constructor(palette: EnvironmentPalette) {
     super();
     this.name = 'env-haze';
     this.palette = palette;
+  }
+
+  /** '(startY, endY, floor)' screen fractions from the bottom. See {@link GLSL_RECEDE}. */
+  setRecession(start: number, end: number, floor: number): void {
+    this.fade.set(start, end, floor);
+    for (const m of this.materials) (m.uniforms.uFade!.value as Vector3).copy(this.fade);
+  }
+
+  setViewportHeight(heightPx: number): void {
+    this.viewH = Math.max(1, heightPx);
+    for (const m of this.materials) m.uniforms.uViewH!.value = this.viewH;
   }
 
   layout(layout: BackdropLayout): void {
@@ -381,6 +426,8 @@ export class HazeBanks extends Group {
           uTime: { value: 0 },
           uDrift: { value: spec.drift },
           uSoftBottom: { value: spec.softBottom },
+          uFade: { value: this.fade.clone() },
+          uViewH: { value: this.viewH },
         },
         vertexShader: HAZE_VERT,
         fragmentShader: HAZE_FRAG,
@@ -460,6 +507,17 @@ export interface WorldEnvironmentOptions {
   /** Deterministic layout seed. */
   seed?: number;
   motes?: MoteFieldOptions;
+  /**
+   * Upward recession: '[startY, endY, floor]' as screen fractions from the
+   * bottom of frame, with 'floor' the value multiplier reached at 'endY'.
+   *
+   * Defaults to {@link DEFAULT_RECESSION}. Pass '[0, 1, 1]' to disable it — a
+   * diagnostic scene inspecting the surround's own materials wants the raw
+   * values, and so does any future map whose composition puts the subject at
+   * the top of the frame rather than in the middle. See {@link GLSL_RECEDE} in
+   * 'sky.ts' for what it is correcting and why it is measured, not tasteful.
+   */
+  recession?: [number, number, number];
 }
 
 const FORWARD = new Vector3();
@@ -518,6 +576,7 @@ export class WorldEnvironment {
       seed: options.seed ?? 1337,
       palette: options.palette ?? {},
       motes: options.motes ?? {},
+      recession: options.recession ?? DEFAULT_RECESSION,
     };
     this.enabled = this.options.enabled;
 
@@ -550,6 +609,32 @@ export class WorldEnvironment {
     this.yawGroup.add(this.motes.points);
     this.yawGroup.add(this.haze);
     this.group.add(this.yawGroup);
+
+    this.setRecession(...this.options.recession);
+  }
+
+  /**
+   * Set the upward recession on every layer at once.
+   *
+   * It has to be one call because the four layers overlap in screen space: the
+   * sky plate, the ridge band standing in front of it, the haze bank in front of
+   * that and the motes in front of all three all cover the same rows near the
+   * top of frame. Grading them on different ramps does not average out, it
+   * produces visible banding wherever one layer ends and the next begins — which
+   * is why the ramp lives here and not in four independently-tuned constants.
+   */
+  setRecession(start: number, end: number, floor: number): void {
+    this.options.recession = [start, end, floor];
+    // The sky takes a deeper floor than everything standing in front of it; see
+    // 'SKY_RECESSION_BIAS'.
+    this.sky.setRecession(start, end, floor * SKY_RECESSION_BIAS);
+    this.backdrop.setRecession(start, end, floor);
+    this.haze.setRecession(start, end, floor);
+    this.motes.setRecession(start, end, floor);
+  }
+
+  get recession(): [number, number, number] {
+    return [...this.options.recession];
   }
 
   private readonly yawGroup = new Group();
@@ -600,6 +685,13 @@ export class WorldEnvironment {
     this.aspect = widthPx / Math.max(1, heightPx);
     this.pixelRatio = pixelRatio;
     this.sky.setAspect(this.aspect);
+    // Every layer but the sky reads 'gl_FragCoord.y', which is in device pixels
+    // and therefore meaningless without the drawing-buffer height. The sky is
+    // the exception because its quad is emitted in clip space, so its own uv
+    // already IS the screen fraction.
+    this.backdrop.setViewportHeight(heightPx);
+    this.haze.setViewportHeight(heightPx);
+    this.motes.setViewportHeight(heightPx);
     // Scale with the drawing buffer, not just the DPR: a mote sized in raw
     // points is a different physical size on a 720p and a 4K render, and the
     // screenshot harness runs at 1920 wide.

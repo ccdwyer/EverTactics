@@ -461,7 +461,7 @@ const BATTLE_OPEN: Scenario = {
   // all four edges. Dropping the flag lets `frameField`'s cover bias take over and the map
   // bleeds past the frame.
   //
-  // 32° rather than 40°. A walled cloister does need to be looked *into*, but 40 flattens
+  // 30° rather than 40°. A walled cloister does need to be looked *into*, but 40 flattens
   // the elevation bands this map exists to express — at 40 the vertical wall faces are half
   // the screen height they get at 32, and height is both the art and the mechanic here.
   // VISUAL_TARGET.md measures the references at "roughly 30° pitch".

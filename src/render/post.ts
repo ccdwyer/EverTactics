@@ -285,6 +285,26 @@ export interface FocusGradeSettings {
    * near shadow, which is the only cue other than blur that separates them.
    */
   farScatter: [number, number, number];
+  /**
+   * Fraction of the BLOOM halo absorbed at full haze, 0..1.
+   *
+   * Round 8. The measured composition defect is that the top of the frame — which contains no
+   * gameplay — is the brightest region in the picture: farTop/board came back at 1.31 against
+   * a reference band of 0.34-0.65. The cause is the town backdrop's lantern field blooming at
+   * full strength fifty world units away. Light from a distant source crosses the same air the
+   * source's own light does, so its halo has to be extinguished by the same term; before this
+   * the bloom was added after the haze coefficient was applied and survived it entirely.
+   */
+  farBloom: number;
+  /**
+   * Graduated-ND strength at the very top of frame, 0..1, applied to the FAR FIELD ONLY.
+   *
+   * See the block comment beside the term in 'materials/post/composite.ts'. Gated by the haze
+   * coefficient so near geometry rising into the top of the composition is untouched.
+   */
+  farTopFalloff: number;
+  /** uv.y where that falloff begins. Below this the far field is graded by haze alone. */
+  farTopStart: number;
 }
 
 export interface GrainSettings {
@@ -743,7 +763,15 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // 'backgroundFraction' at 0.184, i.e. the bottom band had gone flat enough to be
       // counted as void against a reference band of 0.087-0.180 and a hard fail at 0.25.
       // Subordinating the foreground must not turn it into background.
-      edgeWeights: [1.8, 0.85, 0.9],
+      // ROUND 8 takes the TOP weight back down, 1.8 -> 1.25. That weight was round 6's answer
+      // to the same defect this round finally measured properly, and it was the wrong tool for
+      // it: the vignette's rectangular band is screen-space and distance-blind, so at 1.8 it
+      // reached down to uv.y = 0.615 and was darkening the far third of the PLAYABLE BOARD to
+      // pull down a backdrop it could not tell apart from it. Measured: dropping it to 0.85
+      // moved the 'board' luma from 60.0 to 57.7 while 'farTop' rose only 1.2. The graduated ND
+      // in 'focusGrade' now subordinates the top of frame by distance instead, which reaches
+      // the backdrop and nothing else; 1.25 is what is left over for the frame edge itself.
+      edgeWeights: [1.25, 0.85, 0.9],
       // Just over half. At 1.0 (a falloff centred exactly on the subject at u = 0.425) the
       // right edge lost twice the light the left did, and the right edge is a third of the
       // playable board — the darkest corner should be the one furthest from the action, not
@@ -772,7 +800,13 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // the frame does not need more light in the middle, it needs less everywhere else, and
       // "composition is subtraction" is the brief in as many words. More lift here would push
       // the centre onto the shoulder and flatten it.
-      lift: 1.85,
+      // ROUND 8: 1.85 -> 2.02, and the "past ~2 it plates out" caution above has been
+      // re-measured rather than inherited. It was written when the frame ran lumaP95 at
+      // 199/255; with the far field now genuinely subordinated the same frame measures 160,
+      // so there is a whole stop of shoulder that was not there before. The dodge is the only
+      // term that raises the DENOMINATOR of farTop/board, which is the round-8 target, and it
+      // raises it exactly where the gameplay is.
+      lift: 2.02,
       // Starts falling at 16% of the way to the frame edge and takes 62% to get there, so it
       // is still a gradient over most of the picture — but a much tighter one than the first
       // attempt, which started at 0.40. That version measured as a no-op (ratio 1.49 -> 1.51)
@@ -782,32 +816,64 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // ROUND 7: 0.16 -> 0.11, softness 0.62 -> 0.56. Same lift, steeper shoulder on it, so
       // the dodge stops paying out to the right third and the top band — both of which are
       // scenery — while the party cluster and the brazier keep every bit of it.
-      radius: 0.11,
-      softness: 0.56,
+      // ROUND 8 puts the radius back to 0.16. Round 7's tightening was buying subordination of
+      // the top band, and the graduated ND below now does that job by distance instead of by
+      // falloff geometry — so the dodge is free to cover the whole staging area again. It is
+      // worth 1.4 luma on the measured 'board' region and nothing at all on 'farTop'.
+      radius: 0.16,
+      softness: 0.54,
       farAmount: 1.0,
       // Distance costs chroma before it costs light, so the desaturation is the bigger term.
       // Keyed to view-space distance past the focal plane, so the near rim at the bottom of
       // frame — which is defocused too — stays dense and dark, because it is foreground.
-      farDesaturate: 0.60,
+      farDesaturate: 0.62,
       // Transmission. Paired with the in-scatter below this is a CONTRAST COMPRESSION, not a
       // dim: the far field's blacks come up and its whites come down, which is exactly what
       // "everything else deliberately subordinated by haze, blur or value compression" asks
       // for, and it is the one form of subordination that costs no readability — a hazed
       // tile is still a countable tile.
-      farDarken: 0.24,
+      // ROUND 8: 0.24 -> 0.55. 'tools/_scratch/region.mjs' on the round-7 frame puts the
+      // top-centre band — pure backdrop, no gameplay in it — at luma 81 against a staging area
+      // at 55. At 0.24 the far field kept three quarters of its light however far away it was,
+      // which is not transmission, it is a tint.
+      //
+      // It stops at 0.55 rather than going further, and the stopping point is measured. At
+      // 0.68 (with the density below) 'tools/metrics.mjs' put 'backgroundFraction' at 0.338
+      // against a hard fail at 0.25 and a reference band of 0.087-0.180: the far field had
+      // been taken so far down that the connected-component test read it as VOID, which is the
+      // defect this project spent rounds 2-5 removing. Subordinating the background must not
+      // delete it. The rest of the reduction is spent by the graduated ND below, which is
+      // vertically graded and therefore cannot flatten the whole surround.
+      farDarken: 0.55,
       // The cool end of the map's own split. A neutral grey haze is a listed fail condition.
       farTint: [0.78, 0.88, 1.16],
-      // Sized to the shot rather than dialled. 'battle-open''s playable board spans roughly
-      // ±3.2 world units of view distance from the focal plane (see 'focusRange'), the skirt
-      // and near architecture another ~8, and the silhouette surround runs out past 60. At
-      // 0.055/unit the back of the board picks up ~15%, the far cloister ~35% and the
-      // backdrop 90%+, which is a gradient a viewer can read as distance rather than as three
-      // discrete layers.
-      farDensity: 0.055,
+      // ROUND 8: 0.055 -> 0.30, and this one was an outright BUG rather than a taste call.
+      //
+      // The paragraph this replaces claimed "the silhouette surround runs out past 60 [world
+      // units]", so 0.055/unit would put the backdrop at 90%+ haze. That was never measured.
+      // Rendering 'hazeT' straight to the framebuffer (paste 'color = vec3(hazeT);' before the
+      // gl_FragColor write in composite.ts) reports the backdrop at hazeT = 0.19 — i.e. the
+      // aerial term was delivering a fifth of its authored strength on the one region it
+      // exists for, which is why four rounds of raising 'farDarken' and 'farScatter' moved the
+      // measured top band by single luma counts and everyone concluded the environment layer
+      // was at fault.
+      //
+      // The cause is the rig. This is a tilted ORTHOGRAPHIC camera: as the comment on
+      // 'focusRange' works out, the whole visible ground plane spans about ±3.2 world units of
+      // view-space depth, and the backdrop sits only a handful of units behind that — not the
+      // 60 the old comment assumed. An extinction constant sized for a perspective scene is
+      // effectively zero here. At 0.30/unit the back of the board picks up ~10%, the far
+      // cloister ~45% and the backdrop 85%+, which is the gradient the number always claimed.
+      farDensity: 0.30,
       // Nothing inside the sharp zone gets touched: washing chroma out of countable tiles is
       // the "depth of field or vignette obscuring tiles the player must count" fail condition
       // wearing a different hat.
-      farStart: 1.8,
+      // ROUND 8: 1.8 -> 3.2, in step with the density fix above. 3.2 is not a taste value — it
+      // is the measured half-depth of the visible ground plane (see 'focusRange'), so the haze
+      // now begins exactly where the board ends. With the extinction constant five times
+      // stronger, leaving the start at 1.8 would have put the back half of the playable board
+      // under 40% haze.
+      farStart: 3.2,
       // Linear, pre-exposure. At 'battle-open''s exposure of 2.1 this lands the fully-hazed
       // black point around code 22/255 after the tonemap and the LUT's crush, against a near
       // shadow that reaches 4. That difference IS the aerial perspective.
@@ -818,7 +884,37 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // into the overcast one. In-scatter has to lift the FAR black point without lifting the
       // picture; the chroma loss above is what carries the rest of the distance cue, and it
       // costs no light at all.
-      farScatter: [0.0125, 0.0165, 0.028],
+      // ROUND 8: cut to a third, once the density fix above let the term actually reach the
+      // backdrop. Work the arithmetic rather than the adjective — at 'battle-open''s exposure
+      // of 2.1, an in-scatter of 0.028 in blue arrives at the tonemapper as 0.059 linear,
+      // which srgbEncode puts at code 67. That is not a black point, that is a mid-tone FLOOR
+      // painted under every far pixel in the picture, and once the haze coefficient was
+      // corrected it became the thing HOLDING THE BACKDROP UP: no amount of transmission can
+      // darken a region whose value is dominated by an additive term. At
+      // [0.0042, 0.0058, 0.0105] the fully hazed floor lands around code 26/31/43 against a
+      // near shadow that still reaches 4, which is an unmistakable separation and is the
+      // actual size of the effect in 'refs/curated/triangle/official_009_steam.jpg' (far band
+      // 18, near band 17.6, board 54).
+      farScatter: [0.0042, 0.0058, 0.0105],
+      // Round 8. A halo is the one part of a distant light that has no business surviving the
+      // air the light itself came through, and 'battle-open''s town backdrop carries scores of
+      // lanterns every one of which is above the bloom threshold.
+      //
+      // 0.70 rather than the 0.88 tried first, and the difference is the void metric again:
+      // those bloomed points are most of the variance left in the backdrop once the haze has
+      // had it, so absorbing them completely took 'backgroundFraction' from 0.171 to 0.179.
+      // Leaving a third of the halo keeps the far lanterns as discrete bright points, which is
+      // both what stops the backdrop reading as a matte painting and what keeps it measuring
+      // as scenery rather than as void.
+      farBloom: 0.70,
+      // Sized on rendered frames against 'tools/_scratch/fartop.mjs'. Starts just below half
+      // frame height — above that line 'battle-open' holds no countable tile at any camera
+      // yaw, only backdrop and the tops of the far parapets — and reaches 0.86 at the very top
+      // edge, which is where the town's lantern field sits. See the term itself in
+      // 'materials/post/composite.ts' for why this is graded vertically instead of simply
+      // being more haze.
+      farTopFalloff: 0.86,
+      farTopStart: 0.46,
     },
     grain: { enabled: true, amount: REFERENCE_FLOOR.grainAmount, size: 1.0, shadowBias: 0.4, animate: true },
     // Halved from 0.35. That value was authored when the frame corners were empty
@@ -1173,6 +1269,9 @@ export class PostStack implements PostEffectsHost {
       uFarDensity: { value: this.settings.focusGrade.farDensity },
       uFarStart: { value: this.settings.focusGrade.farStart },
       uFarScatter: { value: new Vector3(0, 0, 0) },
+      uFarBloom: { value: this.settings.focusGrade.farBloom },
+      uFarTopAmount: { value: this.settings.focusGrade.farTopFalloff },
+      uFarTopStart: { value: this.settings.focusGrade.farTopStart },
       uGrainAmount: { value: this.settings.grain.amount },
       uGrainSize: { value: this.settings.grain.size },
       uGrainShadowBias: { value: this.settings.grain.shadowBias },
@@ -1688,6 +1787,9 @@ export class PostStack implements PostEffectsHost {
     cu['uFarDensity']!.value = Math.max(0, fg.farDensity);
     cu['uFarStart']!.value = fg.farStart;
     (cu['uFarScatter']!.value as Vector3).set(fg.farScatter[0], fg.farScatter[1], fg.farScatter[2]);
+    cu['uFarBloom']!.value = Math.min(1, Math.max(0, fg.farBloom));
+    cu['uFarTopAmount']!.value = fgOn ? Math.min(1, Math.max(0, fg.farTopFalloff)) : 0;
+    cu['uFarTopStart']!.value = Math.min(0.999, Math.max(0, fg.farTopStart));
     cu['uGrainAmount']!.value = this.settings.grain.enabled
       ? floor
         ? Math.max(this.settings.grain.amount, REFERENCE_FLOOR.grainAmount)
