@@ -426,6 +426,13 @@ export interface SpriteUniforms {
    */
   uIndirectGain: { value: number };
   /**
+   * How much indirect light the *feet* lose relative to the *head*. See the sky
+   * occlusion block in the fragment shader: a flat card collects the hemisphere
+   * uniformly down its whole height, which is why a unit with the key occluded
+   * renders as one value from crown to boot.
+   */
+  uSkyOcclusion: { value: number };
+  /**
    * Chroma pull toward the scene. Shipped HD-2D never leaves a sprite at 100%
    * palette saturation over a graded map — the FFT night frames desaturate and
    * cool every unit until it belongs to the light. `uSceneTint` is multiplied
@@ -531,6 +538,7 @@ export interface SpriteMaterialOptions {
   shadeKnee?: number;
   shadeCompress?: number;
   indirectGain?: number;
+  skyOcclusion?: number;
   sceneTint?: THREE.ColorRepresentation;
   gradeSaturation?: number;
   ambientFloor?: THREE.ColorRepresentation;
@@ -563,6 +571,7 @@ uniform float uAlbedoPivot;
 uniform float uShadeKnee;
 uniform float uShadeCompress;
 uniform float uIndirectGain;
+uniform float uSkyOcclusion;
 uniform vec3  uSceneTint;
 uniform float uGradeSaturation;
 uniform vec3  uAmbientFloor;
@@ -729,10 +738,24 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
     spriteShade = min(spriteShade, vec3(uShadeKnee)) + over / (1.0 + over * uShadeCompress);
   }
 
+  float spriteUp = clamp(spriteCellUv.y, 0.0, 1.0);
+
+  // ── sky occlusion down the body ────────────────────────────────────────────
+  // A billboard presents one horizontal normal for its whole height, so three's
+  // hemisphere light hands the boots exactly as much sky as the crown — and with
+  // the key occluded (which, in a walled cloister at 54 degrees, is most units
+  // most of the time) that leaves the figure a single flat value. Real standing
+  // figures do not work that way: the head sees the whole upper hemisphere, the
+  // shins see the ground and the wall opposite. Ramping the indirect term down
+  // the body is one multiply and it is what gives a unit internal modelling in
+  // shadow, which is the difference between the FFT reference's units and a
+  // silhouette. Ground bounce (below) then lifts the very bottom back up in the
+  // terrain's colour, so the legs read as lit *by the floor* rather than as dark.
+  spriteShade *= mix(1.0 - uSkyOcclusion, 1.0, smoothstep(0.0, 0.8, spriteUp));
+
   // Ground bounce: terrain-coloured light rising into the lower body. Grounding
   // is mostly this plus the contact darkening below — a figure whose legs are as
   // bright as its shoulders always reads as a sticker.
-  float spriteUp = clamp(spriteCellUv.y, 0.0, 1.0);
   float bounceK = 1.0 - smoothstep(0.0, 0.62, spriteUp);
   spriteShade += uBounceColor * (uBounceStrength * bounceK * bounceK);
 
@@ -949,6 +972,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uShadeKnee: { value: options.shadeKnee ?? 1.45 },
     uShadeCompress: { value: options.shadeCompress ?? 0.55 },
     uIndirectGain: { value: options.indirectGain ?? 0.72 },
+    uSkyOcclusion: { value: options.skyOcclusion ?? 0.26 },
     uSceneTint: { value: new THREE.Color(options.sceneTint ?? 0xffffff) },
     uGradeSaturation: { value: options.gradeSaturation ?? 0.9 },
     uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x2e3c5c) },
@@ -963,7 +987,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uBackRimStrength: { value: options.backRimStrength ?? 0.07 },
 
     uBounceColor: { value: new THREE.Color(options.bounceColor ?? 0x6d5b46) },
-    uBounceStrength: { value: options.bounceStrength ?? 0.32 },
+    uBounceStrength: { value: options.bounceStrength ?? 0.42 },
 
     uFootShade: { value: 0.42 },
     uFootShadeTexels: { value: 7 },
@@ -1075,25 +1099,114 @@ export function invalidateSpritePrograms(): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Palette slots are not laid out consistently across sheets: `knight_m` slot 2 is
- * teal and slot 3 is red, while `kuro_m` slot 4 is olive and slot 5 magenta. So
- * rather than hard-coding "enemy = slot 1" we score the *actual colours* in each
- * slot against a target hue and pick the closest non-empty one. Data driven, and
- * it degrades gracefully on story characters that only ship one slot.
+ * Which of the 16 palette indices carry a sheet's **team colour ramp**.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * MEASURED, ROUND 3
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Dumping `battle_knight_m_battle_pal1..5` byte-for-byte, the eight `.act` slots
+ * of a generic class are not eight recolours of the whole figure — they are the
+ * same figure with **one or two colour ramps swapped**:
+ *
+ *   knight_m idx 3,4:  384098/5870d8 (blue)  305068/4890a0 (teal)
+ *                      783028/e04820 (red)   706828/c0b028 (gold)
+ *   knight_m idx 11-15 (skin, leather, gold trim): near-identical in every slot.
+ *
+ * The previous scorer averaged the hue of *every* entry that differed from
+ * `pal1` by more than ~1/25 of the range. On the shipped files that filter keeps
+ * 10-14 of the 15 entries, because the toolkit nudges the skin and leather ramps
+ * a few units between slots too — so the score was dominated by skin, every slot
+ * measured 4-55 degrees, and **`ally` resolved to an orange slot on 6 of the 8
+ * families sampled**. An ally and an enemy standing side by side were the same
+ * colour, which is a gameplay-legibility bug, not just a look one.
+ *
+ * The ramp is instead identified by *variance across the slot set*: an index
+ * whose colour is nearly constant in all eight palettes is skin or steel; an
+ * index that swings from navy to scarlet is the team ramp. That is a property of
+ * the data rather than of any one sheet's layout, so it works on `siro_w` (whose
+ * ramp is indices 7-9) exactly as well as on `knight_m` (indices 3-6).
+ */
+function teamRampMask(palettes: readonly Uint8Array[]): Float64Array {
+  const variance = new Float64Array(16);
+  const usable = palettes.filter((p) => p && !isPaletteEmpty(p));
+  if (usable.length < 2) return variance.fill(1);
+
+  for (let i = 1; i < 16; i++) {
+    let mr = 0;
+    let mg = 0;
+    let mb = 0;
+    for (const p of usable) {
+      mr += (p[i * 3] ?? 0) / 255;
+      mg += (p[i * 3 + 1] ?? 0) / 255;
+      mb += (p[i * 3 + 2] ?? 0) / 255;
+    }
+    mr /= usable.length;
+    mg /= usable.length;
+    mb /= usable.length;
+    let sum = 0;
+    for (const p of usable) {
+      const dr = (p[i * 3] ?? 0) / 255 - mr;
+      const dg = (p[i * 3 + 1] ?? 0) / 255 - mg;
+      const db = (p[i * 3 + 2] ?? 0) / 255 - mb;
+      sum += dr * dr + dg * dg + db * db;
+    }
+    variance[i] = Math.sqrt(sum / usable.length);
+  }
+
+  // Normalise to the loudest index and keep a soft ramp rather than a hard
+  // cutoff: a sheet whose second garment also shifts slightly should still
+  // contribute, just less than the ramp that swings the furthest.
+  let peak = 0;
+  for (let i = 1; i < 16; i++) peak = Math.max(peak, variance[i] ?? 0);
+  if (peak < 1e-4) return variance.fill(1);
+  for (let i = 1; i < 16; i++) {
+    const t = Math.max(0, ((variance[i] ?? 0) / peak - 0.28) / 0.72);
+    variance[i] = t * t;
+  }
+  variance[0] = 0; // transparency slot
+  return variance;
+}
+
+/**
+ * Palette slots are not laid out consistently across sheets: `knight_m` slot 1 is
+ * teal and slot 2 is red, while `siro_w` puts blue at slot 1 and green at slot 3.
+ * So rather than hard-coding "enemy = slot 1" we score the *actual colours* of
+ * each slot's team ramp against a target hue and pick the closest non-empty one.
+ * Data driven, and it degrades gracefully on story characters that only ship one
+ * slot.
  */
 export function pickPaletteSlot(
   palettes: readonly Uint8Array[],
   targetHueDegrees: number,
-  baseline?: Uint8Array,
   taken?: ReadonlySet<number>,
 ): number {
+  const mask = teamRampMask(palettes);
+
+  // How much *ramp chroma* each slot carries at all. `isPaletteEmpty` only
+  // rejects an all-zero table, and the shipped set contains slots that are
+  // almost — but not quite — that: `battle_yumi_m_battle_pal8` and
+  // `battle_thief_w_battle_pal7` have a black team ramp with a couple of stray
+  // non-zero bytes elsewhere. Both were being handed to `ally` once the good
+  // slots were taken, which would render that unit's garment solid black. A slot
+  // has to carry a real ramp before it can represent a team.
+  const chroma = new Float64Array(palettes.length);
+  let peakChroma = 0;
+  for (let slot = 0; slot < palettes.length; slot++) {
+    const palette = palettes[slot];
+    if (!palette || isPaletteEmpty(palette)) continue;
+    chroma[slot] = rampChroma(palette, mask);
+    peakChroma = Math.max(peakChroma, chroma[slot] ?? 0);
+  }
+  const floor = peakChroma * 0.3;
+
   let bestIndex = -1;
   let bestScore = -Infinity;
   for (let slot = 0; slot < palettes.length; slot++) {
     if (taken?.has(slot)) continue;
     const palette = palettes[slot];
     if (!palette || isPaletteEmpty(palette)) continue;
-    const score = paletteHueScore(palette, targetHueDegrees, baseline);
+    if ((chroma[slot] ?? 0) < floor) continue;
+    const score = paletteHueScore(palette, targetHueDegrees, mask);
     if (score > bestScore) {
       bestScore = score;
       bestIndex = slot;
@@ -1102,33 +1215,43 @@ export function pickPaletteSlot(
   return bestIndex;
 }
 
+/** Total chroma a palette carries across its team ramp. See {@link pickPaletteSlot}. */
+function rampChroma(palette: Uint8Array, mask: Float64Array): number {
+  let total = 0;
+  for (let i = 1; i < 16; i++) {
+    const w = mask[i] ?? 0;
+    if (w <= 1e-3) continue;
+    const r = (palette[i * 3] ?? 0) / 255;
+    const g = (palette[i * 3 + 1] ?? 0) / 255;
+    const b = (palette[i * 3 + 2] ?? 0) / 255;
+    total += (Math.max(r, g, b) - Math.min(r, g, b)) * w;
+  }
+  return total;
+}
+
 /**
- * Score how strongly a palette leans toward `targetHue`.
+ * Score how strongly a palette's team ramp leans toward `targetHue`.
  *
- * Only entries that actually *differ* from the baseline palette are considered
- * when a baseline is supplied: skin, hair and metal are shared across team
- * variants, and including them washes every slot toward the same average.
+ * `mask` weights each of the 16 indices by how much that index varies across the
+ * sheet's whole slot set — see {@link teamRampMask}. Skin, hair and steel are
+ * shared between team variants and score ~0, so they can no longer wash every
+ * slot toward the same warm average.
  */
 function paletteHueScore(
   palette: Uint8Array,
   targetHueDegrees: number,
-  baseline?: Uint8Array,
+  mask: Float64Array,
 ): number {
   const target = (targetHueDegrees * Math.PI) / 180;
   let score = 0;
   let weight = 0;
   for (let i = 1; i < 16; i++) {
+    const rampWeight = mask[i] ?? 0;
+    if (rampWeight <= 1e-3) continue;
     const r = (palette[i * 3] ?? 0) / 255;
     const g = (palette[i * 3 + 1] ?? 0) / 255;
     const b = (palette[i * 3 + 2] ?? 0) / 255;
     if (r + g + b === 0) continue;
-
-    if (baseline) {
-      const dr = r - (baseline[i * 3] ?? 0) / 255;
-      const dg = g - (baseline[i * 3 + 1] ?? 0) / 255;
-      const db = b - (baseline[i * 3 + 2] ?? 0) / 255;
-      if (dr * dr + dg * dg + db * db < 0.0016) continue; // ~1/25 of the range
-    }
 
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
@@ -1141,9 +1264,11 @@ function paletteHueScore(
     else hue = (r - g) / chroma + 4;
     hue = (hue * Math.PI) / 3;
 
-    // Cosine similarity on the hue circle, weighted by how saturated the entry is.
-    score += Math.cos(hue - target) * chroma;
-    weight += chroma;
+    // Cosine similarity on the hue circle, weighted by how saturated the entry
+    // is *and* by how strongly it belongs to the team ramp.
+    const w = chroma * rampWeight;
+    score += Math.cos(hue - target) * w;
+    weight += w;
   }
   // Normalise: without this a palette simply carrying *more* colour beats one
   // whose colour is actually the right hue, and every team resolves to the same

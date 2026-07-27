@@ -438,15 +438,18 @@ function cart(rng: () => number, scale: number): BufferGeometry[] {
 const STRUCT_VERT = /* glsl */ `
 attribute float aTint;
 attribute float aWindow;
+attribute float aMat;
 varying vec3  vLocal;
 varying vec3  vNormalL;
 varying float vTint;
 varying float vWindow;
+varying float vMat;
 void main() {
   vLocal = position;
   vNormalL = normal;
   vTint = aTint;
   vWindow = aWindow;
+  vMat = aMat;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -479,10 +482,14 @@ uniform float uTone;
 uniform float uExposure;
 uniform float uTime;
 
+uniform vec3  uWood;
+uniform vec3  uFoliage;
+
 varying vec3  vLocal;
 varying vec3  vNormalL;
 varying float vTint;
 varying float vWindow;
+varying float vMat;
 
 ${GLSL_NOISE}
 
@@ -492,9 +499,21 @@ void main() {
   float sky = 0.5 + 0.5 * n.y;
   float up = max(n.y, 0.0);
 
+  // Material class. Every prop in the surround used to share one cool stone
+  // albedo — rocks, crates, fences, carts and foliage all rendered as the same
+  // blue-grey, which is precisely the "material identity dissolves, the frame
+  // is a two-hue lockup" criticism, and it is why the clutter read as a pile of
+  // untextured primitives rather than as objects. Three families, each with its
+  // own albedo AND its own surface pattern below.
+  float isStone = step(vMat, 0.5);
+  float isWood  = step(0.5, vMat) * step(vMat, 1.5);
+  float isLeaf  = step(1.5, vMat);
+
   // Roofs read warmer/darker than walls; that separation is most of what makes
   // a cluster of buildings legible at this size.
-  vec3 albedo = mix(uBase, uRoof, smoothstep(0.35, 0.85, up));
+  vec3 albedo = mix(uBase, uRoof, smoothstep(0.35, 0.85, up) * isStone);
+  albedo = mix(albedo, uWood, isWood);
+  albedo = mix(albedo, uFoliage, isLeaf);
   albedo *= 0.55 + 0.78 * vTint;
 
   // Face-local coordinates: across the face, and up it. Deriving the pattern
@@ -534,7 +553,7 @@ void main() {
   float mortarY = 1.0 - smoothstep(0.0, 0.13, abs(fract(face.y * 5.6) - 0.5) - 0.37);
   float mortarX = 1.0 - smoothstep(0.0, 0.16, abs(fract(blockU) - 0.5) - 0.34);
   float masonry = (0.74 + 0.46 * block) * (1.0 - 0.42 * max(mortarY, mortarX));
-  tex *= mix(1.0, masonry, 1.0 - up);
+  tex *= mix(1.0, masonry, (1.0 - up) * isStone);
 
   // Half-timbering. Exposed frame at roughly one-metre centres, plus a diagonal
   // brace — the most recognisable feature of the reference game's village
@@ -550,7 +569,21 @@ void main() {
   float beamV = 1.0 - smoothstep(0.0, 0.085, abs(fract(face.y * 0.78) - 0.5) - 0.40);
   float brace = 1.0 - smoothstep(0.0, 0.10, abs(fract(face.x * 0.62 + face.y * 0.55) - 0.5) - 0.40);
   float timber = clamp(max(max(beamU, beamV), brace * 0.75), 0.0, 1.0);
-  tex *= mix(1.0, 0.50 + 0.42 * block, timber * (1.0 - up) * 0.9);
+  tex *= mix(1.0, 0.50 + 0.42 * block, timber * (1.0 - up) * 0.9 * isStone);
+
+  // Wood: plank runs with a per-plank value hash and a dark seam between them.
+  // Low frequency for the same reason the timber is.
+  float plankId = face.y * 2.7;
+  float plankValue = 0.60 + 0.62 * etHash12(vec2(floor(plankId), floor(face.x * 0.55)));
+  float plankSeam = 1.0 - smoothstep(0.0, 0.11, abs(fract(plankId) - 0.5) - 0.39);
+  tex *= mix(1.0, plankValue * (1.0 - 0.38 * plankSeam), isWood);
+
+  // Foliage: clumped mass, deliberately the highest-contrast surface in the
+  // surround. A smooth cone is the single most obvious untextured primitive in
+  // a frame, and a low-poly conifer near the lens was rendering as exactly that.
+  float leafA = etFbm(vec2(vLocal.x * 3.1 + vLocal.y * 2.2, vLocal.z * 3.1 - vLocal.y * 1.6), 3);
+  float leafB = etFbm(vec2(vLocal.x, vLocal.z) * 8.5 + vLocal.y * 3.4, 2);
+  tex = mix(tex, 0.30 + 1.25 * leafA * (0.5 + 0.65 * leafB), isLeaf);
 
   // Roof: shingle courses running with the pitch, with a per-course value hash
   // so no two runs of tile match. Derived from world xz rather than the face
@@ -560,7 +593,7 @@ void main() {
   float course = fract(courseId);
   float shingle = 0.66 + 0.55 * smoothstep(0.04, 0.28, course) * (1.0 - smoothstep(0.68, 0.96, course));
   shingle *= 0.82 + 0.42 * etHash12(vec2(floor(courseId), floor(roofFace.y * 0.9)));
-  tex *= mix(1.0, shingle, up);
+  tex *= mix(1.0, shingle, up * isStone);
 
   // Weathering streaks running down the wall from the eaves — the single most
   // recognisable "this is old stone outdoors" cue, and it is low-frequency
@@ -648,6 +681,9 @@ void main() {
   // under an orthographic iso projection.
   float depth = -vLocal.z;
   float haze = smoothstep(uHazeNear, uHazeFar, depth) * uHazeMax;
+  // Same patchiness on the structures, from the same noise basis as the plate so
+  // the two layers agree about where the air is thick.
+  haze *= 0.72 + 0.56 * etFbm(vLocal.xz * 0.12 + 71.0, 3);
   // Bases dissolve first: the ground fog is thickest at the bottom of a layer,
   // so nothing in the surround terminates on a hard line against the plate.
   haze = clamp(haze + (1.0 - base) * 0.30 * smoothstep(uHazeNear * 0.5, uHazeFar, depth), 0.0, 0.96);
@@ -655,7 +691,7 @@ void main() {
   // Sky-side edge lift. Without it a low-tone band renders as a solid black
   // cut-out and the eye reads "missing texture" rather than "in shadow".
   float edge = pow(clamp(1.0 - abs(n.y), 0.0, 1.0), 3.0) * (0.5 + 0.5 * n.x);
-  vec3 toned = lit * uTone + uSkyColor * edge * 0.16 * uTone * tex;
+  vec3 toned = lit * uTone + uSkyColor * edge * 0.10 * uTone * tex;
   vec3 col = mix(toned, uHaze, haze) * uExposure;
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
@@ -798,8 +834,20 @@ void main() {
   // standard deviation of 20/255, a swatch, because everything else in this
   // shader runs above the frequency the blur preserves. It is deliberately the
   // loudest term in the composite for that reason.
-  float region = etFbm(vLocal.xz * 0.034 + 61.3, 3);
-  float region2 = etFbm(vLocal.xz * 0.075 - 12.9, 3);
+  // Periods of ~9 and ~4 world units. The first attempt used 0.034/0.075, i.e.
+  // 29- and 13-unit periods, which is LESS THAN ONE CYCLE across the strip of
+  // this plate the frame actually shows — so a term with a 4x value swing
+  // integrated to a constant and the quadrant stayed a swatch. The window, not
+  // the amplitude, is what sets the useful frequency.
+  float region = etFbm(vLocal.xz * 0.11 + 61.3, 3);
+  float region2 = etFbm(vLocal.xz * 0.26 - 12.9, 3);
+  // Thresholded patches with real boundaries: trodden dirt against overgrowth.
+  // Continuous noise alone reads as a gradient; ground reads as ground when it
+  // has edges where one surface stops and another starts.
+  // The name 'patch' is a reserved word in GLSL ES 3.00 (tessellation), so using
+  // that under WebGL2 fails the whole fragment shader to compile and the ground
+  // plane renders as a flat grey block.
+  float patchMask = smoothstep(0.44, 0.56, etFbm(vLocal.xz * 0.19 + 33.1, 4));
   float blotch = etFbm(vLocal.xz * 0.13 + 21.7, 3);
   float clump = etFbm(vLocal.xz * 0.55, 4);
   float fine = etFbm(vLocal.xz * 2.9, 3);
@@ -828,6 +876,7 @@ void main() {
   // the out-of-focus margin from one grey field into the soft light-and-dark
   // mottle the reference frames' defocused ground actually is.
   albedo *= 0.42 + 0.90 * region + 0.44 * region2;
+  albedo = mix(albedo, albedo * vec3(1.28, 1.14, 0.86) * 1.22, patchMask * 0.55);
 
   vec3 lit = albedo * (0.30 + 0.70 * ndl);
   lit += uSunColor * albedo * ndl * 0.55;
@@ -849,7 +898,12 @@ void main() {
   // Held back from a full mix so the ground keeps some of its own colour and
   // grain right up to the horizon — fog that erases texture is just a void
   // with a gradient on it.
-  float haze = smoothstep(uHazeNear, uHorizonDepth, depth) * 0.72;
+  // Broken up, not a smooth ramp. A uniform 72% mix toward one flat haze colour
+  // erases the plate's texture exactly where it recedes, so the far margin went
+  // back to being a swatch with a gradient on it — the void with extra steps.
+  // Real distance haze is patchy.
+  float hazeBreak = 0.68 + 0.62 * etFbm(vLocal.xz * 0.12 + 71.0, 3);
+  float haze = clamp(smoothstep(uHazeNear, uHorizonDepth, depth) * 0.62 * hazeBreak, 0.0, 0.84);
   vec3 col = mix(lit, uHaze, haze);
 
   // Ground fog pooling against the board's base. This is what dissolves the
@@ -916,6 +970,25 @@ interface BandSpec {
   /** How far pieces sink into the ground plate; hides their flat undersides. */
   sink?: number;
 }
+
+/**
+ * Which albedo/pattern family a prop belongs to: 0 stone, 1 wood, 2 foliage.
+ * Consumed as the `aMat` vertex attribute by `STRUCT_FRAG`.
+ */
+const MATERIAL_CLASS: Record<PropKind, number> = {
+  house: 0,
+  tower: 0,
+  wall: 0,
+  rock: 0,
+  rubble: 0,
+  crates: 1,
+  barrel: 1,
+  fence: 1,
+  cart: 1,
+  lantern: 1,
+  tree: 2,
+  bush: 2,
+};
 
 type PropKind =
   | 'house'
@@ -1020,7 +1093,7 @@ export class Backdrop extends Group {
         // The equivalent surround band in the Triangle references sits at 60-110.
         tone: 0.95,
         windows: 1,
-        kinds: ['house', 'wall', 'tree', 'tree', 'lantern', 'rock', 'bush', 'bush', 'crates', 'cart', 'fence', 'barrel', 'rubble'],
+        kinds: ['house', 'wall', 'tree', 'lantern', 'rock', 'bush', 'bush', 'crates', 'cart', 'fence', 'barrel', 'rubble'],
       },
       {
         // The ring hugging the board. This is the band that kills the hard
@@ -1120,7 +1193,7 @@ export class Backdrop extends Group {
         // silhouettes that still carry readable value structure.
         tone: 0.46,
         windows: 0,
-        kinds: ['tree', 'tree', 'rock', 'lantern'],
+        kinds: ['bush', 'bush', 'bush', 'rock', 'rubble'],
       },
     ];
 
@@ -1339,6 +1412,7 @@ export class Backdrop extends Group {
       const tint = rng();
       // Trees, rocks and lamp posts have no windows; buildings do.
       const win = band.windows > 0 && (kind === 'house' || kind === 'tower' || kind === 'wall') ? 1 : 0;
+      const mat = MATERIAL_CLASS[kind];
       const tiltX = band.tilt ? (rng() - 0.5) * 2 * band.tilt : 0;
       const tiltZ = band.tilt ? (rng() - 0.5) * 2 * band.tilt : 0;
       const sink = band.sink ?? 0;
@@ -1352,6 +1426,7 @@ export class Backdrop extends Group {
         const n = part.attributes.position!.count;
         part.setAttribute('aTint', new BufferAttribute(new Float32Array(n).fill(tint), 1));
         part.setAttribute('aWindow', new BufferAttribute(new Float32Array(n).fill(win), 1));
+        part.setAttribute('aMat', new BufferAttribute(new Float32Array(n).fill(mat), 1));
         if (!part.attributes.uv) {
           part.setAttribute('uv', new BufferAttribute(new Float32Array(n * 2), 2));
         }
@@ -1399,6 +1474,8 @@ export class Backdrop extends Group {
       uniforms: {
         uBase: { value: new Color() },
         uRoof: { value: new Color() },
+        uWood: { value: new Color() },
+        uFoliage: { value: new Color() },
         uHaze: { value: new Color() },
         uSunColor: { value: new Color() },
         uSkyColor: { value: new Color() },
@@ -1577,6 +1654,12 @@ export class Backdrop extends Group {
     // Warm tile. Darker than the walls: a roof plane faces the sky, so if it is
     // also the lightest albedo in the set every rooftop reads as a highlight.
     const roof = norm(sunTint.clone().lerp(hazeTint, 0.62)).multiplyScalar(0.094);
+    // Two hues the surround did not previously contain anywhere. Warm timber
+    // and cool-green foliage are what let a crate read as a crate and a hedge as
+    // a hedge at thumbnail size, and they are the tertiary colours every note on
+    // the grade asked for.
+    const wood = norm(sunTint.clone().lerp(TIMBER, 0.72)).multiplyScalar(0.126);
+    const foliage = norm(hazeTint.clone().lerp(MOSS, 0.80)).multiplyScalar(0.104);
     const window = p.sun.clone().multiplyScalar(0.30);
     const sky = p.zenith.clone().multiplyScalar(2.2);
     // Halved from the first pass — a strong warm additive on a cool albedo is
@@ -1586,6 +1669,8 @@ export class Backdrop extends Group {
     for (const m of this.structMaterials) {
       (m.uniforms.uBase!.value as Color).copy(wallBase);
       (m.uniforms.uRoof!.value as Color).copy(roof);
+      (m.uniforms.uWood!.value as Color).copy(wood);
+      (m.uniforms.uFoliage!.value as Color).copy(foliage);
       (m.uniforms.uHaze!.value as Color).copy(p.haze);
       (m.uniforms.uSunColor!.value as Color).copy(sunLight);
       (m.uniforms.uSkyColor!.value as Color).copy(sky);
@@ -1686,3 +1771,5 @@ const UP = new Vector3(0, 1, 0);
 
 /** The surround's tertiary hue: damp moss on the ground outside the walls. */
 const MOSS = new Color().setHex(0x5d7a4a, 'srgb');
+/** Weathered timber — crates, barrels, fencing, cart beds. */
+const TIMBER = new Color().setHex(0x8a5f3a, 'srgb');

@@ -180,10 +180,28 @@ if (child) child.kill();
 // >92% of the frame in a single coarse colour bucket means we captured a flat
 // fill — the boot splash, a clear colour, or a crashed renderer.
 const blank = stats !== null && (stats.modalShare > 0.92 || stats.distinct < 12);
-const ok = ready && splashGone && !blank;
+
+/**
+ * A material that fails to compile does NOT blank the frame — three.js falls back
+ * and the scene still renders, just wrong. The ground plane rendering as a flat
+ * grey block passed both the splash check and the blank check while an `env-ground`
+ * fragment shader was failing on a reserved word. Surface that as a failure, and
+ * name the offending materials, rather than burying it in a console-error list
+ * nobody reads.
+ */
+const shaderErrors = errors.filter((e) => /Shader Error|not compiled|Illegal use of reserved word/i.test(e));
+const brokenMaterials = [
+  ...new Set(shaderErrors.flatMap((e) => [...e.matchAll(/Material Name:\s*(\S+)/g)].map((m) => m[1]))),
+];
+
+const ok = ready && splashGone && !blank && shaderErrors.length === 0;
 
 console.log(JSON.stringify(
-  { ok, ready, splashGone, blank, stats, scene, out, width, height, errors: errors.slice(0, 20) },
+  {
+    ok, ready, splashGone, blank, stats, scene, out, width, height,
+    brokenMaterials,
+    errors: errors.slice(0, 20),
+  },
   null,
   2,
 ));
@@ -204,4 +222,13 @@ if (blank) {
       `Do not judge this image.`,
   );
   process.exit(6);
+}
+if (shaderErrors.length) {
+  console.error(
+    `FAIL: ${shaderErrors.length} shader(s) failed to compile` +
+      (brokenMaterials.length ? ` — ${brokenMaterials.join(', ')}` : '') +
+      `. The frame rendered, but with fallback materials, so it does not show what the code says. ` +
+      `Do not judge this image.`,
+  );
+  process.exit(7);
 }

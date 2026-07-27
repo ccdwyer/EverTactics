@@ -149,8 +149,8 @@ function groundRelief(surface: SurfaceKind, wx: number, wz: number): number {
   // finer and the top face aliases into a shimmer under the pixel snap).
   const broad = fbm3(wx * 0.27, 0, wz * 0.27, 913, 2);
   const fine = fbm3(wx * 1.05, 0, wz * 1.05, 2287, 2);
-  const grain = fbm3(wx * 1.9, 0, wz * 1.9, 5171, 2);
-  const n = Math.min(1, Math.max(0, broad * 0.54 + fine * 0.31 + grain * 0.15));
+  const grain = fbm3(wx * 1.32, 0, wz * 1.32, 5171, 2);
+  const n = Math.min(1, Math.max(0, broad * 0.56 + fine * 0.32 + grain * 0.12));
   return -RELIEF_AMPLITUDE * (RELIEF_SCALE[surface] ?? 1) * (0.12 + 0.88 * n);
 }
 
@@ -1201,6 +1201,16 @@ function sideKindFor(kind: TerrainMaterialKind): TerrainMaterialKind {
 function bucketKindFor(t: Tile): TerrainMaterialKind {
   if (isWaterSurface(t.surface)) return 'bed';
   return t.surface;
+}
+
+/** Top-face inset for a tile: a masonry arris on built ground, a turf roll on soil. */
+function chamferInsetFor(t: Tile): number {
+  return RELIEF_SURFACES.has(t.surface) ? TURF_CHAMFER : CHAMFER;
+}
+
+/** How far that tile's chamfer ring drops below its top face, in world units. */
+function chamferDropFor(t: Tile): number {
+  return RELIEF_SURFACES.has(t.surface) ? TURF_CHAMFER_DROP : CHAMFER_DROP;
 }
 
 interface EdgeSpec {

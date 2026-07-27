@@ -442,7 +442,7 @@ export class SpriteSheet {
     const taken = new Set<number>([0]);
     const order: Team[] = ['enemy', 'ally', 'neutral'];
     for (const team of order) {
-      const slot = pickPaletteSlot(this.palettes, TEAM_TARGET_HUE[team], this.palettes[0], taken);
+      const slot = pickPaletteSlot(this.palettes, TEAM_TARGET_HUE[team], taken);
       if (slot < 0) {
         // Sheet has no spare palette (story characters, the WotL additions).
         this.teamSlot.set(team, 0);

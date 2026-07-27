@@ -75,6 +75,8 @@ uniform float uRise;
 uniform float uBoxMinY;
 uniform float uBoxHeight;
 uniform float uPointScale;
+uniform float uZMin;
+uniform float uZMax;
 
 varying float vAlpha;
 varying float vWarm;
@@ -94,13 +96,24 @@ void main() {
 
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = aSize * uPointScale;
+
+  // Depth stratification. The rig is orthographic, so there is no perspective
+  // size falloff to inherit — every mote projected at exactly the same screen
+  // size, which is the "uniform round dots, no parallax, no size falloff with
+  // depth, a flat 2D overlay" note verbatim. Near motes are made large and faint
+  // (they are the ones the lens defocuses into bokeh) and far ones small and
+  // crisp, which is what gives the air depth in a still frame.
+  float nearT = clamp((p.z - uZMin) / max(uZMax - uZMin, 1e-3), 0.0, 1.0);
+  gl_PointSize = aSize * uPointScale * (0.45 + 1.55 * nearT * nearT);
 
   // Slow scintillation, plus a fade at the top and bottom of the volume so
   // particles are never seen popping in or out at the wrap seam.
   float band = smoothstep(0.0, 0.12, (p.y - uBoxMinY) / uBoxHeight)
              * (1.0 - smoothstep(0.72, 1.0, (p.y - uBoxMinY) / uBoxHeight));
   vAlpha = band * (0.45 + 0.55 * (0.5 + 0.5 * sin(uTime * (1.1 + aSeed * 2.7) + aSeed * 12.0)));
+  // Conservation of energy, roughly: a mote spread over four times the area is
+  // a quarter as bright. Without this the near band is a screen of hard dots.
+  vAlpha *= mix(1.0, 0.34, nearT * nearT);
   vWarm = aWarm;
 }
 `;
@@ -143,8 +156,8 @@ export class MoteField {
 
   constructor(palette: EnvironmentPalette, options: MoteFieldOptions = {}) {
     this.opts = {
-      dust: options.dust ?? 900,
-      embers: options.embers ?? 190,
+      dust: options.dust ?? 1150,
+      embers: options.embers ?? 300,
       seed: options.seed ?? 0x5eed,
     };
     this.geometry = new BufferGeometry();
@@ -156,6 +169,8 @@ export class MoteField {
         uBoxMinY: { value: 0 },
         uBoxHeight: { value: 20 },
         uPointScale: { value: 1 },
+        uZMin: { value: -40 },
+        uZMax: { value: 0 },
         uCool: { value: new Color() },
         uWarmColor: { value: new Color() },
         uIntensity: { value: 1 },
@@ -204,7 +219,7 @@ export class MoteField {
       const zt = isEmber ? 0.25 + rnd() * 0.5 : rnd();
       pos[i * 3 + 2] = minZ + zt * (maxZ - minZ);
       seed[i] = rnd();
-      size[i] = isEmber ? 1.6 + rnd() * 2.4 : 0.8 + rnd() * 1.9;
+      size[i] = isEmber ? 2.6 + rnd() * 5.4 : 1.4 + rnd() * 4.2;
       warm[i] = isEmber ? 0.7 + rnd() * 0.3 : rnd() * 0.22;
     }
 
@@ -218,6 +233,8 @@ export class MoteField {
 
     this.material.uniforms.uBoxMinY!.value = minY;
     this.material.uniforms.uBoxHeight!.value = Math.max(1, maxY - minY);
+    this.material.uniforms.uZMin!.value = minZ;
+    this.material.uniforms.uZMax!.value = maxZ;
   }
 
   setPalette(palette: EnvironmentPalette): void {
@@ -560,7 +577,10 @@ export class WorldEnvironment {
     this.aspect = widthPx / Math.max(1, heightPx);
     this.pixelRatio = pixelRatio;
     this.sky.setAspect(this.aspect);
-    this.motes.setPointScale(pixelRatio);
+    // Scale with the drawing buffer, not just the DPR: a mote sized in raw
+    // points is a different physical size on a 720p and a 4K render, and the
+    // screenshot harness runs at 1920 wide.
+    this.motes.setPointScale(pixelRatio * Math.max(0.75, widthPx / (1920 * pixelRatio)) * 2.1);
   }
 
   // ── per-frame ────────────────────────────────────────────────────────────

@@ -374,7 +374,11 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     chroma: 1.85,
     colorSplit: 0.42,
     contrast: 0.85,
-    practicalGain: 2.6,
+    // Raised with the fill cut. Once a shadowed flagstone is receiving a tenth of
+    // the key rather than a third, a brazier finally *can* be the brightest thing
+    // on the ground near it — but only if it is driven hard enough to reach two
+    // or three tiles before inverse-square eats it.
+    practicalGain: 3.3,
   },
 
   /**
@@ -441,7 +445,14 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     fogColor: 0x301d3d,
     fogStart: 2,
     fogEnd: 34,
-    exposure: 1.06,
+    // Lifted with the round-3 fill cut. Dusk authors the most aggressive contrast
+    // in the set (0.9) and it was already the darkest exposure by a wide margin;
+    // once a shadowed surface was receiving an eighth of the key rather than a
+    // third, `mandalia-ford` arrived at a mean luma of 6/255 with the far bank
+    // unreadable. Deep shadow is the goal, an unreadable board is a fail
+    // condition, and exposure is the right lever because it moves the whole
+    // curve rather than putting the flat fill back and flattening the volume.
+    exposure: 1.26,
     shadowRadius: 2.4,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 1.05,
@@ -1034,7 +1045,13 @@ export class LightingRig {
     // frame read as one desaturated slate because the two never met in the
     // middle. This is enough amber to see on stone without cooking white cloth.
     gradeLight(this.key.color, s.keyColor, 0.8 + chroma * 0.3, split * 0.6);
-    gradeLight(this.rim.color, s.rimColor, chroma * 1.1, -split * 1.2);
+    // The rim is stretched *less* than the rest of the fill, not more, now that
+    // the presets author a genuinely saturated tertiary hue there. The 1.1×
+    // multiplier existed to rescue map authors who typed a polite grey-blue; run
+    // it over an already-committed teal and every stone plane the rim touches
+    // comes out cyan, which trades the two-hue lockup for a three-hue one and
+    // makes moss and masonry the same colour.
+    gradeLight(this.rim.color, s.rimColor, chroma * 0.8, -split * 0.85);
     gradeLight(this.hemisphere.color, s.skyColor, chroma * 1.15, -split * 1.15);
     gradeLight(this.hemisphere.groundColor, s.groundColor, chroma, split * 0.4);
     gradeLight(this.ambient.color, s.ambientColor, chroma * 1.2, -split * 1.2);
@@ -1119,10 +1136,16 @@ export class LightingRig {
     // spends most of its area at the bottom of it. Pulling the fill to a tenth
     // of the key is what lets a brazier's own pool become the brightest thing on
     // the flagstones instead of a warm tint over an already-lit floor.
-    const targetHemi = key * 0.115;
-    const targetAmbient = key * 0.012;
-    const targetRim = key * 0.34;
-    const targetProbe = Math.min(s.probeIntensity, 0.6);
+    const targetHemi = key * 0.13;
+    const targetAmbient = key * 0.014;
+    const targetRim = key * 0.27;
+    // Not lower than this. Measured on `mandalia-ford`, which authors contrast 0.9
+    // over an already-dim dusk exposure: at a 0.6 cap the far bank of the river
+    // went to unreadable black and the fail list explicitly forbids obscuring
+    // tiles the player has to count. The probe is *directional* irradiance, so it
+    // is the cheapest term to keep — it holds hue and form in the shadow side
+    // without flattening the volume the way raising the flat ambient would.
+    const targetProbe = Math.min(s.probeIntensity, 0.68);
 
     const hemi = MathUtils.lerp(s.hemiIntensity, targetHemi, drama);
     const ambient = MathUtils.lerp(s.ambientIntensity, targetAmbient, drama);
