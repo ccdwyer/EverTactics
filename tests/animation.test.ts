@@ -220,6 +220,50 @@ describe('ShpLibrary', () => {
     expect(frames[0]!.parts!.length).toBeGreaterThan(1);
   });
 
+  /**
+   * The regression this guards is the one that held the decode back for a
+   * round: `tools/preview-anim.mjs` used to pick a sheet's SHP by pixel
+   * similarity, which chose `other` for `knight_male`. `other` is 17 frames of
+   * one small part each, so every assembled figure was a floating head over an
+   * empty cell, and that was mistaken for a broken decode.
+   *
+   * A figure is complete when the union of its part rectangles spans a whole
+   * body. Measured over the whole rip, in original SPR pixels: `other` frames
+   * are never taller than 24, while a `type1` walk frame is 40 and a `cyoko`
+   * one is 34+. 32 separates them with room on both sides.
+   */
+  function figureHeight(frame: { parts?: readonly { dy: number; h: number }[] }): number {
+    const parts = frame.parts ?? [];
+    if (!parts.length) return 0;
+    const top = Math.min(...parts.map((p) => p.dy));
+    const bottom = Math.max(...parts.map((p) => p.dy + p.h));
+    return bottom - top;
+  }
+
+  it('assembles whole figures, not the heads-only fragment a mis-picked table gives', () => {
+    const lib = ShpLibrary.fromJson(json, 'type1', 'type1')!;
+    for (const frame of lib.assemble(SEQ_ANIM_INDEX.walk!)) {
+      expect(figureHeight(frame)).toBeGreaterThanOrEqual(32);
+    }
+  });
+
+  it('shows `other` is the fragment table, so a wrong pick is detectable', () => {
+    const lib = ShpLibrary.fromJson(json, 'other', 'other')!;
+    const tallest = Math.max(
+      ...json.shp.other!.frames.map((f) => {
+        let top = Infinity;
+        let bottom = -Infinity;
+        for (let i = 0; i < f.p.length; i += 8) {
+          top = Math.min(top, f.p[i + 1]!);
+          bottom = Math.max(bottom, f.p[i + 1]! + f.p[i + 5]!);
+        }
+        return bottom - top;
+      }),
+    );
+    expect(lib.frameCount).toBe(17);
+    expect(tallest).toBeLessThan(32);
+  });
+
   it('reports completeness honestly', () => {
     const lib = ShpLibrary.fromJson(json, 'type1', 'type1')!;
     expect(lib.isComplete(SEQ_ANIM_INDEX.walk!)).toBe(true);

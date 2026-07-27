@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+  <!--
+    Panel corner ornament — drawn 1:1 at ~36px, NOT stretched.
+
+    WHY THIS EXISTS AS A SEPARATE ASSET.
+    panel-frame.svg is a 9-slice with `border-image-slice: 34` against a 13px
+    border, so its 34x34 corner squares are resampled DOWN to 13x13 before they
+    ever reach the screen. Every piece of filigree authored in there — the barbed
+    terminals, the lozenge stud, the scroll tick — collapses into four gold
+    smudges roughly two pixels across. That is precisely the critics' note: "a
+    generic gold-edged panel corner", "placeholder-grade next to everything else
+    in the frame". The 9-slice keeps the job it is actually good at (edge rules,
+    which are constant along their length and so survive stretching); the
+    ornament moved here, onto the four .et-panel__corner nodes, where it is
+    painted at its authored size.
+
+    Lighting is baked to agree with the scene key: the top-left facets carry the
+    highlight, the bottom-right facets fall to the deep gold. The asset is
+    authored for the TOP-LEFT corner and the stylesheet mirrors it into the other
+    three, which keeps that relationship consistent all the way round the frame.
+  -->
+  <defs>
+    <linearGradient id="au" x1="0" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#fdf3d2"/>
+      <stop offset="0.22" stop-color="#efd88f"/>
+      <stop offset="0.5" stop-color="#c9a227"/>
+      <stop offset="0.78" stop-color="#8a6f2a"/>
+      <stop offset="1" stop-color="#4e3d16"/>
+    </linearGradient>
+    <linearGradient id="auEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff8e2"/>
+      <stop offset="0.55" stop-color="#e2c56a"/>
+      <stop offset="1" stop-color="#7a6124"/>
+    </linearGradient>
+    <radialGradient id="gem" cx="0.34" cy="0.3" r="0.78">
+      <stop offset="0" stop-color="#fffbea"/>
+      <stop offset="0.42" stop-color="#f0dda0"/>
+      <stop offset="1" stop-color="#9a7c2e"/>
+    </radialGradient>
+  </defs>
+
+  <!-- relief cast: the whole ornament repeated one unit down-right in near-black,
+       so the gold has something to sit proud of on a busy board -->
+  <g transform="translate(1.1,1.3)" fill="#04060b" opacity="0.85">
+    <path d="M3 3 H35.5 V8.2 H8.2 V35.5 H3 Z"/>
+    <path d="M35.5 3 L41 5.9 L35.5 8.8 Z"/>
+    <path d="M3 35.5 L5.9 41 L8.8 35.5 Z"/>
+    <path d="M14.2 8.4 L19.9 14.1 L14.2 19.8 L8.5 14.1 Z"/>
+    <path d="M12 24 C12 17.4 17.4 12 24 12 L24 15.4 C19.3 15.4 15.4 19.3 15.4 24 Z"/>
+  </g>
+
+  <!-- primary bracket -->
+  <path d="M3 3 H35.5 V8.2 H8.2 V35.5 H3 Z" fill="url(#au)"/>
+  <!-- lit outer chamfer along the top and left arms -->
+  <path d="M3 3 H35.5 V4.1 H4.1 V35.5 H3 Z" fill="#fff6df" opacity="0.72"/>
+  <!-- shaded inner chamfer, the facet turned away from the key -->
+  <path d="M8.2 8.2 H35.5 V7.1 H7.1 V35.5 H8.2 Z" fill="#2a2109" opacity="0.55"/>
+
+  <!-- barbed terminals running off toward the stretched edge rules -->
+  <path d="M35.5 3 L41 5.9 L35.5 8.8 Z" fill="url(#auEdge)"/>
+  <path d="M3 35.5 L5.9 41 L8.8 35.5 Z" fill="url(#auEdge)"/>
+
+  <!-- elbow boss: dark socket, bevelled bezel, gem -->
+  <path d="M14.2 8.4 L19.9 14.1 L14.2 19.8 L8.5 14.1 Z" fill="#070a12"/>
+  <path d="M14.2 9.5 L18.8 14.1 L14.2 18.7 L9.6 14.1 Z" fill="url(#auEdge)"/>
+  <path d="M14.2 11.1 L17.2 14.1 L14.2 17.1 L11.2 14.1 Z" fill="url(#gem)"/>
+  <path d="M14.2 11.1 L15.7 12.6 L13.4 14.4 L11.2 14.1 Z" fill="#fffdf4" opacity="0.75"/>
+
+  <!-- inner volute: a quarter curl that reads as filigree at panel scale -->
+  <path d="M12 24 C12 17.4 17.4 12 24 12 L24 14.6 C18.8 14.6 14.6 18.8 14.6 24 Z" fill="#c9a227" opacity="0.9"/>
+  <path d="M12 24 C12 17.4 17.4 12 24 12 L24 13 C18.1 13 13 18.1 13 24 Z" fill="#f7e9bb" opacity="0.5"/>
+  <circle cx="26.4" cy="12.6" r="1.5" fill="url(#auEdge)"/>
+  <circle cx="12.6" cy="26.4" r="1.5" fill="url(#auEdge)"/>
+
+  <!-- secondary hairline, offset inboard, dying into the panel field -->
+  <path d="M20 5.6 H33.6 V6.6 H20 Z" fill="#e2c56a" opacity="0.5"/>
+  <path d="M5.6 20 H6.6 V33.6 H5.6 Z" fill="#e2c56a" opacity="0.5"/>
+</svg>

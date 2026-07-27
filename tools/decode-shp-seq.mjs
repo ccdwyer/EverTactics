@@ -317,10 +317,7 @@ export function decodeSeq(buf, name) {
       }
       const code = buf[o + 1];
       const entry = SEQ_OPS[code];
-      if (!entry) {
-        desync++;
-        break;
-      }
+      if (!entry) break; // unknown opcode; counted once below, via `ended`
       const [opName, arity] = entry;
       const args = [];
       for (let a = 0; a < arity; a++) args.push(buf.readInt8(o + 2 + a));
@@ -396,9 +393,13 @@ export function toClip(anim) {
 /**
  * The game reads a unit's sprite *type* from its unit table, which is not part
  * of this rip. The pairing below is the one documented on the FFHacktics SEQ
- * page ("Sprite Types"); which sheet gets which type is resolved at build time
- * by scoring each candidate SHP against the sheet's actual pixels — see
- * `scoreShpAgainstSheet`.
+ * page ("Sprite Types").
+ *
+ * Which sheet gets which type is resolved **by sheet class**, in
+ * `resolveSpriteType` in `tools/build-assets.mjs`, and recorded as
+ * `manifest.sheets[key].spriteType`. That is the only assignment anything
+ * should use. Pixel-similarity scoring was tried and does not work — see
+ * `measureShpAgainstSheet`.
  */
 export const SPRITE_TYPES = {
   type1: { shp: 'type1', seq: 'type1' },
@@ -412,29 +413,73 @@ export const SPRITE_TYPES = {
 };
 
 /**
- * How well a decoded SHP's part rectangles land on a sheet's actual artwork.
+ * How a decoded SHP's part rectangles land on a sheet's actual artwork.
  *
- * `opaque` is the mean fraction of non-transparent pixels inside every part
- * rectangle. A sheet drawn for a different sprite type scores near the sheet's
- * background rate; the right type scores far above it.
+ * **This is a diagnostic, not an assignment rule, and it must never be used to
+ * pick a sheet's SHP.** An earlier version returned `opaque` alone and
+ * `preview-anim.mjs` picked the best-scoring table with it; on `knight_male`
+ * that chose `other` (0.294) over the correct `type1` (0.235) and rendered
+ * heads with no bodies, because `other` holds 17 frames of exactly one part
+ * each and its 17 rectangles happen to sit on dense artwork. Measured across
+ * `knight_male`, `chocobo`, `behemoth` and `black_mage_female`, no combination
+ * of these numbers ranks the correct table first on all four, and none
+ * separates `type1` from `type2` at all (they differ by <0.006 everywhere).
+ * Sheets are assigned by class in `tools/build-assets.mjs`.
+ *
+ * What the numbers mean:
+ *
+ * * `opaque` — mean fraction of non-transparent pixels inside every part rect.
+ *   Biased hard toward tables with few, large, well-placed parts.
+ * * `recall` — fraction of the sheet's opaque pixels covered by some part rect.
+ *   Biased toward tables with many or oversized parts.
+ * * `emptyPartRate` — fraction of part rects that land on <2 % opaque pixels,
+ *   i.e. blits into blank sheet. This is the one number that does carry signal:
+ *   a table built for a different sheet layout aims parts at nothing
+ *   (`cyoko` on `knight_male` = 30.5 %, `type1` on `behemoth` = 24.0 %). It
+ *   still cannot rank `mon`/`other`/`kanzen`, whose 48×48 and 64×64 boxes are
+ *   too big to miss.
  */
-export function scoreShpAgainstSheet(shp, sheet) {
+export function measureShpAgainstSheet(shp, sheet) {
+  const covered = new Uint8Array(sheet.width * sheet.height);
   let inside = 0;
   let total = 0;
+  let emptyParts = 0;
+  let partCount = 0;
   for (const frame of shp.frames) {
     for (const part of frame.parts) {
+      partCount++;
+      let partOpaque = 0;
+      let partTotal = 0;
       for (let j = 0; j < part.h; j++) {
         for (let i = 0; i < part.w; i++) {
           const x = part.sx + i;
           const y = part.sy + j;
           if (x >= sheet.width || y >= sheet.height) continue;
           total++;
-          if (sheet.data[y * sheet.width + x] !== 0) inside++;
+          partTotal++;
+          covered[y * sheet.width + x] = 1;
+          if (sheet.data[y * sheet.width + x] !== 0) {
+            inside++;
+            partOpaque++;
+          }
         }
       }
+      if (partTotal && partOpaque / partTotal < 0.02) emptyParts++;
     }
   }
-  return total ? inside / total : 0;
+  let sheetOpaque = 0;
+  let sheetCovered = 0;
+  for (let i = 0; i < covered.length; i++) {
+    if (sheet.data[i] === 0) continue;
+    sheetOpaque++;
+    if (covered[i]) sheetCovered++;
+  }
+  return {
+    opaque: total ? inside / total : 0,
+    recall: sheetOpaque ? sheetCovered / sheetOpaque : 0,
+    emptyPartRate: partCount ? emptyParts / partCount : 0,
+    parts: partCount,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -201,17 +201,26 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
    detailed, lit and sharp, so the eye has nowhere to land.
 2. **Inventory** — consumables were infinite; an agent was mid-way adding a party stock model.
    Verify with `npx vitest run tests/inventory.test.ts`.
-3. **SHP/SEQ animation — PARTIALLY decoded, deliberately NOT shipped.**
-   `tools/decode-shp-seq.mjs` and `tools/preview-anim.mjs` exist and produce
-   `public/assets/animations.json` for 12 sheets. `src/render/animation.ts` can consume it.
-   **But the assembly is incomplete**: run `node tools/preview-anim.mjs` and look at
-   `tools/out/anim-knight_male-frames.png` — heads and torsos assemble, limbs and lower bodies do
-   not, and the decoder's own SHP-table fit scores top out at 0.294, i.e. it is guessing which
-   table applies. A partial figure is WORSE than a complete static pose, so nothing fetches
-   `animations.json` at runtime and units still use whole-body pose cells. Do not wire it in until
-   the preview sheet shows complete figures.
-   This remains the largest available art win; it is a real reverse-engineering problem, not a
-   plumbing one.
+3. **SHP/SEQ animation — DECODED and visually verified; not yet wired into the runtime.**
+   `tools/decode-shp-seq.mjs` and `tools/preview-anim.mjs` produce
+   `public/assets/animations.json`; `src/render/animation.ts` consumes it.
+   Run `node tools/preview-anim.mjs --anim 6,8,12` and look at
+   `tools/out/anim-knight_male-seq.png`: **complete figures — head, cape, torso, arms, legs,
+   boots — in a seven-frame walk cycle with alternating legs.**
+
+   The earlier "limbs and lower bodies do not assemble" report was **not a decode bug**. The
+   decoder was already correct. `preview-anim.mjs` chose which SHP table to preview by pixel
+   similarity, and that score ranked `other` (0.294) above the correct `type1` (0.235) for
+   `knight_male` — and `other` is 17 frames of exactly one small part each, so every figure
+   rendered as a floating head. The preview now takes the table from
+   `manifest.sheets[key].spriteType`, which `build-assets.mjs` has always resolved correctly by
+   sheet class. See docs/ASSETS.md §5.
+
+   Remaining work is **plumbing, not reverse engineering**: nothing fetches `animations.json` at
+   runtime yet, so units still use whole-body pose cells. `src/render/sprites.ts` has to load it
+   and call `decodedAnimationSet`. Animation *naming* is still the honest gap — only `walk`,
+   `run` and `idle` are asserted (`SEQ_ANIM_INDEX`); attack/cast/hurt/KO stay on the procedural
+   pose curve rather than guess a SEQ slot.
 4. **22 sprite sheets in the rip are broken stubs** (see docs/ASSETS.md §1.2). Dark Knight and
    Onion Knight are re-pointed at Knight/Squire sheets; `chocobo` has zero whole-body frames.
 
@@ -260,7 +269,15 @@ not comparable; the cropped ones are harsher and more honest.
 ## Hard-won lessons — read before trusting any tool here
 
 The dominant failure mode in this project has been **something reporting success while silently
-doing nothing or the wrong thing.** It happened at least six times:
+doing nothing or the wrong thing.** It happened at least seven times:
+
+0. **A VERIFICATION TOOL WAS WRONG AND CAUSED A CORRECT FEATURE TO BE SHELVED.** `preview-anim.mjs`
+   picked which SHP table to preview by pixel similarity; that score ranked `other` (0.294) above
+   the correct `type1` (0.235) for `knight_male`, and `other` is 17 frames of one small part each,
+   so every figure rendered as a floating head. On that evidence the SHP decode was written up as
+   "partial — heads and torsos only" and deliberately not shipped. **The decoder had been correct
+   the whole time.** The lesson is not "verify with pixels" — that was done. It is that a verifier
+   has its own assumptions, and a *plausible-looking wrong* output is the most expensive kind.
 
 1. `shoot.mjs` returned `ok: true` on a **black boot-splash frame** — READY fires on renderer
    convergence but the splash is removed on a later event.

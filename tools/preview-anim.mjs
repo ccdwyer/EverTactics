@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { decodeAll, SPRITE_TYPES, scoreShpAgainstSheet } from './decode-shp-seq.mjs';
+import { decodeAll, SPRITE_TYPES, measureShpAgainstSheet } from './decode-shp-seq.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ASSETS = path.join(ROOT, 'public', 'assets');
@@ -238,20 +238,39 @@ function main() {
   const sheet = loadSheet(manifest, sheetKey);
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  // Which SHP/SEQ pair? Explicit, or the best-scoring candidate.
-  let shpKey = arg('shp');
-  if (!shpKey || arg('score')) {
-    const scores = Object.values(SPRITE_TYPES)
-      .map((t) => t.shp)
-      .filter((v, i, a) => a.indexOf(v) === i)
-      .map((k) => [k, scoreShpAgainstSheet(decoded.shp[k], sheet)])
-      .sort((a, b) => b[1] - a[1]);
-    console.log(`${sheetKey}: SHP fit ` + scores.map(([k, s]) => `${k}=${s.toFixed(3)}`).join(' '));
-    if (!shpKey) shpKey = scores[0][0];
+  // Which SHP/SEQ pair? Explicit `--shp` wins; otherwise the sheet's declared
+  // sprite type from the manifest, which `build-assets.mjs` resolves by sheet
+  // class. Do NOT pick by pixel similarity — that is what produced the
+  // "limbs are missing" result this tool once reported: the score preferred
+  // `other` for `knight_male`, and `other` is 17 frames of one part each, so
+  // every figure came out as a lone head. See `measureShpAgainstSheet`.
+  const declaredType = manifest.sheets[sheetKey]?.spriteType ?? null;
+  const shpKey = String(arg('shp', SPRITE_TYPES[declaredType]?.shp ?? ''));
+  if (!shpKey) {
+    throw new Error(
+      `sheet '${sheetKey}' has spriteType null in the manifest (no decoded animation). ` +
+        `Pass --shp <type1|type2|cyoko|mon|other|arute|kanzen> to force one.`,
+    );
   }
   const shp = decoded.shp[shpKey];
   if (!shp) throw new Error(`unknown SHP '${shpKey}'`);
-  const seqKey = String(arg('seq', Object.values(SPRITE_TYPES).find((t) => t.shp === shpKey)?.seq ?? shpKey));
+  const seqKey = String(
+    arg('seq', SPRITE_TYPES[declaredType]?.seq ?? Object.values(SPRITE_TYPES).find((t) => t.shp === shpKey)?.seq ?? shpKey),
+  );
+
+  if (arg('score')) {
+    const rows = [...new Set(Object.values(SPRITE_TYPES).map((t) => t.shp))]
+      .map((k) => [k, measureShpAgainstSheet(decoded.shp[k], sheet)])
+      .sort((a, b) => a[1].emptyPartRate - b[1].emptyPartRate);
+    console.log(`${sheetKey}: spriteType=${declaredType} (manifest, by sheet class) — diagnostics only:`);
+    for (const [k, m] of rows) {
+      console.log(
+        `  ${k.padEnd(7)} emptyParts=${(m.emptyPartRate * 100).toFixed(1).padStart(5)}%` +
+          ` opaque=${m.opaque.toFixed(3)} recall=${m.recall.toFixed(3)} parts=${m.parts}`,
+      );
+    }
+    console.log('  (these do NOT rank the correct table first; assignment is by class)');
+  }
   const scale = Number(arg('scale', 2));
 
   // Cells must be big enough for the largest part box on this SHP, or the

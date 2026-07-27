@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>EverTactics</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        margin: 0; padding: 0; height: 100%; overflow: hidden;
+        background: #05060a;
+        font-family: 'Cinzel', 'Trajan Pro', Georgia, serif;
+      }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+      #ui > * { pointer-events: auto; }
+      #boot {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        color: #d8c9a3; letter-spacing: 0.4em; font-size: 13px; text-transform: uppercase;
+        background: #05060a; transition: opacity 600ms ease; z-index: 100;
+      }
+      #boot.hidden { opacity: 0; pointer-events: none; }
+    </style>
+    <script type="module" crossorigin src="/assets/index-BTNRXHNH.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BruRwE-g.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="ui"></div>
+    <div id="boot">EverTactics</div>
+  </body>
+</html>

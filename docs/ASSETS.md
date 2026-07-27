@@ -373,6 +373,22 @@ node tools/preview-anim.mjs --sheet chocobo --shp cyoko --first 0 --limit 48
 verification**: a parse that does not throw proves nothing, a knight that looks
 like a knight proves a great deal.
 
+It takes the sheet's SHP from `manifest.sheets[key].spriteType` — the
+class-based assignment of §5.4 — and `--shp` only overrides it. **Do not
+reintroduce picking the table by pixel similarity.** It was tried, and it is
+what produced the long-standing "limbs and lower bodies do not assemble"
+report: the similarity score ranked `other` (0.294) above the correct `type1`
+(0.235) for `knight_male`, and `other` holds 17 frames of exactly one small
+part each, so every figure rendered as a floating head. The decode was correct
+the whole time; the verifier was pointed at the wrong table. `--score` still
+prints the numbers, now with `emptyPartRate` and coverage alongside, purely as
+a diagnostic — measured over `knight_male`, `chocobo`, `behemoth` and
+`black_mage_female`, no combination of them ranks the correct table first on
+all four, and none separates `type1` from `type2` at all (they differ by
+< 0.006 everywhere). `tests/animation.test.ts` guards the failure directly: a
+walk frame's parts must span ≥ 32 SPR pixels vertically, which a real figure
+(40) clears and an `other` fragment (≤ 24) cannot.
+
 The container layout and the SEQ instruction set are documented by the FFT
 modding community — the FFHacktics wiki pages *SHP & Graphic info page* and
 *SEQ & Animation info page* (the live site is behind a bot challenge; both pages
@@ -529,9 +545,13 @@ Fully decoded and visually verified:
 
 * **All 11 SHP files parse**: 2023 frames, 4138 parts.
 * **All 14 SEQ files parse**: 2134 animations.
-* Assembled frames read as figures on `knight_male` (`type1`), `chocobo`
-  (`cyoko`) and `behemoth` / `malboro` (`mon`) — checked as contact sheets, not
-  as parse statistics. **`chocobo` in particular has zero whole-body pose frames
+* Assembled frames read as **complete** figures — head, torso, arms, legs,
+  boots — on `knight_male` and `goblin` (`type1`), `chocobo` (`cyoko`) and
+  `behemoth` / `malboro` (`mon`), checked as contact sheets, not as parse
+  statistics. Re-verified across all 182 `type1` frames and against SEQ slots
+  6 / 8 / 12 / 42 / 43: slot 6 is a seven-frame gait with alternating legs, and
+  42/43 step through the eight standing rotations, which is what the §5.4
+  naming argument predicts. **`chocobo` in particular has zero whole-body pose frames
   on its sheet (§1.4) and now assembles correctly**, which is the strongest
   independent evidence the decode is right: nothing about that result could come
   from accidentally reading a pre-composed pose.
