@@ -60,7 +60,30 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 9 | 5/12 baseline, 9/12 after | 11/12 and 10/12 | first n=12 round |
 | 10 | 6/12 baseline, 10/12 after | 9/12 and **8/12** | **the loop has stopped paying** |
 
-### DECISIVE TEST — we are NOT indistinguishable. The 30% figure was an artefact.
+### DISCRIMINATION — measured twice, and it moved
+
+                                              before      after
+    control-same   two Triangle frames        1/4  25%    1/4  25%
+    control-diff   Triangle vs Unicorn Ov.    3/4  75%    3/4  75%
+    test           OURS vs Triangle           5/6  83%    3/6  50%
+
+Both control arms held exactly, which is what makes the test arm readable. We went from **above the
+control-diff ceiling** (more separable from Triangle Strategy than a genuinely different shipped
+title is) to **roughly midway between the floor and the ceiling**.
+
+The change came from the `discriminators` agent's lighting and post-composite work, which was
+interrupted mid-run and never reported — so it was committed as unverified. This is the verification:
+it landed.
+
+**Caveat, and it matters: n=6 on the test arm.** 5/6 -> 3/6 is two pairs; against a pooled rate the
+shift is p = 0.32, i.e. not individually significant. The *position between two stable controls* is
+the more trustworthy signal than the delta. Re-run with more test pairs before quoting 50% as precise.
+
+**Still not indistinguishable.** 50% against a 25% same-game floor means judges separate our frame
+from a shipped title about twice as often as they wrongly separate two frames of one title. The gap
+roughly halved; it did not close.
+
+### Superseded: the earlier claim that the 30% identification figure meant parity
 
 The identification protocol ("which of these is the shipped game?") returned ~30% across 36 pairs,
 i.e. judges systematically picked OUR frame as shipped. I flagged the caveat that this might be the
