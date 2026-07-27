@@ -381,7 +381,27 @@ Do:
     focus: `COMPOSITION FIRST. Round 1's critic scored composition 3/10 and lighting 2/10; these are
 concrete, already-diagnosed defects with file references. Fix them before any new effect work.
 
-**(1) COMPOSITION IS NOW THE LOWEST AXIS (4.3).** Earlier rounds fixed the void and the framing;
+**(0) THE BRIGHTEST PART OF THE FRAME IS THE EMPTY TOP, NOT THE SUBJECT. This is measured and it
+is the whole composition score.** The environment agent attributed it precisely last round:
+
+    farTop / board luminance = 1.05      references sit at 0.46 - 0.53
+
+It is NOT the environment layer: with `environment.setEnabled(false)` the ratio is still 0.90, and
+hiding the sky mesh or the haze banks each moves it only ~1 luma. It is terrain geometry reaching
+the top of frame plus post bloom. That is yours.
+
+Fix the ratio, and verify it by measuring, not by eye. A frame whose brightest region is empty
+sky has no focal hierarchy by construction — which is exactly the repeated critique ("everything
+equally detailed, equally lit, equally sharp, nothing tells you where to look") and why the
+composition axis fell to 3.8 last round while texture and geometry rose.
+
+Options, in rough order of bluntness: a top-weighted luminance falloff in the composite; reducing
+bloom contribution above the focal band; letting distance haze pull the far terrain toward the sky
+value so it stops carrying highlights; pulling the camera so less empty sky is in frame at all.
+Get farTop/board under 0.6 without flattening the board itself (check `localContrast` does not
+fall below ~25 and `backgroundFraction` stays inside 0.087-0.180).
+
+**(1) The older composition note, largely superseded — verify before acting:** Earlier rounds fixed the void and the framing;
 what critics now describe is a frame with no focal hierarchy — everything equally detailed, equally
 lit, equally sharp, so the eye has nowhere to land. Open refs/curated/triangle/ and note that each
 frame has ONE bright, sharp, high-contrast focus with everything else deliberately subordinated by
