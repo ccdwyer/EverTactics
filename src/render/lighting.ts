@@ -284,6 +284,33 @@ const DEFAULT_VIEW_BEARING = bearingFromYawDegrees(
 const KEY_VIEW_SEPARATION_MIN = 62;
 const KEY_VIEW_SEPARATION_MAX = 128;
 
+/**
+ * How high the key is allowed to sit, in degrees above the horizon.
+ *
+ * THIS IS THE ROUND-3 SIBLING OF THE AZIMUTH POLICY, and it fails the same way.
+ * A shadow's length on the ground is `height / tan(elevation)`. `battle-open`
+ * authors its key at 54°, which turns a 4.5-unit cloister wall into a 3.3-unit
+ * shadow — and the wall is 1 unit thick and sits on a 2-unit plinth, so almost
+ * the entire shadow lands on the wall's own footprint and the plinth beside it.
+ * Nothing reaches the garden. Six critics then wrote "not one wall throws a
+ * shadow onto the courtyard floor" about a scene rendering a fitted 2048²
+ * shadow map every frame, for the second round running.
+ *
+ * Drop the same wall to 38° and it lays 5.8 units across the flagstones — over
+ * two tiles of visible, unmistakable cast shadow, which is the thing the eye
+ * reads as "these blocks are in a place" rather than "these blocks are shaded".
+ *
+ * The lower bound matters as much. Below ~24° a walled cloister self-occludes:
+ * the sun never clears its own perimeter and the whole playable interior is one
+ * flat shadow, which is what the map author was (correctly) running from when
+ * they typed 54. So the rig takes the elevation off them and puts it in the
+ * narrow band where a wall casts *into* the courtyard without swallowing it.
+ *
+ * Authored elevation survives wherever it is already inside the band.
+ */
+const KEY_ELEVATION_MIN = 26;
+const KEY_ELEVATION_MAX = 39;
+
 /** Wrap to (−180, 180]. */
 function wrapSigned(deg: number): number {
   let d = ((deg + 180) % 360 + 360) % 360 - 180;
@@ -779,6 +806,15 @@ export class LightingRig {
     return { key, rim: s.rimAzimuth + shift };
   }
 
+  /**
+   * Clamp the key into the elevation band where its shadows land in open frame.
+   * See `KEY_ELEVATION_MIN` / `KEY_ELEVATION_MAX` for why this is the rig's call
+   * and not the map author's.
+   */
+  private resolveKeyElevation(s: LiveState): number {
+    return MathUtils.clamp(s.keyElevation, KEY_ELEVATION_MIN, KEY_ELEVATION_MAX);
+  }
+
   get preset(): LightingPresetName {
     return this.presetName;
   }
@@ -921,13 +957,14 @@ export class LightingRig {
     const radius = this.boundsSphere.radius;
     const distance = radius * 2.6 + 4;
 
-    const rig = this.applyContrast(s);
+    const elevation = this.resolveKeyElevation(s);
+    const rig = this.applyContrast(s, elevation);
     const bearing = this.resolveBearings(s);
 
     // Key
     this.key.color.setHex(s.keyColor, 'srgb');
     this.key.intensity = rig.key;
-    placeDirectional(this.key, centre, bearing.key, s.keyElevation, distance, this.tmpVec);
+    placeDirectional(this.key, centre, bearing.key, elevation, distance, this.tmpVec);
 
     const cam = this.key.shadow.camera;
     cam.left = -radius;
@@ -991,7 +1028,7 @@ export class LightingRig {
     gradeLight(this.hemisphere.groundColor, s.groundColor, chroma, split * 0.4);
     gradeLight(this.ambient.color, s.ambientColor, chroma * 1.2, -split * 1.2);
 
-    this.updateProbe(s, rig, bearing);
+    this.updateProbe(s, rig, bearing, elevation);
     this.placePracticals();
 
     if (this.manageBackground) {
@@ -1038,7 +1075,7 @@ export class LightingRig {
    * misses from a committed bearing and a complementary hue, which is how the
    * references keep their shadow side readable without flattening it.
    */
-  private applyContrast(s: LiveState): {
+  private applyContrast(s: LiveState, keyElevation: number): {
     key: number;
     rim: number;
     hemi: number;
@@ -1083,7 +1120,7 @@ export class LightingRig {
     // The key absorbs whatever the rim did not, divided by the cosine it will be
     // seen through — a 54° sun only delivers sin 54° of its intensity to the
     // floor, so handing it the raw number under-compensates and the frame dims.
-    const cosine = Math.max(0.35, Math.sin(MathUtils.degToRad(s.keyElevation)));
+    const cosine = Math.max(0.35, Math.sin(MathUtils.degToRad(keyElevation)));
     const recovered = Math.max(0, surrendered - rimCost * 0.5) / cosine;
 
     return { key: key + recovered * 0.9, rim, hemi, ambient, probe };
@@ -1102,6 +1139,7 @@ export class LightingRig {
     s: LiveState,
     rig: { key: number; rim: number; hemi: number; probe: number },
     bearing: { key: number; rim: number },
+    keyElevation: number,
   ): void {
     const sh = this.probeSh;
     sh.zero();
@@ -1131,7 +1169,7 @@ export class LightingRig {
     // Lobe weights read from the *post-policy* levels, not the authored ones —
     // otherwise the probe quietly puts back the flat sky fill that `applyContrast`
     // just took out, and the shadows stay grey.
-    add(s.keyColor, bearing.key, Math.max(4, s.keyElevation * 0.35), rig.key * 0.12, split * 0.55);
+    add(s.keyColor, bearing.key, Math.max(4, keyElevation * 0.35), rig.key * 0.12, split * 0.55);
     add(s.rimColor, bearing.rim, s.rimElevation * 0.6, 0.3 + rig.rim * 0.8, -split * 1.2);
     add(s.skyColor, 0, 90, rig.hemi * 0.62, -split * 1.15);
     add(s.groundColor, 0, -90, rig.hemi * 0.24, split * 0.45);

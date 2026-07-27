@@ -788,7 +788,7 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
     spriteColor += uDissolveColor * (band * uDissolveGlow);
   }
 
-  gl_FragColor = vec4(spriteColor, 1.0);
+  gl_FragColor = vec4(spriteShade, 1.0);
 `;
 
 /**

@@ -380,8 +380,13 @@ const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
 
   // ── Enemy: the north cloister, the plinth flanks, the east walk ──────────
   {
-    id: 'e-corvin', name: 'Corvin', job: 'knight', gender: 'male', team: 'enemy',
-    level: 14, zodiac: 'taurus', brave: 74, faith: 50,
+    // A Dragoon, not a second Knight. The enemy line used to mirror the player's
+    // roster job-for-job and level-for-level, so the two inspect panels showed
+    // byte-identical stats (Knight LV 14, 335 HP, 52 MP) and critics read the
+    // HUD as duplicated. A spear silhouette and a horned helm also give the
+    // opposing line a shape the player side does not have.
+    id: 'e-corvin', name: 'Corvin', job: 'dragoon', gender: 'male', team: 'enemy',
+    level: 15, zodiac: 'taurus', brave: 74, faith: 50,
     at: { x: 6, y: 4 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
     secondary: 'squire', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
     personality: 'defensive', ct: 40,

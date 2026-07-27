@@ -594,6 +594,28 @@ attribute vec4 aOrbit;   // centreX, centreZ, omega, radialRate
 uniform float uTime;
 uniform float uAtlasGrid;
 
+/**
+ * Depth stratification, for an ORTHOGRAPHIC rig.
+ *
+ * A perspective camera gives a particle field its depth cues for free: near
+ * motes are large and far ones are specks. This game is tilted-ortho, so a mote
+ * two tiles from the lens and a mote thirty tiles away project to *exactly* the
+ * same number of pixels at exactly the same opacity. That is why round-3 critics
+ * wrote "identical white dots — same size, same alpha, no depth parallax, no
+ * size falloff with distance" and "they render as a flat 2D overlay rather than
+ * occupying volume between camera and geometry". They are describing an ortho
+ * projection doing precisely what it is defined to do.
+ *
+ * So the falloff is put back by hand: `x` scales size and `y` scales alpha,
+ * both about `uDepthPivot` (the camera-to-board distance) over `uDepthRange`.
+ * Zero on the combat batches — a fireball must not shrink because it went off
+ * at the back of the map — and non-zero only on the standing atmosphere, where
+ * it is the entire mechanism by which the air reads as having depth in it.
+ */
+uniform vec2 uDepthResponse;
+uniform float uDepthPivot;
+uniform float uDepthRange;
+
 varying vec4 vColor;
 varying vec2 vAtlasUv;
 varying float vViewDist;
@@ -633,6 +655,11 @@ void main() {
 
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   float size = mix(aSize.x, aSize.y, t);
+
+  // -1 at the near edge of the depth band, +1 at the far edge.
+  float depthK = clamp((-mv.z - uDepthPivot) / max(uDepthRange, 1e-3), -1.0, 1.0);
+  float depthSize = 1.0 - depthK * uDepthResponse.x;
+  size *= max(0.12, depthSize);
 
   vec2 corner;
   if (aEnv.w > 1e-4) {

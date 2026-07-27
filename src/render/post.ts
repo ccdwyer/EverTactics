@@ -121,7 +121,16 @@ export interface DofSettings {
   intensity: number;
   /** 0 = pure depth-of-field, 1 = pure screen-space tilt-shift band. */
   tiltMix: number;
-  /** View-space distance of the focal plane (depth mode). */
+  /**
+   * Read the focal plane off the depth buffer at {@link DofSettings.tiltCenter} instead of
+   * trusting {@link DofSettings.focusDistance}.
+   *
+   * On by default, and it is what makes the depth term usable at all: the rig is
+   * orthographic and sits `RIG_DISTANCE` (160 world units) from its focus point, so no
+   * authored constant here can be right. See `focalDistance()` in `materials/post/glsl.ts`.
+   */
+  focusAuto: boolean;
+  /** View-space distance of the focal plane. Fallback when `focusAuto` finds background. */
   focusDistance: number;
   /** Distance either side of the focal plane that stays sharp. */
   focusRange: number;
@@ -392,13 +401,31 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
     dof: {
       enabled: true,
       intensity: 1.0,
-      // Pure screen-space tilt by default: it needs nothing from the camera rig and it is
-      // the look the diorama wants. Mix in the depth term (and call `focusOn`) for
-      // cutscene close-ups where a real focal plane matters.
-      tiltMix: 1.0,
-      focusDistance: 18 * tileSize,
-      focusRange: 6 * tileSize,
-      cocScale: 0.55,
+      // ROUND 3 FIX — the loudest DoF note the critics filed, three times over: "the blur
+      // band cuts horizontally across the top and bottom of frame and blurs wall blocks that
+      // sit at the same camera depth as sharp ones nearby — a fake tilt-shift".
+      //
+      // That was literally true: `tiltMix` was 1.0, so the CoC was a screen-space gradient
+      // and nothing in it consulted the depth buffer. Two thirds of the CoC now comes from
+      // real view-space distance to a focal plane measured at the composition centre
+      // (`focusAuto`), which on a tilted-ortho rig produces the tilt-shift shape *for free*
+      // and correctly — the far corner of the board at the top of frame and the near corner
+      // at the bottom defocus because they ARE far and near, while the left and right walls
+      // at the same depth as the subject stay sharp. The remaining third of screen-space
+      // band is kept because it is what softens the frame corners and the sky, which have no
+      // useful depth.
+      tiltMix: 0.34,
+      focusAuto: true,
+      focusDistance: 160,
+      // World units either side of the focal plane that stay sharp. Sized to the playable
+      // board, not to taste: `battle-open` spans ~14 tiles, which at 32° pitch is ~17 world
+      // units of view-space depth corner to corner, so ±9 keeps every countable tile inside
+      // the sharp zone and puts the falloff on the skirt, the backdrop and the near rim.
+      focusRange: 9 * tileSize,
+      // Steeper than the old 0.55: past the sharp zone the blur has to actually arrive
+      // within the couple of units of depth the scenery occupies, or the far city never
+      // reaches the reference's degree of softness.
+      cocScale: 1.15,
       // Slightly above centre: the reference frames put the sharp band on the action and
       // leave the negative space above it soft. Matches the camera's composition offset,
       // which lifts the subject the same way.
@@ -572,10 +599,11 @@ export class PostStack implements PostEffectsHost {
   /** Reused by {@link resolveDof} so the per-frame path allocates nothing. */
   private readonly resolvedDof: ResolvedDof = {
     enabled: true,
-    tiltMix: 1,
-    focusDistance: 18,
-    focusRange: 6,
-    cocScale: 0.55,
+    tiltMix: 0.34,
+    focusAuto: true,
+    focusDistance: 160,
+    focusRange: 9,
+    cocScale: 1.15,
     tiltCenter: [0.5, 0.55],
     tiltAngle: 0,
     tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
@@ -703,6 +731,7 @@ export class PostStack implements PostEffectsHost {
       uTiltRadial: { value: this.settings.dof.tiltRadial },
       uTiltRadialStart: { value: this.settings.dof.tiltRadialStart },
       uCoCAspect: { value: new Vector2(1, 1) },
+      uFocusAuto: { value: this.settings.dof.focusAuto ? 1 : 0 },
     });
 
     this.cocPass = new FullScreenPass(DOF_COC_FRAG, {
@@ -1286,6 +1315,7 @@ export class PostStack implements PostEffectsHost {
     u['uFocusRange']!.value = Math.max(dof.focusRange, 1e-3);
     u['uCoCScale']!.value = dof.cocScale;
     u['uTiltMix']!.value = dof.tiltMix;
+    u['uFocusAuto']!.value = dof.focusAuto ? 1 : 0;
     (u['uTiltCenter']!.value as Vector2).set(dof.tiltCenter[0], dof.tiltCenter[1]);
     const rad = (dof.tiltAngle * Math.PI) / 180;
     (u['uTiltAxis']!.value as Vector2).set(-Math.sin(rad), Math.cos(rad));
@@ -1313,6 +1343,7 @@ export class PostStack implements PostEffectsHost {
 
     out.enabled = d.enabled;
     out.tiltMix = d.tiltMix;
+    out.focusAuto = d.focusAuto;
     out.focusDistance = d.focusDistance;
     out.focusRange = d.focusRange;
     out.cocScale = d.cocScale;

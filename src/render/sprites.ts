@@ -746,7 +746,7 @@ function createShadowDecalMaterial(map: THREE.Texture): THREE.ShaderMaterial {
       varying vec2 vUvDecal;
       void main() {
         vec3 shade = texture2D(uMap, vUvDecal).rgb;
-        gl_FragColor = vec4(mix(vec3(1.0), shade, clamp(uStrength, 0.0, 1.0)), 1.0);
+        gl_FragColor = vec4(mix(vec3(1.0), vec3(1.0, 0.0, 0.0), (1.0 - shade.r) * 3.0), 1.0);
       }
     `,
     blending: THREE.MultiplyBlending,
