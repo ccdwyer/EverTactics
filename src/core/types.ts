@@ -192,6 +192,12 @@ export interface Ability {
   readonly cures?: readonly StatusId[];
   /** Ability can target empty tiles (e.g. movement, summons, geomancy). */
   readonly targetsTiles?: boolean;
+  /**
+   * The ability's reach comes from the equipped weapon rather than from
+   * `range.range` — FFT's generic Attack, where a bow strikes at five tiles and
+   * a knife at one. `range.range` is the bare-handed floor.
+   */
+  readonly usesWeaponRange?: boolean;
   /** VFX key resolved by `render/vfx`. */
   readonly vfx: string;
   /** Sound key. */

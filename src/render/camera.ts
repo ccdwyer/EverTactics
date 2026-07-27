@@ -119,6 +119,37 @@ export function texelsToWorld(texels: number): number {
   return texels / TEXELS_PER_UNIT;
 }
 
+/**
+ * Height of the drawn figure *inside* a unit's billboard quad, in sprite texels.
+ *
+ * The quad itself is 80 texels tall (2.5 world units at `TEXELS_PER_UNIT`), but it is mostly
+ * transparent above the head and below the feet — measured on a rendered frame, a standing
+ * humanoid occupies about 48 of those texels. Framing maths wants the figure, not the quad.
+ */
+export const HUMANOID_TEXEL_HEIGHT = 48;
+
+/**
+ * Target on-screen height of a character, as a fraction of frame height.
+ *
+ * Measured, per VISUAL_TARGET.md "Camera and framing": a Triangle Strategy character is
+ * ~130px in a 1080p frame (12%), an FFT character ~180px (17%). Sitting a little under the
+ * Triangle number keeps the whole diorama in shot while staying well clear of the failure
+ * the brief calls out ("if our units fill a third of the screen the composition is wrong")
+ * *and* clear of the opposite failure, which is what we actually had: at 7% the battlefield
+ * read as a distant map floating in dead space.
+ */
+export const REFERENCE_CHARACTER_FRAME_FRACTION = 0.115;
+
+/**
+ * The largest a character may get. FFT's own frames measure ~17% of frame height
+ * (VISUAL_TARGET.md), so a hair above that is the outer edge of shipped-game practice and
+ * well short of the stated failure ("units fill a third of the screen").
+ */
+export const MAX_CHARACTER_FRAME_FRACTION = 0.18;
+
+/** Ceiling on `frameField`'s breathing room, as a fraction of the board's on-screen span. */
+export const MAX_FRAME_MARGIN_FRACTION = 0.15;
+
 /** Centre of the walkable top surface of a grid cell, in world space. */
 export function gridToWorld(
   cell: { x: number; y: number; z?: number },
@@ -227,6 +258,15 @@ interface ShakeState {
   frequency: number;
   seedX: number;
   seedY: number;
+}
+
+export interface FrameFieldOptions {
+  /**
+   * Ignore the composition floor and honour the contain-fit, so no part of the
+   * battlefield is cropped. Costs on-screen character size; use for overview
+   * shots and map-wide critique, not for normal play.
+   */
+  fitWholeField?: boolean;
 }
 
 export interface FocusOptions {
@@ -404,8 +444,45 @@ export class IsoCamera {
     this.focus(gridToWorld(cell, this.tmpVecA.clone()), options);
   }
 
-  /** Frame an entire battlefield: centre on it and pick the largest zoom that fits. */
-  frameField(field: Battlefield, margin = 2): void {
+  /**
+   * On-screen height of a standing character at the current zoom, as a fraction of the
+   * frame. Compare against {@link REFERENCE_CHARACTER_FRAME_FRACTION}.
+   */
+  get characterFrameFraction(): number {
+    return (HUMANOID_TEXEL_HEIGHT * this.pixelScale) / this.bufferHeight;
+  }
+
+  /**
+   * The smallest whole pixels-per-texel that keeps a character at the reference size.
+   * Resolution-relative, so a 4K frame composes the same as a 1080p one.
+   */
+  get compositionFloorPixelScale(): number {
+    const ideal = (REFERENCE_CHARACTER_FRAME_FRACTION * this.bufferHeight) / HUMANOID_TEXEL_HEIGHT;
+    return Math.max(1, Math.round(ideal));
+  }
+
+  /**
+   * The largest whole pixels-per-texel that still keeps a character no bigger than the FFT
+   * reference measurement. This is the hard stop on the cover bias below — VISUAL_TARGET.md
+   * calls a unit filling a third of the screen a composition failure, and FFT's own 17% is
+   * the outer edge of what a shipped game does.
+   */
+  get compositionCeilingPixelScale(): number {
+    const ideal = (MAX_CHARACTER_FRAME_FRACTION * this.bufferHeight) / HUMANOID_TEXEL_HEIGHT;
+    return Math.max(1, Math.floor(ideal));
+  }
+
+  /**
+   * Frame an entire battlefield: centre on it and pick the largest zoom that fits.
+   *
+   * "Fits" is not the only constraint. A pure contain-fit with a generous margin pulls back
+   * until the map is a postage stamp in an empty frame — which is what it was doing, and it
+   * is a composition failure, not a safe default. Neither reference game shows the whole
+   * playfield: they crop, and the character size stays constant. So the contain-fit result
+   * is clamped up to {@link compositionFloorPixelScale}; the edges of a large map fall
+   * outside the frame rather than the subject shrinking out of readability.
+   */
+  frameField(field: Battlefield, margin = 2, options: FrameFieldOptions = {}): void {
     const bounds = new Box3();
     let any = false;
     for (const tile of field.tiles) {
@@ -428,11 +505,17 @@ export class IsoCamera {
     const centre = bounds.getCenter(new Vector3());
     this.focus(centre, { immediate: true });
 
-    // Extent of the bounds when projected onto the camera plane, plus margin.
+    // Extent of the bounds when projected onto the camera plane.
     const size = bounds.getSize(this.tmpVecC);
-    const horizontal = Math.hypot(size.x, size.z) + margin;
-    const vertical =
-      Math.hypot(size.x, size.z) * Math.sin(this.pitch) + size.y * Math.cos(this.pitch) + margin;
+    const spanH = Math.hypot(size.x, size.z);
+    const spanV = spanH * Math.sin(this.pitch) + size.y * Math.cos(this.pitch);
+    // Margin is breathing room, not a reason to give away a third of the frame. A caller
+    // asking for 4 tiles around a 12-tile board is asking for 33% padding on every side,
+    // which by itself costs a whole zoom step and is most of why the diorama used to float
+    // in a void. Cap it at a fraction of the board so the request scales with the map.
+    const cappedMargin = Math.max(0, Math.min(margin, spanH * MAX_FRAME_MARGIN_FRACTION));
+    const horizontal = spanH + cappedMargin;
+    const vertical = spanV + cappedMargin;
 
     let best = this.zoomLevels[0] ?? 2;
     for (const level of this.zoomLevels) {
@@ -441,6 +524,30 @@ export class IsoCamera {
         best = Math.max(best, level);
       }
     }
+
+    // Composition floor. Never zoom out past the point where a character stops
+    // reading — unless the caller explicitly wants the whole board in shot, which
+    // is what an overview screenshot and the tactical "show me everything" key
+    // both want. The floor is the default precisely because it is right for play.
+    const ceiling = this.zoomLevels[this.zoomLevels.length - 1] ?? best;
+    const floor = options.fitWholeField === true ? (this.zoomLevels[0] ?? best) : this.compositionFloorPixelScale;
+    best = Math.min(Math.max(best, floor), ceiling);
+
+    if (options.fitWholeField !== true) {
+      // Cover bias.
+      //
+      // Contain-fitting a small map leaves the diorama swimming in empty background, and an
+      // empty background is the one thing no reference frame has: every frame in
+      // refs/curated/triangle is filled corner to corner with scene. So push toward the zoom
+      // at which the field actually reaches the frame edges (no margin — margin is breathing
+      // room for a map that already fills the frame, not a reason to shrink one that does
+      // not), stopping at the character-size ceiling so this can never run away.
+      const coverW = this.bufferWidth / (TEXELS_PER_UNIT * Math.max(spanH, 1e-3));
+      const coverH = this.bufferHeight / (TEXELS_PER_UNIT * Math.max(spanV, 1e-3));
+      const cover = Math.round(Math.max(coverW, coverH));
+      best = Math.min(Math.max(best, Math.min(cover, this.compositionCeilingPixelScale)), ceiling);
+    }
+
     this.setPixelScale(best, true);
   }
 

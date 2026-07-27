@@ -14,7 +14,7 @@
  */
 
 import type {
-  Ability, AbilityId, AbilitySetId, Equipment, Facing, Gender, Item, ItemId, Job, JobId,
+  Ability, AbilityId, AbilityRange, AbilitySetId, Equipment, Facing, Gender, Item, ItemId, Job, JobId,
   JobProgress, Rng, SpriteRef, Stats, StatusId, Team, Unit, UnitId, Vec3, Zodiac,
 } from './types';
 import {
@@ -204,6 +204,32 @@ export function weaponOf(unit: Unit): Item | undefined {
   const left = getItem(unit.equipment.leftHand);
   if (left && left.wp !== undefined) return left;
   return undefined;
+}
+
+/** Reach of the equipped weapon in tiles. Bare hands and melee weapons are 1. */
+export function weaponRange(unit: Unit): number {
+  let reach = 1;
+  for (const slot of ['rightHand', 'leftHand'] as const) {
+    const item = getItem(unit.equipment[slot]);
+    if (item?.wp === undefined) continue;
+    if (item.range !== undefined && item.range > reach) reach = item.range;
+  }
+  return reach;
+}
+
+/**
+ * An ability's targeting range as it applies to this unit.
+ *
+ * Only `usesWeaponRange` abilities differ from their declared range: the generic
+ * Attack reaches as far as whatever is in the unit's hand, so an Archer shoots
+ * at five tiles with the same command a Knight swings at one. Line of sight is
+ * forced on for anything that gains reach this way — an arrow needs a path.
+ */
+export function effectiveRange(unit: Unit, ability: Ability): AbilityRange {
+  if (ability.usesWeaponRange !== true) return ability.range;
+  const reach = weaponRange(unit);
+  if (reach <= ability.range.range) return ability.range;
+  return { ...ability.range, range: reach, los: true };
 }
 
 /** The shield in either hand, if any. */

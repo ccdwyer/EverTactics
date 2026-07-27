@@ -34,7 +34,10 @@ export const EQ2_JOBS: readonly Job[] = [
       'target selection — Unholy Presence multiplies the threat he generates, and Grasp of ' +
       'Night is a hard taunt no AI can refuse. Play him as the anchor the enemy line cannot ' +
       'walk past, not as a damage dealer.',
-    sprite: { male: '1110_Dark_Knight_Male_hd', female: '1112_Dark_Knight_Female_hd' },
+    // The Dark Knight sheets this job used to borrow (1110/1112) are broken in
+    // the rip. The Dragoon is the better donor anyway: the horned helm reads as a
+    // dread knight at a glance, and it keeps three plate jobs off one sheet.
+    sprite: { male: '1044_Dragoon_Male_hd', female: '1046_Dragoon_Female_hd' },
     move: 3,
     jump: 3,
     cEvade: 10,
@@ -46,21 +49,21 @@ export const EQ2_JOBS: readonly Job[] = [
     ],
     actionSet: 'dread-arts',
     learnable: [
-      a('grasp-of-night', 200),
+      a('taunt', 200),
       a('siphon-strike', 250),
       a('unholy-blessing', 300),
       a('malevolence', 350),
       a('doom-judgement', 400),
       a('harm-touch', 500),
-      a('shroud-of-armor', 400),
-      a('death-march', 600),
-      a('unholy-presence', 500),
-      a('legionnaires-smite', 550),
-      a('reaver', 700),
+      a('bulwark', 400),
+      a('sentinel-roar', 600),
+      a('vehement-threat', 500),
+      a('shield-slam', 550),
+      a('provoking-wound', 700),
       a('sanguine-covenant', 900),
     ],
     equip: ['sword', 'knightsword', 'knife', 'flail', 'shield', 'helm', 'armor', 'accessory'],
-    innate: ['unholy-presence', 'covenant-of-dread'],
+    innate: ['covenant-of-dread'],
   },
   {
     id: 'templar',
@@ -100,7 +103,7 @@ export const EQ2_JOBS: readonly Job[] = [
       a('shield-of-faith', 800),
     ],
     equip: ['flail', 'hammer', 'staff', 'shield', 'helm', 'hat', 'armor', 'robe', 'accessory'],
-    innate: ['ward-mastery'],
+    innate: ['greater-wards'],
   },
   {
     id: 'coercer',
@@ -124,19 +127,19 @@ export const EQ2_JOBS: readonly Job[] = [
       { job: 'mystic', level: 4 },
       { job: 'orator', level: 3 },
     ],
-    actionSet: 'coercion',
+    actionSet: 'enthrall',
     learnable: [
-      a('mesmerise', 250),
-      a('charm', 600),
+      a('mesmerize', 250),
+      a('dominate', 600),
       a('possess-essence', 900),
-      a('shatter-will', 300),
+      a('terrorize', 300),
       a('mana-flow', 400),
       a('peaceful-link', 350),
       a('spellbind', 300),
-      a('mind-blight', 350),
+      a('mind-blank', 350),
       a('breeze', 300),
       a('cannibalise-thoughts', 450),
-      a('simple-minds', 500),
+      a('mass-mesmerize', 500),
       a('puppetmaster', 800),
     ],
     equip: ['rod', 'staff', 'book', 'hat', 'robe', 'clothing', 'accessory'],
@@ -167,14 +170,14 @@ export const EQ2_JOBS: readonly Job[] = [
     actionSet: 'primal-bond',
     learnable: [
       a('warder-rush', 200),
-      a('feral-bite', 250),
+      a('savage-mauling', 250),
       a('bestial-fury', 600),
       a('primal-instinct', 350),
       a('pack-tactics', 400),
-      a('sic-warder', 300),
+      a('harrying-strike', 300),
       a('bond-of-blood', 500),
       a('rending-maul', 450),
-      a('feralic-rage', 550),
+      a('enrage-warder', 550),
       a('warders-guard', 400),
       a('call-of-the-wild', 700),
       a('shared-senses', 380),
@@ -220,7 +223,7 @@ export const EQ2_JOBS: readonly Job[] = [
       a('maestros-cadence', 800),
     ],
     equip: ['knife', 'sword', 'instrument', 'hat', 'clothing', 'accessory'],
-    innate: ['aura-carrier'],
+    innate: ['resonant-aura'],
   },
   {
     id: 'dirge',
@@ -298,11 +301,13 @@ export const EQ2_MECHANICS: readonly JobMechanics[] = [
       '`reaver`) return 50% of damage dealt as HP, which is why his sustain does not need a ' +
       'healer. Balance lever: Dread income, not lifetap percentage.',
     spriteBorrow: {
-      from: '1110_Dark_Knight_Male_hd / 1112_Dark_Knight_Female_hd',
+      from: '1044_Dragoon_Male_hd / 1046_Dragoon_Female_hd',
       recolour:
-        'Battle palette 4 (violet) rather than the Dark Knight\'s black-and-crimson: bruised ' +
-        'purple plate, bone-white trim, sickly green sigil on the shield face. Needs a new ' +
-        'shield-boss detail (the FFT Dark Knight carries no shield) and a duller helm crest.',
+        'Battle palette 4 (violet): bruised purple plate, bone-white trim, sickly green sigil. ' +
+        'The Dragoon\'s horned helm and heavy pauldrons are already the right silhouette for a ' +
+        'dread knight — shorten the helm horns to a duller crest so it does not read as a ' +
+        'lancer, repaint the spear cells into a flail, and add a shield to the off hand. ' +
+        '(Was 1110/1112 Dark Knight, which is a broken rip: 18-pixel noise, no artwork.)',
     },
   },
   {

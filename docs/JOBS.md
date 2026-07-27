@@ -18,9 +18,11 @@ Verify the tables at any time with:
 node --experimental-strip-types --import ./tools/ts-ext-hook-register.mjs tools/check-jobs.mts
 ```
 
-That runs `validateJobs()` + `validateTree()` and confirms every sprite key a job, pet or
-stance references resolves to a real sheet in `public/assets/sprites/`. It currently reports
-**34 jobs, 76 sprite refs, OK.**
+That runs `validateJobs()` + `validateTree()` and confirms every sprite key a job, pet or stance
+references resolves to a sheet in `public/assets/sprites/` that is **usable** — present on disk,
+not flagged `broken` in `public/assets/manifest.json`, and carrying at least one whole-body pose
+frame. Existence alone is not enough: sheets `1110`-`1130` exist but contain no artwork. It
+currently reports **34 jobs, 76 sprite refs, OK.**
 
 ---
 
@@ -33,13 +35,34 @@ come in pairs (`1000`/`1001` are both `Knight_Male`); jobs always reference the 
 pair.
 
 **Ability ids are globally-unique kebab-case slugs** of the ability's canonical name:
-`head-break`, `equip-armor`, `move-plus-1`, `fira`, `raise-ghoul`. Not namespaced by set —
+`head-break`, `equip-armor`, `move-plus-1`, `fira`, `raise-thrall`. Not namespaced by set —
 FFT ability names are already unique, and flat ids keep the learned-ability `Set<AbilityId>`
 on `Unit` simple.
 
-**Ability set ids are the kebab-case command name**: `battle-skill`, `white-magic`, `punch-art`,
-`iaido`, `dread-arts`, `runeblade`. `allActionSets()` returns all 40 currently referenced,
-including stance and pet sets.
+**Ability set ids are the kebab-case command name**: `battle-skill`, `white-magick`, `punch-art`,
+`draw-out`, `dread-arts`, `runic-strike`. Every `Job.actionSet` is the **canonical** id as
+registered in `ABILITY_SETS` — not one of the spellings `SET_ALIASES` tolerates — so a job's
+command menu resolves by direct lookup. `resolveSetId()` still accepts the aliases and should
+still be used by anything taking a set id from outside `core/abilities`.
+
+### Canonical set names
+
+The job table and the ability table were authored in parallel and named seven sets twice, which
+left ten jobs pointing at sets containing zero abilities. One name per set is now canonical on
+both sides; the loser of each pair survives in `SET_ALIASES` so nothing holding an old id breaks.
+
+| Canonical | Superseded | Why this one |
+|---|---|---|
+| `dread-arts` | `threat-arts` | Reads as a command rather than as a mechanic. The set is the Shadowknight's alone, and "Threat Arts" names the threat table instead of what the button does. |
+| `sacraments` | `ward-craft` | The Templar is cathedral clergy; "Ancestral Ward Craft" was shaman flavour on a job that has none. |
+| `enthrall` | `coercion` | A verb beats an abstract noun in a menu, and it does not simply restate the job name back at the player. |
+| `primal-bond` | `beast-command` | Names the relationship the job is actually about. The warder is not a summon taking orders. |
+| `subterfuge` | `subtlety` | `subtlety` is already a support **ability** id. Two different things under one name in one table is a bug waiting to be written. |
+| `wild-shape` | `stances` | The set belongs to the Druid, and no Berserker job exists to justify the generic name. Its contents were rewritten from generic postures into forms, feral strikes and the unshifted healing kit. |
+| `judgement` | `auras` | The command is the seal → strike → collect loop; the auras are its passive floor, not the whole menu. The collector ability is `divine-judgement`, so a set id and an ability id never collide. |
+
+Three further sets are deliberately unowned and exist as secondary commands and enemy-unit kit:
+`snatch`, `holy-sword` and `mighty-sword`.
 
 **Job levels are gated by lifetime JP, not unspent JP.** `JobProgress.totalJp` is the gate;
 spending JP on abilities never costs tree progress. Thresholds are FFT's:
@@ -75,38 +98,104 @@ Growth is `HP/MP/PA/MA/SPD`; multipliers likewise. (M)/(F) marks a gender lock.
 | Archer | 3 | 3 | 10% | 11/16/45/50/100 | 100/65/110/80/100 | `charge` | squire 2 | 10 (4070 JP) |
 | Monk | 3 | 4 | 20% | 9/16/48/50/100 | 135/80/129/80/100 | `punch-art` | knight 2 | 10 (3700 JP) |
 | Thief | 4 | 4 | 25% | 11/17/50/50/90 | 90/60/100/60/110 | `steal` | archer 2 | 9 (2630 JP) |
-| White Mage | 3 | 3 | 5% | 12/10/70/45/100 | 80/120/90/110/100 | `white-magic` | chemist 2 | 14 (5530 JP) |
-| Black Mage | 3 | 3 | 5% | 12/10/75/45/100 | 75/120/80/120/100 | `black-magic` | chemist 2 | 14 (4700 JP) |
-| Time Mage | 3 | 3 | 5% | 12/10/70/50/100 | 75/115/80/110/100 | `time-magic` | black-mage 2 | 16 (8600 JP) |
-| Summoner | 3 | 3 | 5% | 13/10/70/40/100 | 70/125/80/120/100 | `summon-magic` | time-mage 3 | 17 (10500 JP) |
-| Mystic | 3 | 3 | 10% | 12/12/60/50/100 | 75/110/80/110/100 | `mystic-arts` | white-mage 2 | 15 (4480 JP) |
+| White Mage | 3 | 3 | 5% | 12/10/70/45/100 | 80/120/90/110/100 | `white-magick` | chemist 2 | 14 (5530 JP) |
+| Black Mage | 3 | 3 | 5% | 12/10/75/45/100 | 75/120/80/120/100 | `black-magick` | chemist 2 | 14 (4700 JP) |
+| Time Mage | 3 | 3 | 5% | 12/10/70/50/100 | 75/115/80/110/100 | `time-magick` | black-mage 2 | 16 (8600 JP) |
+| Summoner | 3 | 3 | 5% | 13/10/70/40/100 | 70/125/80/120/100 | `summon-magick` | time-mage 3 | 17 (10500 JP) |
+| Mystic | 3 | 3 | 10% | 12/12/60/50/100 | 75/110/80/110/100 | `yin-yang-magick` | white-mage 2 | 15 (4480 JP) |
 | Geomancer | 4 | 3 | 10% | 11/13/50/50/100 | 110/95/110/105/100 | `geomancy` | monk 3 | 15 (5380 JP) |
-| Dragoon | 3 | 4 | 15% | 11/15/40/50/100 | 120/70/120/80/100 | `jump` | thief 3 | 12 (4800 JP) |
-| Orator | 3 | 3 | 5% | 12/15/60/50/100 | 80/75/90/90/100 | `speechcraft` | mystic 3 | 13 (3950 JP) |
-| Samurai | 3 | 3 | 20% | 12/13/45/50/100 | 100/90/120/110/100 | `iaido` | knight 4, monk 5 | 13 (7300 JP) |
+| Dragoon | 3 | 4 | 15% | 11/15/40/50/100 | 120/70/120/80/100 | `jump` | thief 3 | 14 (6300 JP) |
+| Orator | 3 | 3 | 5% | 12/15/60/50/100 | 80/75/90/90/100 | `talk-skill` | mystic 3 | 13 (3950 JP) |
+| Samurai | 3 | 3 | 20% | 12/13/45/50/100 | 100/90/120/110/100 | `draw-out` | knight 4, monk 5 | 13 (7300 JP) |
 | Ninja | 4 | 4 | 30% | 12/16/43/50/80 | 80/50/120/75/120 | `throw` | archer 4, thief 5 | 13 (4930 JP) |
-| Arithmetician | 3 | 3 | 5% | 14/10/90/50/100 | 60/110/50/80/50 | `arithmeticks` | white-mage 4, black-mage 4, time-mage 3, mystic 4 | 9 (5200 JP) |
+| Arithmetician | 3 | 3 | 5% | 14/10/90/50/100 | 60/110/50/80/50 | `math-skill` | white-mage 4, black-mage 4, time-mage 3, mystic 4 | 9 (5200 JP) |
 | Bard (M) | 3 | 3 | 5% | 12/15/100/50/100 | 55/110/40/115/100 | `sing` | squire 5, summoner 5, orator 5 | 10 (4900 JP) |
 | Dancer (F) | 3 | 3 | 5% | 12/15/50/100/100 | 60/110/110/40/100 | `dance` | squire 5, geomancer 5, dragoon 5 | 10 (4800 JP) |
 | Mime | 4 | 4 | 5% | 6/30/35/40/100 | 140/50/120/115/120 | `mimicry` | squire 8, chemist 8, geomancer 4, dragoon 4, orator 4 | 0 |
-| Dark Knight | 3 | 3 | 10% | 9/12/40/45/100 | 130/80/130/110/100 | `dark-arts` | knight 8, black-mage 8, **20 kills** | 9 (6200 JP) |
-| Onion Knight | 3 | 3 | 5% | 10/15/50/50/100 | 100/100/100/100/100 | `onion-skills` | squire 6, chemist 6 | 0 |
+| Dark Knight | 3 | 3 | 10% | 9/12/40/45/100 | 130/80/130/110/100 | `dark-sword` | knight 8, black-mage 8, **20 kills** | 13 (9100 JP) |
+| Onion Knight | 3 | 3 | 5% | 10/15/50/50/100 | 100/100/100/100/100 | `onion-skills` | squire 6, chemist 6 | 8 (2700 JP) |
 | Shadowknight | 3 | 3 | 10% | 9/13/45/50/100 | 130/90/118/105/100 | `dread-arts` | knight 4, black-mage 3 | 12 (5650 JP) |
 | Templar | 3 | 3 | 10% | 11/11/60/48/100 | 110/115/95/110/100 | `sacraments` | white-mage 4, knight 3 | 12 (5100 JP) |
-| Coercer | 3 | 3 | 5% | 13/10/75/45/100 | 70/125/70/120/100 | `coercion` | mystic 4, orator 3 | 12 (5500 JP) |
+| Coercer | 3 | 3 | 5% | 13/10/75/45/100 | 70/125/70/120/100 | `enthrall` | mystic 4, orator 3 | 12 (5500 JP) |
 | Beastlord | 4 | 4 | 15% | 10/14/48/50/95 | 115/85/115/90/105 | `primal-bond` | geomancer 3, thief 3 | 12 (5080 JP) |
 | Troubador | 4 | 3 | 10% | 12/12/70/50/100 | 85/110/80/110/105 | `anthems` | orator 4, squire 5 | 12 (5400 JP) |
 | Dirge | 4 | 3 | 15% | 11/12/60/50/95 | 95/105/100/105/105 | `dirges` | mystic 4, thief 3 | 12 (5850 JP) |
-| Death Knight | 3 | 3 | 10% | 9/14/42/50/100 | 135/75/125/100/100 | `runeblade` | dark-knight 3, mystic 3, **30 kills** | 12 (5800 JP) |
+| Death Knight | 3 | 3 | 10% | 9/14/42/50/100 | 135/75/125/100/100 | `runic-strike` | dark-knight 3, mystic 3, **30 kills** | 12 (5800 JP) |
 | Warlock | 3 | 3 | 5% | 13/10/80/42/100 | 75/125/70/125/100 | `affliction` | black-mage 4, summoner 3 | 12 (5250 JP) |
 | Druid | 4 | 3 | 10% | 11/12/55/48/100 | 105/110/100/110/100 | `wild-shape` | geomancer 4, white-mage 3 | 12 (4550 JP) |
 | Paladin | 3 | 3 | 10% | 10/13/45/50/100 | 125/95/115/105/100 | `judgement` | knight 4, white-mage 4 | 12 (5300 JP) |
-| Rogue | 4 | 4 | 30% | 11/18/46/55/85 | 90/50/122/60/115 | `subtlety` | thief 4, ninja 2 | 12 (5100 JP) |
+| Rogue | 4 | 4 | 30% | 11/18/46/55/85 | 90/50/122/60/115 | `subterfuge` | thief 4, ninja 2 | 12 (5100 JP) |
 | Shaman | 3 | 3 | 5% | 12/11/65/47/100 | 95/115/90/115/100 | `totemcraft` | mystic 3, geomancer 3 | 12 (4800 JP) |
 
-Mime and Onion Knight learn nothing. That is authentic, not an omission: the Mime's power is
-entirely innate (`mimicry`, `cannot-equip`, `no-secondary`) and the Onion Knight's is its
-universal equipment access plus multipliers that scale with mastered jobs.
+**The Mime learns nothing**, which is authentic rather than an omission: its power is entirely
+innate. All three innates are real abilities rather than engine flags — `mimic` (the command
+itself), `bare-mimicry` (what it is paid for carrying no equipment at all) and `sole-command`
+(the cost: no secondary, no reaction, no support slot).
+
+**The Onion Knight** is the roster's one deliberate departure from FFT. Vanilla gives it nothing
+to learn at all, which reads as a bug rather than a joke in a game with a job-detail panel and a
+displayed mastery cost. `onion-skills` is the same joke played straight instead: six plain,
+cheap, wholly unspecialised soldier's actions with no element and no charge time between them.
+The ceiling is still the `onion-mastery` innate — a percent on all five multipliers for every job
+taken to level 8 — and never the abilities.
+
+---
+
+## Command menus
+
+Every action set in the game, in menu order, with the job that carries it as a **primary**
+command. Anything here can also be taken as a **secondary** command by any job except the two
+flagged `primaryOnly` (`math-skill`, `mimicry`), which is why the two unowned FFT sets and the
+two story-job sets still earn their place in the table.
+
+Passives are not listed here — they live in one flat pool per slot and any job may take any of
+them: 49 support, 31 reaction, 20 movement. `passivesForSlot()` in `src/state/abilityIndex.ts`
+is what the job screen's slot pickers read.
+
+| Set | Menu name | Primary job | # | Abilities |
+|---|---|---|---|---|
+||`basic-skill`|Basic Skill|`squire`|9|Focus, Dash, Throw Stone, Tend, Yell, Steel, Wish, Rally, Shield Bash
+||`item`|Item|`chemist`|14|Potion, Hi-Potion, X-Potion, Ether, Hi-Ether, Elixir, Antidote, Eye Drops, Echo Herbs, Maiden's Kiss, Soft, Holy Water, Remedy, Phoenix Down
+||`battle-skill`|Battle Skill|`knight`|9|Head Break, Armor Break, Shield Break, Weapon Break, Magick Break, Speed Break, Power Break, Mind Break, Stasis Sword
+||`charge`|Charge|`archer`|8|Charge +1 / +2 / +3 / +4 / +5 / +7 / +10 / +20
+||`punch-art`|Punch Art|`monk`|8|Spin Fist, Repeating Fist, Wave Fist, Earth Slash, Secret Fist, Purification, Chakra, Revive
+||`white-magick`|White Magick|`white-mage`|15|Cure, Cura, Curaga, Curaja, Raise, Arise, Reraise, Regen, Protect, Protectja, Shell, Shellja, Wall, Esuna, Holy
+||`black-magick`|Black Magick|`black-mage`|16|Fire · Fira · Firaga · Firaja, Blizzard · Blizzara · Blizzaga · Blizzaja, Thunder · Thundara · Thundaga · Thundaja, Poison, Toad, Death, Flare
+||`time-magick`|Time Magick|`time-mage`|14|Haste, Hastega, Slow, Slowga, Stop, Immobilize, Disable, Reflect, Quick, Demi, Demiga, Float, Meteor, Stabilize
+||`summon-magick`|Summon Magick|`summoner`|16|Moogle, Shiva, Ramuh, Ifrit, Titan, Golem, Carbuncle, Bahamut, Odin, Leviathan, Salamander, Sylph, Fairy, Lich, Cyclops, Zodiark
+||`steal`|Steal|`thief`|8|Steal Gil, Weapon, Shield, Helm, Armor, Accessory, Heart, EXP
+||`snatch`|Snatch|— (secondary)|6|Snatch Purse, Weapon, Charm, Breath, Mana, Footing
+||`talk-skill`|Talk Skill|`orator`|13|Invitation, Persuade, Praise, Threaten, Preach, Solution, Condemn, Insult, Mimic Daravon, Refute, Beast Tongue, Train, Rehabilitate
+||`yin-yang-magick`|Yin-Yang Magick|`mystic`|14|Blind, Spell Absorb, Life Drain, Pray Faith, Doubt Faith, Zombie, Silence Song, Blind Rage, Foxbird, Confusion Song, Dispel, Paralyze, Sleep, Break
+||`geomancy`|Geomancy|`geomancer`|14|Pitfall, Water Ball, Hell Ivy, Carve Model, Local Quake, Kamaitachi, Demon Fire, Quicksand, Sandstorm, Blizzard, Gusty Wind, Lava Ball, Static Shock, Will-o'-the-Wisp
+||`jump`|Jump|`dragoon`|13|Jump, Level Jump 2/3/4/5/8, Vertical Jump 2/3/4/5/8, High Jump, Dragon Dive
+||`draw-out`|Draw Out|`samurai`|10|Asura, Koutetsu, Bizen Boat, Murasame, Heaven's Cloud, Kiyomori, Muramasa, Kikuichimonji, Masamune, Chirijiraden
+||`throw`|Throw|`ninja`|14|Shuriken, Fuma Shuriken, Knife, Ninja Blade, Spear, Hammer, Iron Ball, Stick, Wand, Sword, Katana, Axe, Bomb, Caltrops
+||`math-skill`|Math Skill|`arithmetician`|8|**Attributes** Charge Time, Level, Experience, Height · **Divisors** Multiple of 3, 4, 5, Prime Number
+||`sing`|Sing|`bard`|9|Angel Song, Life Song, Cheer Song, Battle Song, Magick Song, Nameless Song, Space Storage, Last Song, Sky Demon
+||`dance`|Dance|`dancer`|9|Witch Hunt, Wiznaibus, Slow Dance, Polka Polka, Disillusion, Nameless Dance, Void Storage, Last Waltz, Obsidian Blade
+||`dark-sword`|Dark Sword|`dark-knight`|14|Sanguine Sword, Night Sword, Shadowblade, Crushing Blow, Infernal Strike, Abyssal Blade, Duskblade, Unyielding Blade, Crush Helm/Armor/Weapon/Accessory, Unholy Darkness, Unholy Sacrifice
+||`holy-sword`|Holy Sword|`holy-knight` (story)|6|Judgment Blade, Cleansing Strike, Northswain's Strike, Hallowed Bolt, Divine Ruination, Sanctify
+||`mighty-sword`|Mighty Sword|`divine-knight` (story)|5|Shellburst Stab, Blastar Punch, Hellcry Punch, Icewolf Bite, Crush Punch
+||`mimicry`|Mimicry|`mime`|2|Mimic, Echo Form
+||`onion-skills`|Onion Skills|`onion-knight`|6|Onion Slash, Onion Guard, Onion Hurl, Onion Resolve, Onion Mend, Onion Blade
+||`dread-arts`|Dread Arts|`shadowknight`|14|Taunt, Sentinel Roar, Rescue, Shield Slam, Provoking Wound, Bulwark, Intercept, Last Stand, Siphon Strike, Harm Touch, Malevolence, Unholy Blessing, Doom Judgement, Sanguine Covenant
+||`sacraments`|Sacraments|`templar`|14|Ward of Salvation, Smite of Conviction, Reprieve, Sanctuary, Act of War, Sacrament of Stone, Perseverance, Faithful Bulwark, Divine Arbitration, Torpor, Spirit Tap, Resurrection Rite, Unyielding Benediction, Shield of Faith
+||`enthrall`|Enthrall|`coercer`|12|Mesmerize, Mass Mesmerize, Dominate, Spellbind, Mind Blank, Mana Flow, Terrorize, Breeze, Peaceful Link, Cannibalise Thoughts, Possess Essence, Puppetmaster
+||`primal-bond`|Primal Bond|`beastlord`|15|Call of the Wild, Savage Mauling, Pack Tactics, Call Back, Mend Companion, Enrage Warder, Beastly Bond, Harrying Strike, Warder Rush, Rending Maul, Bestial Fury, Primal Instinct, Shared Senses, Bond of Blood, Warder's Guard
+||`anthems`|Anthems|`troubador`|12|Anthem of Valour, Allegretto, Dodge and Cover, Resonance, Lucky Break, Reverberation, Bria's Entrancing Sonnet, Jester's Cap, Demoralising Processional, Perfect Shrill, Countersong, Maestro's Cadence
+||`dirges`|Dirges|`dirge`|12|Percussion of Force, Death Knell, Hymn of Horror, Gravitas, Darksong Blade, Oration of Sacrifice, Cacophony of Blades, Shroud of the Fallen, Clara's Chaotic Cacophony, Luda's Nefarious Wail, Exuberant Encore, Requiem
+||`affliction`|Affliction|`warlock`|15|Corruption, Agony, Immolation, Unstable Affliction, Curse of Doom, Drain Life, Shadow Plague, Harvest, Shadow Bolt, Drain Soul, Curse of Tongues, Howl of Terror, Shadowburn, Soulstone, Summon Felguard
+||`subterfuge`|Subterfuge|`rogue`|15|Stealth, Vanish, Ambush, Backstab, Sinister Strike, Hemorrhage, Garrote, Cheap Shot, Shadowstep, Eviscerate, Kidney Strike, Rupture, Expose Armour, Slice and Dice, Deadly Crescendo
+||`wild-shape`|Wild Shape|`druid`|12|Dire Bear Form, Feral Cat Form, Mangle, Swipe, Shred, Wrath, Moonfire, Entangling Roots, Rejuvenation, Regrowth, Nature's Swiftness, Tranquillity
+||`totemcraft`|Totemcraft|`shaman`|15|Searing / Stoneskin / Cleansing / Windfury / Mana Tide / Earthbind / Healing Stream / Tremor Totem, Totemic Recall, Lightning Bolt, Chain Lightning, Earth Shock, Frost Shock, Ancestral Spirit, Bloodlust
+||`judgement`|Judgement|`paladin`|15|Devotion / Retribution / Concentration / Sanctity / Crusader Aura, Aura Mastery, Holy Strike, Seal of Righteousness, Seal of Justice, Judgement, Hammer of Justice, Consecration, Blessing of Protection, Lay on Hands, Divine Shield
+||`runic-strike`|Runic Strike|`death-knight`|13|Blood Strike, Frost Strike, Unholy Blight, Death Coil, Rune Tap, Howling Blast, Marked for Death, Raise Thrall, Obliterate, Chains of Ice, Anti-Magic Shell, Death and Decay, Army of the Dead
+
+The tables that back this are `SET_LIST` (metadata) and the per-set `actions(...)` blocks in
+`src/core/abilities/sets.ts`. To add an ability, add it to its set's block and to the owning
+job's `learnable` list — `jobSkillset()` will surface anything the job table misses, but an
+ability nobody priced shows up at a generated JP cost rather than a designed one.
 
 ---
 
@@ -199,8 +288,16 @@ exactly once, no requirement cycles exist, and no job is drawn left of its own p
 
 ## Sprite mapping
 
-FFT jobs map 1:1 onto their own sheets. Bard and Dancer are gender-locked, so both slots point
-at the single existing sheet.
+FFT jobs map 1:1 onto their own sheets, with two exceptions. Bard and Dancer are gender-locked,
+so both slots point at the single existing sheet.
+
+**Dark Knight and Onion Knight borrow.** The WotL-exclusive sheets (`1110`-`1130`) are broken in
+this rip — 18-pixel grey noise strips containing no artwork, flagged `broken: true` in
+`public/assets/manifest.json` and documented in docs/ASSETS.md §1.2. `SpriteAtlas.loadSheet`
+rejects them outright, so a job pointing at one renders nothing at all. Both jobs therefore
+borrow a live sheet and are separated by palette, exactly as the twelve imported jobs are; the
+recolours are in the borrowed-sheets table below. **Do not point anything at `1110`-`1130`** —
+`tools/check-jobs.mts` fails the build if you do.
 
 | Job | Male sheet | Female sheet |
 |---|---|---|
@@ -224,20 +321,24 @@ at the single existing sheet.
 | Bard (M) | `1060_Bard_Male_hd` | — |
 | Dancer (F) | — | `1062_Dancer_Female_hd` |
 | Mime | `1064_Mime_Male_hd` | `1066_Mime_Female_hd` |
-| Dark Knight | `1110_Dark_Knight_Male_hd` | `1112_Dark_Knight_Female_hd` |
-| Onion Knight | `1114_Onion_Knight_Male_hd` | `1116_Onion_Knight_Female_hd` |
+| Dark Knight | `1000_Knight_Male_hd` (borrowed) | `1002_Knight_Female_hd` (borrowed) |
+| Onion Knight | `924_Squire_Male_hd` (borrowed) | `994_Squire_Female_hd` (borrowed) |
 
 ### Borrowed sheets
 
-The imported jobs have no art of their own. Each borrows a thematically-adjacent FFT sheet;
+Fourteen jobs have no usable art of their own — the twelve imported ones, which were never in
+FFT, plus Dark Knight and Onion Knight, whose sheets are broken rips. Each borrows a
+thematically-adjacent FFT sheet;
 the recolour/edit each one needs to stop reading as its donor is recorded in
 `JOB_MECHANICS.get(id).spriteBorrow` in code, and summarised here. **Palette-only** entries can
 ship immediately through the GPU palette-LUT path; **edit** entries need real pixel work.
 
 | Job | Borrows | Work needed | Cost |
 |---|---|---|---|
-| Shadowknight | `1110`/`1112` Dark Knight | Bruised violet plate, bone trim, green sigil; add a shield boss, duller helm crest | palette + small edit |
-| Death Knight | `1110`/`1112` Dark Knight | Steel-blue rime palette, cyan helm-slit eyes, frost fume on idle cells | palette + fx |
+| Dark Knight | `1000`/`1002` Knight | Blackened plate, oxblood trim, matte-dark rather than the Knight's polished steel; drop the shield, lengthen the blade | palette + small edit |
+| Onion Knight | `924`/`994` Squire | Off-white and onion-green over the Squire's browns, brass buckles; the joke needs it to read as *deliberately* plain, so no added detail | palette only |
+| Shadowknight | `1044`/`1046` Dragoon | Bruised violet plate, bone trim, green sigil; shorten helm horns to a crest so it stops reading as a lancer, spear cells → flail, add a shield | palette + edit |
+| Death Knight | `1048`/`1050` Samurai | Steel-blue rime palette, cyan under-helm eyes, frost fume on idle cells; drop the topknot, square the helm, katana cells → greatsword | palette + edit |
 | Templar | `1000` Knight / `880` Agrias | White-and-gold liturgy; male sword cells repainted to a flanged mace, stole on pauldrons | palette + edit (M) |
 | Paladin | `1000`/`1002` Knight | Brass/crimson tabard, sunburst shield; sword cells → two-handed war hammer | palette + edit |
 | Coercer | `1036`/`1038` Mystic | Indigo-and-brass; floating focus-gem on idle, pole cells → open palm | palette + small edit |
@@ -260,10 +361,16 @@ Non-unit sheets used by mechanics:
 | Druid cat form | `1137_Coeurl_2_hd` | Tawny recolour, tendrils removed from head cells |
 | Shaman totems | `1088_Treant_hd` | Crop one upright segment, half unit height, four painted variants (stone / brazier / water / feathered pole), two-frame glow |
 
-Three jobs share the Dark Knight sheet and three share the Knight sheet. That is deliberate —
-the palette-LUT pipeline exists precisely so a sheet can carry several classes — but Paladin and
-Templar both need their silhouette-changing weapon edit before shipping, or the player will not
-be able to tell three knights apart at a glance on a busy field.
+Sheet sharing is deliberate — the palette-LUT pipeline exists precisely so one sheet can carry
+several classes — but it has a limit, and the Knight sheet is at it: Knight, Paladin, Templar
+(male) and Dark Knight all sit on `1000`/`1002`. That is why Shadowknight and Death Knight were
+moved onto the Dragoon and Samurai sheets rather than piling onto the Knight as well when their
+Dark Knight donor turned out to be broken: four plate jobs on one silhouette is already one too
+many. Paladin and Templar both need their silhouette-changing weapon edit before shipping, or
+the player will not be able to tell four knights apart at a glance on a busy field.
+
+Nothing in the roster references `1068` Chocobo, which is correct — it has zero whole-body pose
+frames and needs SHP part assembly before anything can render it.
 
 ---
 
@@ -276,7 +383,7 @@ can implement it without guessing.
 ### EverQuest II
 
 **Shadowknight** — the only job that *wants* to be hit. Real threat table: `generated: 2.0`
-doubles all threat he produces, and `grasp-of-night` is a hard taunt applying the `taunted`
+doubles all threat he produces, and `taunt` is a hard taunt applying the `taunted`
 status that forces enemy AI target selection. Builds **Dread** from damage taken (1 per 4 HP,
 +5 per enemy that targeted him) and spends it on lifetaps returning 50% of damage dealt as HP.
 FFT has no threat concept at all — this is the job that introduces one, and the enemy AI needs
@@ -322,13 +429,13 @@ if the Dirge ever out-damages the units it is buffing, the tuning has failed.
 **Death Knight** — a rune economy instead of MP. Blood, Frost and Unholy each hold 2 charges and
 recharge 1 per turn; abilities cost runes *by type*, so the turn-to-turn play is a genuine
 resource puzzle rather than a spell list. Spending runes generates **Runic Power**, which bleeds
-5 per idle turn so it must be used in the fight it was built in. `raise-ghoul` targets a corpse
+5 per idle turn so it must be used in the fight it was built in. `raise-thrall` targets a corpse
 tile — a KO'd unit that has not yet crystallised — and consumes it, which also denies the enemy
 their own raise. The UI needs three pip bars, not an MP bar.
 
-**Warlock** — three damage-over-time channels that coexist on one target (Corruption/shadow,
-Immolate/fire, Curse of Agony/dark), each ticking independently at the target's turn start.
-Curse of Agony ramps 60% → 100% → 140% across its three ticks, so letting it run is rewarded.
+**Warlock** — three damage-over-time channels that coexist on one target (`corruption`/shadow,
+`immolation`/fire, `agony`/dark), each ticking independently at the target's turn start.
+`agony` ramps 60% → 100% → 140% across its three ticks, so letting it run is rewarded.
 `unstable-affliction` damages anyone who dispels it. Kills on afflicted targets yield **Soul
 Shards**, which pay for the Felguard, Shadowburn, and `soulstone` — a pre-placed
 self-resurrection that stands an ally back up once at 25% HP before the crystal timer starts.
@@ -345,7 +452,7 @@ staff. The healing kit is unshifted-only, so the Druid must commit to a role per
 
 **Paladin** — persistent radius-3 auras (exactly one active, recomputed on move, stacking with
 anthems and songs because all three use different channels) plus a debt mechanic: seals placed
-on enemies accrue **Judgement Debt** on the target, capped at 3, consumed whole by `judgement`.
+on enemies accrue **Judgement Debt** on the target, capped at 3, consumed whole by `divine-judgement`.
 The loop is seal → attack twice → judge. `lay-on-hands` is a once-per-battle full heal that
 zeroes the Paladin's MP and must be surfaced in the UI as an obviously-single-use resource.
 `divine-shield` grants a round of immunity and wipes all threat he holds — the escape valve.

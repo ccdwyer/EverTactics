@@ -46,6 +46,7 @@ uniform float uExposure;
 uniform float uVignetteAmount;
 uniform float uVignetteRadius;
 uniform float uVignetteSoftness;
+uniform float uVignetteEdge;
 uniform vec3  uVignetteColor;
 
 uniform float uGrainAmount;
@@ -133,8 +134,29 @@ void main() {
   color += texture2D(uBloom, uv).rgb * uBloomIntensity * uBloomTint;
 
   // Vignette — optical falloff, so it multiplies scene light before the tonemapper.
-  float vig = 1.0 - uVignetteAmount * smoothstep(uVignetteRadius, uVignetteRadius + uVignetteSoftness, sqrt(r2));
-  color *= mix(uVignetteColor, vec3(1.0), vig);
+  //
+  // The radial coordinate is normalised so 1.0 lands exactly on the frame CORNER at any
+  // aspect ratio. Before, 'radius'/'softness' were raw aspect-scaled uv lengths, which made
+  // "0.55 + 0.5" reach only ~93% of the way to the corner on a 16:9 frame and meant the
+  // same numbers vignetted a 4:3 frame completely differently. With the normalisation,
+  // radius is "where darkening starts, as a fraction of the way to the corner".
+  //
+  // The 'uVignetteEdge' term is separate and rectangular: measured on
+  // refs/curated/triangle/official_005_steam.jpg, the top and bottom edges carry a dark
+  // band that runs the full width of the frame, which a purely radial falloff cannot make.
+  {
+    float cornerLen = 0.5 * length(vec2(uAspect, 1.0));
+    float rn = sqrt(r2) / max(cornerLen, 1e-4);
+    float radial = smoothstep(uVignetteRadius, uVignetteRadius + uVignetteSoftness, rn);
+
+    // Distance to the nearest frame edge, 0 at the edge, 1 at 25% in.
+    vec2 e = min(uv, 1.0 - uv) * 4.0;
+    float edge = 1.0 - clamp(min(e.x, e.y), 0.0, 1.0);
+    edge = edge * edge;
+
+    float darken = clamp(uVignetteAmount * max(radial, uVignetteEdge * edge), 0.0, 1.0);
+    color *= mix(vec3(1.0), uVignetteColor, darken);
+  }
 
   color *= uExposure;
   color = tonemapACES(color);
@@ -146,11 +168,16 @@ void main() {
 
   if (uGrainAmount > 0.0) {
     vec2 gp = floor(gl_FragCoord.xy / max(uGrainSize, 1.0)) + floor(uTime * 24.0) * 17.0;
-    float n = hash12(gp) - 0.5;
+    // Two octaves: a fine per-cell grain plus a coarser clump. Single-octave white noise
+    // reads as digital dither; real stock has structure at more than one scale.
+    float n = (hash12(gp) - 0.5) + (hash12(floor(gp * 0.5) + 91.7) - 0.5) * 0.5;
+    // Slight per-channel decorrelation — dye-cloud grain is not monochrome.
+    vec2 ch = hash22(gp + 13.3) - 0.5;
+    vec3 nrgb = n + vec3(ch.x, ch.y, -(ch.x + ch.y)) * 0.35;
     // Real film grain lives in the midtones and shadows, not the highlights.
     float l = luma(color);
     float weight = mix(1.0, 1.0 - l, uGrainShadowBias) * (1.0 - smoothstep(0.75, 1.0, l));
-    color += n * uGrainAmount * weight;
+    color += nrgb * uGrainAmount * weight;
   }
 
   if (uDebug == 1) {

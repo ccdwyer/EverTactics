@@ -7,6 +7,7 @@ import type {
   Battlefield,
   Command,
   Facing,
+  SurfaceKind,
   Team,
   Tile,
   Unit,
@@ -17,12 +18,14 @@ import type {
 import {
   BASIC_ATTACK,
   PERSONALITIES,
+  computeReachable,
   createAiWorld,
   decideTurn,
   manhattan,
   planTurn,
   tilesInAoe,
 } from '../src/core/ai/index';
+import { SURFACE_MOVE_COST } from '../src/core/grid';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -694,5 +697,162 @@ describe('decideTurn — archetypes diverge on one board', () => {
     for (let i = 0; i < 5; i++) decideTurn(state, 'ai', { world, personality: 'tactician' });
     const ms = (performance.now() - t0) / 5;
     expect(ms).toBeLessThan(100);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engagement — the AI has to actually pick a fight
+//
+// These are the regression tests for the stall that let a 6v6 run to a 400-turn
+// cap with most of the field at full HP. Three separate failures produced it and
+// each gets its own test here: no approach gradient once the enemy was more than
+// a handful of tiles away, a threat term that made stepping into reach strictly
+// worse than hovering outside it, and a move-cost table that disagreed with the
+// reducer's.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Walk a unit forward by whatever its own plan says to do, and report on it.
+ * The battle clock advances with the turn, as it does in a real battle — the AI
+ * reads it to decide how much longer it can afford to be careful.
+ */
+function stepTurn(
+  state: BattleState,
+  id: UnitId,
+  personality: keyof typeof PERSONALITIES,
+): { pos: Vec3; acted: boolean } {
+  const unit = state.units.get(id)!;
+  const commands = decideTurn(state, id, { personality });
+  const pos = finalPos(commands, unit.pos);
+  unit.pos = { ...pos };
+  unit.facing = 'S';
+  state.tick += 1;
+  return { pos, acted: actOf(commands) !== undefined };
+}
+
+describe('decideTurn — closing on the enemy', () => {
+  const OPEN_16 = Array.from({ length: 16 }, () => '0'.repeat(9));
+
+  /** Every archetype that is not explicitly a runaway must shorten the gap. */
+  const COMMITTED = ['aggressive', 'defensive', 'assassin', 'tactician', 'berserk'] as const;
+
+  for (const personality of COMMITTED) {
+    it(`a ${personality} unit out of range closes the distance turn after turn`, () => {
+      const state = makeState(makeField(OPEN_16), [
+        makeUnit('ai', 'enemy', { x: 4, y: 14, z: 0 }, { move: 3, hp: 400, maxHp: 400 }),
+        makeUnit('foe', 'player', { x: 4, y: 1, z: 0 }, { move: 3, hp: 400, maxHp: 400 }),
+      ]);
+      const foe = state.units.get('foe')!;
+      const start = manhattan(state.units.get('ai')!.pos, foe.pos);
+
+      const gaps: number[] = [];
+      let attacked = false;
+      for (let turn = 0; turn < 40 && !attacked; turn++) {
+        const step = stepTurn(state, 'ai', personality);
+        gaps.push(manhattan(step.pos, foe.pos));
+        attacked = step.acted;
+      }
+
+      // Monotone: never a step backwards, which is what oscillation looks like.
+      for (let i = 1; i < gaps.length; i++) {
+        expect(gaps[i]!, `turn ${i} moved away: ${gaps.join(' → ')}`).toBeLessThanOrEqual(gaps[i - 1]!);
+      }
+      // And real progress, not a one-tile shuffle.
+      expect(gaps[gaps.length - 1]!, `gaps ${gaps.join(' → ')}`).toBeLessThan(start - 4);
+      // It has to arrive and swing, not merely drift closer forever.
+      expect(attacked, `never attacked; gaps ${gaps.join(' → ')}`).toBe(true);
+    });
+  }
+
+  it('a coward still refuses to close — the fix is balance, not a zerg rush', () => {
+    const state = makeState(makeField(OPEN_16), [
+      makeUnit('ai', 'enemy', { x: 4, y: 8, z: 0 }, { move: 3 }),
+      makeUnit('foe', 'player', { x: 4, y: 5, z: 0 }, { move: 3, pa: 20 }),
+    ]);
+    const before = manhattan(state.units.get('ai')!.pos, state.units.get('foe')!.pos);
+    const step = stepTurn(state, 'ai', 'coward');
+    expect(manhattan(step.pos, state.units.get('foe')!.pos)).toBeGreaterThan(before);
+  });
+});
+
+describe('decideTurn — engaging rather than hovering', () => {
+  it('a unit adjacent to a weaker enemy attacks it instead of waiting', () => {
+    for (const personality of ['aggressive', 'defensive', 'assassin', 'tactician', 'berserk'] as const) {
+      const state = makeState(makeField(OPEN_9), [
+        makeUnit('ai', 'enemy', { x: 4, y: 4, z: 0 }, { pa: 14 }),
+        makeUnit('foe', 'player', { x: 4, y: 3, z: 0 }, { hp: 40, maxHp: 200, pa: 4 }),
+      ]);
+      const commands = decideTurn(state, 'ai', { personality });
+      const act = actOf(commands);
+      expect(act, `${personality} declined an adjacent kill`).toBeDefined();
+      expect(act?.targetUnit).toBe('foe');
+    }
+  });
+
+  it('steps into reach to attack even though the tile is more dangerous', () => {
+    // One tile out of range of a genuinely threatening enemy. Hovering here is
+    // strictly safer than closing, and that is exactly the trade the AI has to
+    // be willing to make.
+    const state = makeState(makeField(OPEN_9), [
+      makeUnit('ai', 'enemy', { x: 4, y: 6, z: 0 }, { pa: 12, move: 3 }),
+      makeUnit('foe', 'player', { x: 4, y: 3, z: 0 }, { pa: 22, maxHp: 300, hp: 300 }),
+    ]);
+    const commands = decideTurn(state, 'ai', { personality: 'aggressive' });
+    expect(actOf(commands)).toBeDefined();
+    expect(manhattan(finalPos(commands, { x: 4, y: 6, z: 0 }), { x: 4, y: 3 })).toBe(1);
+  });
+
+  it('two AI squads converge instead of staring at each other', () => {
+    const rows = Array.from({ length: 18 }, () => '0'.repeat(11));
+    const state = makeState(makeField(rows), [
+      makeUnit('a1', 'enemy', { x: 3, y: 16, z: 0 }, { job: 'knight' }),
+      makeUnit('a2', 'enemy', { x: 6, y: 16, z: 0 }, { job: 'archer' }),
+      makeUnit('b1', 'player', { x: 3, y: 1, z: 0 }, { job: 'knight' }),
+      makeUnit('b2', 'player', { x: 6, y: 1, z: 0 }, { job: 'archer' }),
+    ]);
+
+    let contact = -1;
+    for (let turn = 0; turn < 40 && contact < 0; turn++) {
+      // The battle clock is what erodes a stand-off, so it has to advance.
+      state.tick = turn;
+      for (const id of ['a1', 'b1', 'a2', 'b2']) {
+        const unit = state.units.get(id)!;
+        const commands = decideTurn(state, id);
+        if (actOf(commands) !== undefined) contact = turn;
+        unit.pos = { ...finalPos(commands, unit.pos) };
+      }
+    }
+    expect(contact, 'no squad ever committed to an attack').toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('computeReachable — agrees with the reducer about footing', () => {
+  it('charges the same move cost the reducer will charge', () => {
+    // The AI keeps its own copy of the surface cost table so `evaluate.ts` stays
+    // free of the rest of core. If the two drift, the AI plans routes the
+    // reducer throws IllegalCommandError on and the unit loses its turn.
+    for (const surface of Object.keys(SURFACE_MOVE_COST) as SurfaceKind[]) {
+      const expected = SURFACE_MOVE_COST[surface];
+      if (!Number.isFinite(expected)) continue;
+
+      const tiles: Tile[] = [];
+      for (let y = 0; y < 3; y++) {
+        for (let x = 0; x < 3; x++) {
+          tiles.push({
+            x, y, height: 0, depth: Infinity,
+            surface: x === 1 && y === 0 ? surface : 'grass',
+            slope: 'flat', passable: true, submerged: false,
+          });
+        }
+      }
+      const field: Battlefield = {
+        width: 3, height: 3, tiles, mapId: 'surface',
+        tileAt: (x, y) => (x < 0 || y < 0 || x > 2 || y > 2 ? undefined : tiles[y * 3 + x]),
+      };
+      const unit = makeUnit('ai', 'enemy', { x: 1, y: 1, z: 0 }, { move: 6 });
+      const option = computeReachable(makeState(field, [unit]), unit)
+        .find((o) => o.pos.x === 1 && o.pos.y === 0);
+      expect(option?.cost, `cost of stepping onto ${surface}`).toBe(expected);
+    }
   });
 });

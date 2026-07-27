@@ -46,20 +46,24 @@ export type ScoreTerm =
   | 'height'          // height advantage over the units we care about
   | 'facingSafety'    // 0..1, how well our final facing covers the real threats
   | 'flankRisk'       // being pinched between hostiles on opposite sides
-  | 'threatExposure'  // expected incoming damage at the destination, fraction of our HP
+  | 'threatExposure'  // expected incoming damage at the destination, fraction of
+                      //      our HP, scaled by `battleCaution`
   | 'clusterRisk'     // standing packed with allies while hostiles hold AoE
   | 'chokepoint'      // holding a narrow tile that gates the approach
   | 'guardAlly'       // staying between the protected ally and the threats
-  | 'closeDistance'   // 0..1, closeness to the nearest hostile
-  | 'keepDistance'    // 0..1, distance kept from the nearest hostile
+  | 'closeDistance'   // 0..1, fit to our preferred engagement range; falls off
+                      //      smoothly with separation so it always pulls us in
+  | 'keepDistance'    // 0..1, distance kept, saturating at the range we can
+                      //      still strike from — backing off further buys nothing
   // ── target selection ──
   | 'lowHpTarget'     // 0..1, how wounded the primary target is
   | 'squishyTarget'   // 0..1, how fragile the primary target is
   | 'taunt'           // 1 when we obey a taunt compulsion
   // ── self preservation ──
   | 'terrainHazard'   // destination tile actively hurts us (lava, deep water)
-  | 'selfRisk'        // chance we simply die before our next turn at this spot
-  | 'idle';           // 1 when the candidate does nothing useful at all
+  | 'selfRisk'        // chance we simply die before our next turn at this spot,
+                      //      scaled by `battleCaution`
+  | 'idle';           // 1 when the candidate lands no ability, moved or not
 
 export const SCORE_TERMS: readonly ScoreTerm[] = [
   'damage', 'kill', 'mpDrain', 'statusInflict', 'overkill',
@@ -108,7 +112,11 @@ const BASE: Record<ScoreTerm, number> = {
   clusterRisk: -10,
   chokepoint: 10,
   guardAlly: 0,
-  closeDistance: 14,
+  // Every archetype needs a real reason to walk toward the fight. This is the
+  // only term with a gradient out in the open field, so if it is small the unit
+  // has no opinion about the enemy at all and settles wherever the terrain
+  // happens to score best — which is how a battle ends up never happening.
+  closeDistance: 46,
   keepDistance: 0,
 
   lowHpTarget: 22,
@@ -196,7 +204,7 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
     weights: weights({
       damage: 130,
       kill: 320,
-      closeDistance: 46,
+      closeDistance: 85,
       threatExposure: -22,
       selfRisk: -55,
       facingSafety: 12,
@@ -225,11 +233,11 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
       chokepoint: 58,
       facingSafety: 46,
       flankRisk: -60,
-      threatExposure: -95,
-      closeDistance: 4,
-      keepDistance: 6,
+      threatExposure: -70,
+      closeDistance: 58,
+      keepDistance: 8,
       guardAlly: 60,
-      selfRisk: -160,
+      selfRisk: -130,
       terrainHazard: -90,
       idle: -12,
     }),
@@ -257,8 +265,8 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
       friendlyStatus: -240,
       mpCost: -5,
       threatExposure: -120,
-      keepDistance: 40,
-      closeDistance: -18,
+      keepDistance: 55,
+      closeDistance: 30,
       selfRisk: -190,
       height: 18,
       facingSafety: 18,
@@ -282,7 +290,7 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
       kill: 420,
       lowHpTarget: 120,
       squishyTarget: 95,
-      closeDistance: 26,
+      closeDistance: 70,
       threatExposure: -34,
       facingSafety: 8,
       height: 20,
@@ -307,8 +315,8 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
       damage: 70,
       kill: 200,
       threatExposure: -140,
-      keepDistance: 55,
-      closeDistance: -35,
+      keepDistance: 70,
+      closeDistance: 26,
       selfRisk: -260,
       facingSafety: 30,
       height: 26,
@@ -317,8 +325,8 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
     }),
     fleeHpFraction: 0.45,
     survivalWeights: {
-      keepDistance: 300,
-      closeDistance: -180,
+      keepDistance: 120,
+      closeDistance: -60,
       threatExposure: -320,
       selfRisk: -420,
       damage: -30,
@@ -339,7 +347,7 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
     weights: weights({
       damage: 150,
       kill: 300,
-      closeDistance: 130,
+      closeDistance: 180,
       threatExposure: 0,
       selfRisk: 0,
       flankRisk: 0,
@@ -379,8 +387,8 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
       threatExposure: -70,
       clusterRisk: -26,
       terrainHazard: -85,
-      closeDistance: 8,
-      keepDistance: 12,
+      closeDistance: 50,
+      keepDistance: 30,
       selfRisk: -140,
       wasteRisk: -90,
       idle: -14,
@@ -396,6 +404,32 @@ export const PERSONALITIES: Readonly<Record<PersonalityId, Personality>> = {
 };
 
 export const DEFAULT_PERSONALITY: PersonalityId = 'aggressive';
+
+/** Ticks a squad is allowed to be shy before the clock starts pushing it in. */
+const PATIENCE_TICKS = 24;
+/** Ticks over which caution decays from full to `MIN_CAUTION`. */
+const PATIENCE_RAMP = 60;
+/** Self-preservation never switches off entirely; it just stops being decisive. */
+const MIN_CAUTION = 0.15;
+
+/**
+ * How much weight the self-preservation terms still carry at clock `tick`.
+ *
+ * Two cautious squads across open ground is a stable equilibrium: each one's
+ * threat term says "make them come to us", so neither moves. Nothing in the
+ * scoring breaks that tie, because for a coward holding position genuinely *is*
+ * the highest-scoring play — forever. Real skirmishes do not work that way;
+ * somebody always commits. Caution therefore decays with the battle clock, so a
+ * stand-off resolves itself instead of running to the turn cap. It bites late
+ * enough that a normal engagement is over before it matters, and it never
+ * reaches zero: a wounded coward still runs, it just stops being able to run out
+ * the clock.
+ */
+export function battleCaution(tick: number): number {
+  const over = tick - PATIENCE_TICKS;
+  if (over <= 0) return 1;
+  return 1 - (1 - MIN_CAUTION) * clamp01(over / PATIENCE_RAMP);
+}
 
 /** Resolve a personality from an id, a full object, or undefined. */
 export function resolvePersonality(
@@ -414,14 +448,21 @@ export function resolvePersonality(
  * Returned as a plain mutable record so callers can layer situational tweaks
  * (taunt compulsion, objective pressure) without mutating the shared table.
  */
-export function effectiveWeights(personality: Personality, unit: Unit): Record<ScoreTerm, number> {
+export function effectiveWeights(
+  personality: Personality,
+  unit: Unit,
+  caution = 1,
+): Record<ScoreTerm, number> {
   const out = { ...personality.weights } as Record<ScoreTerm, number>;
   const maxHp = Math.max(1, unit.stats.maxHp);
   const hpFraction = unit.stats.hp / maxHp;
   if (personality.fleeHpFraction > 0 && hpFraction <= personality.fleeHpFraction) {
     // Ramp: the further below the threshold, the harder the survival vector bites.
+    // Scaled by `caution` as well, because a battle whose last survivor is a
+    // wounded coward with a movement advantage otherwise never ends: it simply
+    // outruns the pursuit until the turn cap. Late on, it turns and fights.
     const depth = clamp01((personality.fleeHpFraction - hpFraction) / personality.fleeHpFraction);
-    const intensity = 0.5 + 0.5 * depth;
+    const intensity = (0.5 + 0.5 * depth) * caution;
     for (const key of Object.keys(personality.survivalWeights) as ScoreTerm[]) {
       const delta = personality.survivalWeights[key];
       if (delta !== undefined) out[key] = out[key] + delta * intensity;

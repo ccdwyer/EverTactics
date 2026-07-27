@@ -135,7 +135,18 @@ export interface DofSettings {
   tiltBand: number;
   /** Falloff distance past the band, in UV. */
   tiltFalloff: number;
-  /** Maximum blur radius in full-res pixels. */
+  /**
+   * Weight of the elliptical corner term, 0..1. A pure horizontal band leaves the frame
+   * corners razor sharp; both reference frames soften them. See COC_CHUNK.
+   */
+  tiltRadial: number;
+  /** Normalised radius (1.0 = frame corner) at which the corner term starts. */
+  tiltRadialStart: number;
+  /**
+   * Maximum blur radius, in pixels **at 1080p**. Scaled by the actual frame height at
+   * render time so a 4K screenshot is blurred by the same visible fraction of the frame,
+   * not by half as much.
+   */
   maxCoCPixels: number;
   /** Superlinear boost applied to bright samples so highlights form discs. */
   bokehBoost: number;
@@ -153,9 +164,18 @@ export interface GradeSettings {
 
 export interface VignetteSettings {
   enabled: boolean;
+  /** Fraction of the light removed where the falloff is complete. 1 = down to `color`. */
   amount: number;
+  /** Where darkening starts, as a fraction of the way from centre to the frame CORNER. */
   radius: number;
+  /** Width of the transition, in the same normalised units. */
   softness: number;
+  /**
+   * Weight of the extra rectangular edge darkening, 0..1. Both references carry a dark band
+   * along the full width of the top and bottom edges, which a radial falloff cannot draw.
+   */
+  edge: number;
+  /** The colour the darkened region multiplies toward. Never neutral. */
   color: [number, number, number];
 }
 
@@ -231,6 +251,41 @@ const QUALITY: Record<PostQuality, QualityProfile> = {
   ultra: { aoScale: 0.75, aoSlices: 6, aoSteps: 8, bloomMips: 6, dofScale: 0.5, dofTaps: 48, aaSearchSteps: 12, aoBlur: true, dofFill: true },
 };
 
+/**
+ * Measured floors, from `refs/curated/triangle/official_005_steam.jpg` and
+ * `official_019_se_screenshot.jpg`.
+ *
+ * These are not taste knobs. VISUAL_TARGET.md lists "weak or absent depth of field" as an
+ * explicit fail condition and says the depth of field is "*the* diorama tell and we are
+ * likely to under-do it out of timidity". Scenario post profiles were authored against an
+ * older, much weaker DoF and now dial it down to roughly a fifth of what the references
+ * show — so the stack clamps *up* to these values rather than trusting the dial.
+ *
+ * The dial still works in the direction that matters: `enabled: false` removes the effect
+ * entirely, and anything above the floor is passed through untouched. Set
+ * `respectReferenceFloor = false` on the stack to author below the floor deliberately.
+ */
+export const REFERENCE_FLOOR = {
+  /** Blur radius at the softest part of the frame, in pixels at 1080p. Measured ~20px. */
+  dofCoCPixels: 20,
+  /** Half-height of the fully sharp band, in UV. Measured: the sharp stripe is ~1/3 of frame height. */
+  dofTiltBand: 0.17,
+  /** Falloff past the band. Short, so the transition is visible rather than a slow smear. */
+  dofTiltFalloff: 0.22,
+  /** Corner-term weight. */
+  dofTiltRadial: 0.7,
+  /** Fraction of light removed at the frame corner. Measured ~0.8 on both references. */
+  vignetteAmount: 0.72,
+  /** Where the falloff starts, fraction of the way to the corner. */
+  vignetteRadius: 0.26,
+  /**
+   * Grain amplitude as a fraction of full scale. Measured against the reference frames at
+   * 1:1 — 0.03 was still invisible in a screenshot, which fails the "clearly visible" note
+   * in VISUAL_TARGET.md section 5.
+   */
+  grainAmount: 0.05,
+} as const;
+
 export function defaultPostSettings(tileSize = 1): PostSettings {
   return {
     exposure: 1.0,
@@ -265,18 +320,29 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       focusDistance: 18 * tileSize,
       focusRange: 6 * tileSize,
       cocScale: 0.55,
-      tiltCenter: [0.5, 0.47],
+      // Slightly above centre: the reference frames put the sharp band on the action and
+      // leave the negative space above it soft.
+      tiltCenter: [0.5, 0.52],
       tiltAngle: 0,
-      tiltBand: 0.12,
-      tiltFalloff: 0.3,
-      maxCoCPixels: 14,
-      bokehBoost: 1.4,
-      nearStrength: 0.85,
-      nearSpread: 0.35,
+      tiltBand: REFERENCE_FLOOR.dofTiltBand,
+      tiltFalloff: REFERENCE_FLOOR.dofTiltFalloff,
+      tiltRadial: REFERENCE_FLOOR.dofTiltRadial,
+      tiltRadialStart: 0.42,
+      maxCoCPixels: REFERENCE_FLOOR.dofCoCPixels,
+      bokehBoost: 1.6,
+      nearStrength: 0.9,
+      nearSpread: 0.4,
     },
     grade: { enabled: true, amount: 1.0, name: 'dusk-plains' },
-    vignette: { enabled: true, amount: 0.26, radius: 0.55, softness: 0.5, color: [0.05, 0.05, 0.09] },
-    grain: { enabled: true, amount: 0.016, size: 1.5, shadowBias: 0.6, animate: true },
+    vignette: {
+      enabled: true,
+      amount: REFERENCE_FLOOR.vignetteAmount,
+      radius: REFERENCE_FLOOR.vignetteRadius,
+      softness: 0.62,
+      edge: 0.55,
+      color: [0.04, 0.05, 0.09],
+    },
+    grain: { enabled: true, amount: REFERENCE_FLOOR.grainAmount, size: 1.0, shadowBias: 0.4, animate: true },
     chroma: { enabled: true, amount: 0.35, edge: 3.4 },
     aa: { enabled: true, subpix: 0.4, threshold: 0.125, thresholdMin: 0.0312, spritePolicy: 'exclude' },
   };
@@ -422,6 +488,12 @@ export class PostStack implements PostEffectsHost {
   /** Set to a value other than 'off' to inspect an individual buffer. */
   debugView: DebugView = 'off';
 
+  /**
+   * When true (the default) DoF, vignette and grain are clamped up to {@link REFERENCE_FLOOR}.
+   * Turn it off to author deliberately below the measured reference look.
+   */
+  respectReferenceFloor = true;
+
   private whiteTexture: Texture;
   private disposed = false;
 
@@ -513,10 +585,13 @@ export class PostStack implements PostEffectsHost {
       uFocusRange: { value: this.settings.dof.focusRange },
       uCoCScale: { value: this.settings.dof.cocScale },
       uTiltMix: { value: this.settings.dof.tiltMix },
-      uTiltCenter: { value: new Vector2(0.5, 0.46) },
+      uTiltCenter: { value: new Vector2(0.5, 0.52) },
       uTiltAxis: { value: new Vector2(0, 1) },
       uTiltBand: { value: this.settings.dof.tiltBand },
       uTiltFalloff: { value: this.settings.dof.tiltFalloff },
+      uTiltRadial: { value: this.settings.dof.tiltRadial },
+      uTiltRadialStart: { value: this.settings.dof.tiltRadialStart },
+      uCoCAspect: { value: new Vector2(1, 1) },
     });
 
     this.cocPass = new FullScreenPass(DOF_COC_FRAG, {
@@ -570,6 +645,7 @@ export class PostStack implements PostEffectsHost {
       uVignetteAmount: { value: this.settings.vignette.amount },
       uVignetteRadius: { value: this.settings.vignette.radius },
       uVignetteSoftness: { value: this.settings.vignette.softness },
+      uVignetteEdge: { value: this.settings.vignette.edge },
       uVignetteColor: { value: new Vector3(0.06, 0.06, 0.1) },
       uGrainAmount: { value: this.settings.grain.amount },
       uGrainSize: { value: this.settings.grain.size },
@@ -980,9 +1056,9 @@ export class PostStack implements PostEffectsHost {
     }
 
     // 5 ── depth of field ---------------------------------------------------
-    const dof = this.settings.dof;
-    const dofOn = dof.enabled && dof.intensity > 0.001 && dof.maxCoCPixels > 0.5;
-    const maxCoCHalf = dof.maxCoCPixels * dof.intensity * this.profile.dofScale;
+    const dof = this.resolveDof();
+    const dofOn = dof.enabled && dof.cocPixelsThisFrame > 0.5;
+    const maxCoCHalf = dof.cocPixelsThisFrame * this.profile.dofScale;
     let dofTexture: Texture = colorTarget.texture;
     if (dofOn) {
       this.syncCoCUniforms(this.cocPass.uniforms);
@@ -1028,20 +1104,27 @@ export class PostStack implements PostEffectsHost {
     (cu['uResolution']!.value as Vector2).set(this.width, this.height);
     cu['uTime']!.value = this.settings.grain.animate ? this.time : 0;
     cu['uDoFEnabled']!.value = dofOn ? 1 : 0;
-    cu['uMaxCoCPixels']!.value = Math.max(1, dof.maxCoCPixels * dof.intensity);
+    cu['uMaxCoCPixels']!.value = Math.max(1, dof.cocPixelsThisFrame);
     cu['uNearStrength']!.value = dof.nearStrength;
     cu['uBloomIntensity']!.value = bloom.enabled ? bloom.intensity : 0;
     (cu['uBloomTint']!.value as Vector3).set(bloom.tint[0], bloom.tint[1], bloom.tint[2]);
     cu['uExposure']!.value = this.settings.exposure;
-    cu['uVignetteAmount']!.value = this.settings.vignette.enabled ? this.settings.vignette.amount : 0;
-    cu['uVignetteRadius']!.value = this.settings.vignette.radius;
-    cu['uVignetteSoftness']!.value = this.settings.vignette.softness;
-    (cu['uVignetteColor']!.value as Vector3).set(
-      this.settings.vignette.color[0],
-      this.settings.vignette.color[1],
-      this.settings.vignette.color[2],
-    );
-    cu['uGrainAmount']!.value = this.settings.grain.enabled ? this.settings.grain.amount : 0;
+    const vig = this.settings.vignette;
+    const floor = this.respectReferenceFloor;
+    cu['uVignetteAmount']!.value = vig.enabled
+      ? floor
+        ? Math.max(vig.amount, REFERENCE_FLOOR.vignetteAmount)
+        : vig.amount
+      : 0;
+    cu['uVignetteRadius']!.value = floor ? Math.min(vig.radius, REFERENCE_FLOOR.vignetteRadius) : vig.radius;
+    cu['uVignetteSoftness']!.value = vig.softness;
+    cu['uVignetteEdge']!.value = vig.edge;
+    (cu['uVignetteColor']!.value as Vector3).set(vig.color[0], vig.color[1], vig.color[2]);
+    cu['uGrainAmount']!.value = this.settings.grain.enabled
+      ? floor
+        ? Math.max(this.settings.grain.amount, REFERENCE_FLOOR.grainAmount)
+        : this.settings.grain.amount
+      : 0;
     cu['uGrainSize']!.value = Math.max(1, this.settings.grain.size * this.pixelRatio);
     cu['uGrainShadowBias']!.value = this.settings.grain.shadowBias;
     cu['uChromaAmount']!.value = this.settings.chroma.enabled ? this.settings.chroma.amount : 0;
@@ -1075,7 +1158,7 @@ export class PostStack implements PostEffectsHost {
   }
 
   private syncCoCUniforms(u: Record<string, IUniform>): void {
-    const dof = this.settings.dof;
+    const dof = this.resolveDof();
     u['uFocusDist']!.value = dof.focusDistance;
     u['uFocusRange']!.value = Math.max(dof.focusRange, 1e-3);
     u['uCoCScale']!.value = dof.cocScale;
@@ -1085,6 +1168,33 @@ export class PostStack implements PostEffectsHost {
     (u['uTiltAxis']!.value as Vector2).set(-Math.sin(rad), Math.cos(rad));
     u['uTiltBand']!.value = dof.tiltBand;
     u['uTiltFalloff']!.value = Math.max(dof.tiltFalloff, 1e-3);
+    u['uTiltRadial']!.value = dof.tiltRadial;
+    u['uTiltRadialStart']!.value = dof.tiltRadialStart;
+    (u['uCoCAspect']!.value as Vector2).set(this.width / Math.max(this.height, 1), 1);
+  }
+
+  /**
+   * The DoF settings actually used this frame: authored values clamped up to
+   * {@link REFERENCE_FLOOR}, and the CoC radius rescaled from its 1080p reference to the
+   * current frame height.
+   *
+   * `intensity` scales the blur, but only down to the floor — see REFERENCE_FLOOR for why.
+   */
+  private resolveDof(): DofSettings & { cocPixelsThisFrame: number } {
+    const d = this.settings.dof;
+    const floor = this.respectReferenceFloor;
+    const heightScale = this.height / 1080;
+
+    const dialled = d.maxCoCPixels * d.intensity;
+    const pixels1080 = floor ? Math.max(dialled, REFERENCE_FLOOR.dofCoCPixels) : dialled;
+
+    return {
+      ...d,
+      tiltBand: floor ? Math.min(d.tiltBand, REFERENCE_FLOOR.dofTiltBand) : d.tiltBand,
+      tiltFalloff: floor ? Math.min(d.tiltFalloff, REFERENCE_FLOOR.dofTiltFalloff) : d.tiltFalloff,
+      tiltRadial: floor ? Math.max(d.tiltRadial, REFERENCE_FLOOR.dofTiltRadial) : d.tiltRadial,
+      cocPixelsThisFrame: pixels1080 * heightScale,
+    };
   }
 
   /** Put the sharp band on a world position — e.g. the acting unit. */

@@ -360,12 +360,49 @@ export interface SpriteUniforms {
 
   /** How much scene light modulates the art. 1 = fully lit, 0 = flat. */
   uLightInfluence: { value: number };
+  /** Scales the Lambert accumulation before it is applied to the art. */
+  uLightGain: { value: number };
+  /**
+   * Extra weight on the *direct* term only. A billboard always turns to face the
+   * camera, so it presents a near-perfect normal to any key light on the camera's
+   * side and soaks up more of it than any terrain surface ever does — which is
+   * precisely what makes a sprite read as brighter than the world it stands in.
+   * Discounting the direct term (and only the direct term) puts a unit back at
+   * the same exposure as the stone under its feet, without flattening the
+   * shading the way a global influence cut would.
+   */
+  uDirectGain: { value: number };
+  /**
+   * Light the art still receives when the key is fully occluded. Keeps a unit in
+   * shadow sitting in the map's cool tone instead of crushing to black — the FFT
+   * reference never has a silhouette that reads as a hole.
+   */
+  uAmbientFloor: { value: THREE.Color };
   /** Curvature of the impostor normal. 0 = flat card, 1 = strongly cylindrical. */
   uShadeBend: { value: number };
   /** Key light travel direction in world space, for the silhouette rim. */
   uKeyLightDir: { value: THREE.Vector3 };
+  /** Fill/back light travel direction — drives the cool counter-rim. */
+  uFillLightDir: { value: THREE.Vector3 };
   uRimColor: { value: THREE.Color };
   uRimStrength: { value: number };
+  uBackRimColor: { value: THREE.Color };
+  uBackRimStrength: { value: number };
+
+  /**
+   * Ground bounce. Terrain-coloured light rising into the lower half of the
+   * figure — the cheapest, most convincing "this unit is standing *in* the
+   * scene" cue there is, and the thing that keeps legs from reading as cut-out.
+   */
+  uBounceColor: { value: THREE.Color };
+  uBounceStrength: { value: number };
+
+  /** Occlusion baked into the lowest texels of the art, where it meets the tile. */
+  uFootShade: { value: number };
+  /** Height of that ramp, in texels. */
+  uFootShadeTexels: { value: number };
+  /** 0 while the unit is airborne, so the feet contact term lifts with the hop. */
+  uGrounded: { value: number };
 
   /** Damage / heal flash. */
   uFlashColor: { value: THREE.Color };
@@ -386,6 +423,13 @@ export interface SpriteUniforms {
   uOpacity: { value: number };
   /** Palette alpha below this is discarded. */
   uAlphaCut: { value: number };
+
+  /**
+   * How far, in world units, the quad is pushed away from the key light **in the
+   * shadow pass only**. See {@link DEPTH_PROJECT_VERTEX} — this is what stops a
+   * billboard from casting a shadow onto itself.
+   */
+  uShadowPush: { value: number };
 }
 
 export interface SpriteMaterialBundle {
@@ -405,12 +449,20 @@ export interface SpriteMaterialOptions {
   sheetHeight: number;
   frameWidth: number;
   frameHeight: number;
-  /** Defaults to a restrained 0.55 — pixel art dies under heavy shading. */
+  /** Defaults to 1 — the sprites live in the same light as the terrain. */
   lightInfluence?: number;
+  lightGain?: number;
+  directGain?: number;
+  ambientFloor?: THREE.ColorRepresentation;
   shadeBend?: number;
   rimColor?: THREE.ColorRepresentation;
   rimStrength?: number;
+  backRimColor?: THREE.ColorRepresentation;
+  backRimStrength?: number;
+  bounceColor?: THREE.ColorRepresentation;
+  bounceStrength?: number;
   keyLightDirection?: THREE.Vector3;
+  fillLightDirection?: THREE.Vector3;
 }
 
 const SPRITE_DECLARATIONS = /* glsl */ `
@@ -423,10 +475,21 @@ uniform vec2  uFrameTexels;
 uniform vec2  uTexelStep;
 uniform float uMirror;
 uniform float uLightInfluence;
+uniform float uLightGain;
+uniform float uDirectGain;
+uniform vec3  uAmbientFloor;
 uniform float uShadeBend;
 uniform vec3  uKeyLightDir;
+uniform vec3  uFillLightDir;
 uniform vec3  uRimColor;
 uniform float uRimStrength;
+uniform vec3  uBackRimColor;
+uniform float uBackRimStrength;
+uniform vec3  uBounceColor;
+uniform float uBounceStrength;
+uniform float uFootShade;
+uniform float uFootShadeTexels;
+uniform float uGrounded;
 uniform vec3  uFlashColor;
 uniform float uFlash;
 uniform vec3  uTint;
@@ -469,6 +532,30 @@ float spriteHash(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
   q += dot(q, q.yzx + 33.33);
   return fract((q.x + q.y) * q.z);
+}
+
+/**
+ * How strongly a light rims the silhouette at a point whose outward edge normal
+ * (in the quad's screen plane) is \`outward\`.
+ *
+ * \`lightView\` is the light's *travel* direction in view space. Its z component
+ * says where the light stands relative to the camera: positive means it is
+ * travelling toward the lens, i.e. it is behind the subject and backlights it;
+ * negative means it is behind the camera and can produce no rim at all. The xy
+ * component is the lateral part that picks an edge.
+ */
+float spriteRimTerm(vec3 lightView, vec2 outward) {
+  vec2 plane = vec2(dot(lightView, vQuadRight), dot(lightView, vQuadUp));
+  float lateral = length(plane);
+  float side = 0.0;
+  if (lateral > 1e-4) {
+    float facing = clamp(dot(outward, -plane / lateral), 0.0, 1.0);
+    side = facing * facing * facing * lateral;
+  }
+  // A pure backlight haloes the whole silhouette evenly; weight it below the
+  // directional term so a side light still reads as directional.
+  float halo = clamp(lightView.z, 0.0, 1.0) * 0.3;
+  return clamp(side + halo, 0.0, 1.0);
 }
 `;
 
@@ -529,12 +616,45 @@ const SPRITE_NORMAL_FRAGMENT = /* glsl */ `
 `;
 
 const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
-  vec3 spriteLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
-  vec3 spriteColor = spriteAlbedo * mix(vec3(1.0), spriteLight, uLightInfluence);
+  // ── scene light ────────────────────────────────────────────────────────────
+  // diffuseColor was left white above, so this accumulation is *pure incoming
+  // light* including the key, the hemisphere fill, the ambient bounce and every
+  // dynamic VFX point light in range. Applying it at full influence is what puts
+  // the unit inside the diorama instead of on top of it; uAmbientFloor is the
+  // only thing keeping a fully shadowed unit from crushing to black.
+  vec3 spriteLight = reflectedLight.directDiffuse * uDirectGain + reflectedLight.indirectDiffuse;
+  vec3 spriteShade = uAmbientFloor + spriteLight * uLightGain;
 
-  // Silhouette rim from the 1-texel alpha gradient, restricted to the edge that
-  // faces the key light. Cheap (4 taps) and it is what welds the unit to the
-  // scene lighting instead of looking like a decal.
+  // Ground bounce: terrain-coloured light rising into the lower body. Grounding
+  // is mostly this plus the contact darkening below — a figure whose legs are as
+  // bright as its shoulders always reads as a sticker.
+  float spriteUp = clamp(spriteCellUv.y, 0.0, 1.0);
+  float bounceK = 1.0 - smoothstep(0.0, 0.62, spriteUp);
+  spriteShade += uBounceColor * (uBounceStrength * bounceK * bounceK);
+
+  // Contact occlusion in the art itself, ramping over the lowest few texels.
+  // Lifts away with the unit during a hop so it never detaches from the tile.
+  float footRamp = 1.0 - smoothstep(0.0, max(uFootShadeTexels, 1.0) / max(uFrameTexels.y, 1.0), spriteUp);
+  spriteShade *= 1.0 - uFootShade * footRamp * uGrounded;
+
+  vec3 spriteColor = spriteAlbedo * mix(vec3(1.0), spriteShade, uLightInfluence);
+
+  // ── silhouette rims ────────────────────────────────────────────────────────
+  // A warm rim on the key side and a cool one on the fill side, both read off
+  // the 1-texel alpha gradient. Four texture taps, and it is the thing that
+  // stops a billboard reading as a decal — the FFT reference does exactly this,
+  // warm down one edge of the Squire and cool down the other.
+  //
+  // The weighting matters more than the colours. A light is only capable of
+  // rimming at all when it is *behind the subject*; one sitting behind the
+  // camera front-lights and rims nothing. So each light is split into
+  //   • a lateral part (its projection into the quad's screen plane), which
+  //     lights one edge and needs a direction, and
+  //   • a backlight part (how much it travels toward the lens), which haloes the
+  //     whole silhouette and needs none,
+  // and anything travelling away from the camera contributes neither. Without
+  // that split a key sitting near the view axis normalises a near-zero vector
+  // and paints a hard, arbitrarily-placed keyline down one side of every unit.
   {
     vec2 step = vec2(uTexelStep.x / max(uFrameRect.z, 1e-6), uTexelStep.y / max(uFrameRect.w, 1e-6));
     float aL = spriteAlphaAt(spriteCellUv - vec2(step.x, 0.0));
@@ -545,12 +665,12 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
     vec2 grad = vec2(aR - aL, aU - aD);
     if (dot(grad, grad) > 1e-6 && edge > 0.0) {
       vec2 outward = -normalize(grad);
-      vec3 lightView = normalize((viewMatrix * vec4(uKeyLightDir, 0.0)).xyz);
-      vec2 lightPlane = vec2(dot(lightView, vQuadRight), dot(lightView, vQuadUp));
-      if (dot(lightPlane, lightPlane) > 1e-6) {
-        float facing = clamp(dot(outward, -normalize(lightPlane)), 0.0, 1.0);
-        spriteColor += uRimColor * (uRimStrength * edge * facing * facing);
-      }
+
+      vec3 keyView = normalize((viewMatrix * vec4(uKeyLightDir, 0.0)).xyz);
+      vec3 fillView = normalize((viewMatrix * vec4(uFillLightDir, 0.0)).xyz);
+
+      spriteColor += uRimColor * (uRimStrength * edge * spriteRimTerm(keyView, outward));
+      spriteColor += uBackRimColor * (uBackRimStrength * edge * spriteRimTerm(fillView, outward));
     }
   }
 
@@ -566,6 +686,31 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
   }
 
   gl_FragColor = vec4(spriteColor, 1.0);
+`;
+
+/**
+ * Depth-pass vertex push — the other half of the billboard shadow problem.
+ *
+ * Once the quad casts into the shadow map (see `shadowSide` above) it is also a
+ * *receiver* of that same map, and a flat card sitting exactly on top of its own
+ * recorded depth shadows itself completely: every unit renders as a black
+ * silhouette. Global `shadow.bias` would fix it by destroying the terrain's own
+ * self-shadowing, so the offset is applied here, to this material only.
+ *
+ * The light is orthographic, so translating along its view −Z is a **pure depth
+ * change**: the silhouette written into the map does not move by a single texel,
+ * it is merely recorded slightly further away. The unit therefore sits in front
+ * of its own shadow, while ground more than `uShadowPush` further along the
+ * light ray is still occluded normally.
+ *
+ * The cost is a small band of unshadowed floor right at the feet — the ground
+ * there is less than `uShadowPush` behind the caster. That band is exactly what
+ * the contact-darkening decal in `sprites.ts` covers, which is why both exist.
+ */
+const DEPTH_PROJECT_VERTEX = /* glsl */ `
+  #include <project_vertex>
+  mvPosition.z -= uShadowPush;
+  gl_Position = projectionMatrix * mvPosition;
 `;
 
 const DEPTH_DECLARATIONS = /* glsl */ `
@@ -629,11 +774,26 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uTexelStep: { value: new THREE.Vector2(1 / options.sheetWidth, 1 / options.sheetHeight) },
     uMirror: { value: 0 },
 
-    uLightInfluence: { value: options.lightInfluence ?? 0.55 },
-    uShadeBend: { value: options.shadeBend ?? 0.55 },
+    uLightInfluence: { value: options.lightInfluence ?? 1 },
+    uLightGain: { value: options.lightGain ?? 1 },
+    uDirectGain: { value: options.directGain ?? 0.62 },
+    uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x24304a) },
+    uShadeBend: { value: options.shadeBend ?? 0.7 },
     uKeyLightDir: { value: (options.keyLightDirection ?? new THREE.Vector3(-0.5, -1, -0.35)).clone().normalize() },
+    uFillLightDir: {
+      value: (options.fillLightDirection ?? new THREE.Vector3(0.5, -0.6, 0.35)).clone().normalize(),
+    },
     uRimColor: { value: new THREE.Color(options.rimColor ?? 0xffe6b8) },
-    uRimStrength: { value: options.rimStrength ?? 0.5 },
+    uRimStrength: { value: options.rimStrength ?? 0.4 },
+    uBackRimColor: { value: new THREE.Color(options.backRimColor ?? 0x8fb0d8) },
+    uBackRimStrength: { value: options.backRimStrength ?? 0.16 },
+
+    uBounceColor: { value: new THREE.Color(options.bounceColor ?? 0x6d5b46) },
+    uBounceStrength: { value: options.bounceStrength ?? 0.32 },
+
+    uFootShade: { value: 0.42 },
+    uFootShadeTexels: { value: 7 },
+    uGrounded: { value: 1 },
 
     uFlashColor: { value: new THREE.Color(0xffffff) },
     uFlash: { value: 0 },
@@ -647,6 +807,8 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
 
     uOpacity: { value: 1 },
     uAlphaCut: { value: 0.5 },
+
+    uShadowPush: { value: 0.16 },
   };
 
   const material = new THREE.MeshLambertMaterial({
@@ -659,6 +821,17 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     fog: true,
   });
   material.name = 'UnitSprite';
+  // ── why this line exists ───────────────────────────────────────────────────
+  // three derives the shadow pass's cull side from the *object* material:
+  // `side = material.shadowSide ?? shadowSide[material.side]`, and
+  // `shadowSide[FrontSide]` is BackSide. That is right for closed solids (it
+  // hides acne inside the mesh) and catastrophic for a single-sided billboard:
+  // the quad turns to face the camera, so whenever the key light is on the
+  // camera's side of the unit the light sees the quad's *front*, back-face
+  // culling throws it away, and the unit casts no shadow at all. Which is
+  // exactly what was happening — not one sprite had a shadow. A flat card has no
+  // interior to protect, so render both faces into the map.
+  material.shadowSide = THREE.DoubleSide;
 
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -681,13 +854,18 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
   const depthMaterial = new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
     alphaTest: 0.5,
+    side: THREE.DoubleSide,
   });
   depthMaterial.name = 'UnitSpriteDepth';
   depthMaterial.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vSpriteUv;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSpriteUv = uv;');
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform float uShadowPush;\nvarying vec2 vSpriteUv;',
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSpriteUv = uv;')
+      .replace('#include <project_vertex>', DEPTH_PROJECT_VERTEX);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${DEPTH_DECLARATIONS}`)
       .replace('#include <alphatest_fragment>', DEPTH_ALPHATEST_FRAGMENT);

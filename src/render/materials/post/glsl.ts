@@ -141,8 +141,14 @@ float ign(vec2 p) {
  * Circle-of-confusion evaluation, shared by the CoC prepass and the final composite so
  * the half-res gather and the full-res blend agree exactly.
  *
+ * The tilt term is a band PLUS a radial corner term. That second half is measured, not
+ * invented: in `refs/curated/triangle/official_005_steam.jpg` and `official_019_se_screenshot.jpg`
+ * the left and right edges at mid-height are soft as well as the top and bottom, so the
+ * in-focus region is a lens-shaped island, not an infinite horizontal stripe. A pure band
+ * leaves the frame corners sharp and the miniature illusion collapses there.
+ *
  * Uniforms: uFocusDist, uFocusRange, uCoCScale, uTiltMix, uTiltCenter, uTiltAxis,
- *           uTiltBand, uTiltFalloff, uMaxCoC
+ *           uTiltBand, uTiltFalloff, uTiltRadial, uTiltRadialStart, uCoCAspect
  */
 export const COC_CHUNK = /* glsl */ `
 uniform float uFocusDist;
@@ -153,6 +159,9 @@ uniform vec2  uTiltCenter;
 uniform vec2  uTiltAxis;
 uniform float uTiltBand;
 uniform float uTiltFalloff;
+uniform float uTiltRadial;      // 0..1 weight of the corner term
+uniform float uTiltRadialStart; // normalised radius (1.0 = frame corner) where it begins
+uniform vec2  uCoCAspect;       // vec2(width/height, 1.0)
 
 /** Signed CoC in [-1,1]: negative = in front of focus (near field), positive = behind. */
 float computeCoC(vec2 uv, float d) {
@@ -171,7 +180,19 @@ float computeCoC(vec2 uv, float d) {
     float band = dot(uv - uTiltCenter, uTiltAxis);
     float mag = smoothstep(uTiltBand, uTiltBand + uTiltFalloff, abs(band));
     // Below the band reads as "closer to camera" in an isometric diorama.
-    coc += uTiltMix * sign(band) * mag;
+    float bandSign = band < 0.0 ? -1.0 : 1.0;
+    coc += uTiltMix * bandSign * mag;
+
+    if (uTiltRadial > 0.0) {
+      // Corner term. Elliptical distance from the band centre, normalised so 1.0 lands on
+      // the frame corner. Combined by magnitude so it never cancels the band, and it
+      // inherits the band's sign — the bottom corners of an isometric frame are foreground.
+      vec2 c = (uv - uTiltCenter) * uCoCAspect;
+      float rn = length(c) / max(0.5 * length(uCoCAspect), 1e-4);
+      float radial = uTiltMix * uTiltRadial * smoothstep(uTiltRadialStart, 1.0, rn);
+      float s = coc < 0.0 ? -1.0 : 1.0;
+      coc = s * max(abs(coc), radial);
+    }
   }
 
   return clamp(coc, -1.0, 1.0);

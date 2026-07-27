@@ -36,7 +36,7 @@ import type {
   Vec3,
   Zodiac,
 } from '../types';
-import type { Personality, ScoreTerm } from './personalities';
+import { battleCaution, type Personality, type ScoreTerm } from './personalities';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Small geometry helpers
@@ -144,10 +144,17 @@ export function isCharmedOrConfused(unit: Unit): boolean {
 // Battlefield queries
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Movement cost of stepping onto a surface. FFT charges extra for bad footing. */
+/**
+ * Movement cost of stepping onto a surface. FFT charges extra for bad footing.
+ *
+ * This MUST mirror `SURFACE_MOVE_COST` in `grid.ts`, which is what the reducer
+ * charges when it validates the path. An AI that under-costs a surface plans
+ * routes the reducer then throws `IllegalCommandError` on, which kills the turn
+ * mid-plan. (`tests/ai.test.ts` pins the two tables together.)
+ */
 const SURFACE_COST: Readonly<Record<SurfaceKind, number>> = {
   grass: 1, dirt: 1, stone: 1, sand: 1, wood: 1, roof: 1, bridge: 1,
-  snow: 2, swamp: 2, water: 2, deepwater: 3, lava: 1, void: Infinity,
+  snow: 2, swamp: 2, water: 2, lava: 3, deepwater: 4, void: Infinity,
 };
 
 /** How much a unit hates standing here, 0..1. Lava burns; deep water drowns. */
@@ -200,7 +207,6 @@ export function computeReachable(
   const jump = Math.max(0, Math.floor(opts.jump ?? unit.stats.jump));
   if (immobile || move <= 0) return [originOption];
 
-  const floats = hasStatus(unit, 'float');
   const occupied = opts.ignoreOccupancy ? new Map<number, Unit>() : occupancyMap(state);
   const field = state.field;
 
@@ -240,7 +246,9 @@ export function computeReachable(
         if (tile.depth < 1) continue; // no headroom to stand
         if (Math.abs(tile.height - node.z) > jump) continue;
 
-        const surfaceCost = floats ? 1 : (SURFACE_COST[tile.surface] ?? 1);
+        // No Float discount here: the reducer charges the surface either way, so
+        // discounting it only produces paths it will refuse.
+        const surfaceCost = SURFACE_COST[tile.surface] ?? 1;
         if (!Number.isFinite(surfaceCost)) continue;
         const next = cost + surfaceCost;
         if (next > move) continue;
@@ -377,8 +385,38 @@ export function inRange(field: Battlefield, ability: Ability, from: Vec3, epicen
   const d = manhattan(from, epicentre);
   if (d > r.range) return false;
   if (Number.isFinite(r.vertical) && Math.abs(from.z - epicentre.z) > r.vertical) return false;
+  if (!shapeAllows(r.shape ?? 'circle', from, epicentre, d)) return false;
   if (r.los && !hasLineOfSight(field, from, epicentre)) return false;
   return true;
+}
+
+/**
+ * Whether an ability's targeting shape permits this aim point.
+ *
+ * `core/battle.ts` validates the aim by deriving the caster's facing from the
+ * direction to the target and then running `grid.isInRange`. So the only
+ * shape-dependent question is whether the aim point lies on a legal ray for that
+ * derived facing:
+ *
+ *   circle — any tile inside the diamond.
+ *   line   — a single ray along the facing, so the target must be cardinal.
+ *   cross  — the four cardinal rays; same test.
+ *   cone   — a 90-degree wedge about the facing, which by construction always
+ *            contains the tile the facing was derived from.
+ *
+ * Omitting this test is not a scoring inaccuracy: it makes the evaluator propose
+ * commands the reducer then throws on, which kills the turn.
+ */
+function shapeAllows(
+  shape: NonNullable<Ability['range']['shape']>,
+  from: Vec3,
+  epicentre: Vec3,
+  distance: number,
+): boolean {
+  if (shape === 'circle') return true;
+  if (distance === 0) return shape !== 'line' && shape !== 'cone';
+  if (shape === 'cone') return true;
+  return from.x === epicentre.x || from.y === epicentre.y;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -491,6 +529,17 @@ export const BASIC_ATTACK: Ability = {
   castAnim: 'attack',
 };
 
+/**
+ * `Ability.usesWeaponRange` means the record's `range.range` is only the
+ * bare-handed floor — `core/battle.ts` widens it to the equipped weapon before
+ * validating the aim. The evaluator has to widen it too, or an Archer's basic
+ * shot is priced as a one-tile poke and never gets proposed.
+ */
+function withWeaponRange(ability: Ability, reach: number): Ability {
+  if (ability.usesWeaponRange !== true || reach <= ability.range.range) return ability;
+  return { ...ability, range: { ...ability.range, range: reach, los: true } };
+}
+
 interface WeaponProfile {
   wp: number;
   range: number;
@@ -555,12 +604,11 @@ export function createAiWorld(opts: AiWorldOptions = {}): AiWorld {
 
   const defaultAbilitiesFor = (_state: BattleState, unit: Unit): readonly Ability[] => {
     const out: Ability[] = [];
-    const attack = lookupAbility(BASIC_ATTACK.id) ?? BASIC_ATTACK;
-    out.push(attack);
+    out.push(withWeaponRange(lookupAbility(BASIC_ATTACK.id) ?? BASIC_ATTACK, weaponOf(unit).range));
     if (abilities === undefined) return out;
 
     const silenced = hasStatus(unit, 'silence');
-    const seen = new Set<AbilityId>([attack.id]);
+    const seen = new Set<AbilityId>([BASIC_ATTACK.id]);
     const consider = (id: AbilityId): void => {
       if (seen.has(id)) return;
       seen.add(id);
@@ -835,9 +883,16 @@ export function buildThreatField(state: BattleState, actor: Unit, world: AiWorld
     let total = 0;
     for (const src of sources) {
       const d = manhattan(src.unit.pos, pos);
-      if (d > src.reach + 2) continue;
-      // Full threat inside the reach envelope, tapering just past it.
-      const proximity = d <= src.reach ? 1 : 0.4;
+      const envelope = src.reach + 2;
+      if (d > envelope) continue;
+      // Danger grows smoothly as the gap closes rather than switching on at the
+      // edge of the reach envelope. A step function there is a wall in the score
+      // landscape sitting exactly where two advancing squads meet, and neither
+      // side will ever be the one to climb it: both hold at reach + 1 and the
+      // battle never happens. It is also the more honest model — a unit that has
+      // to spend its whole move to touch you is less dangerous than one already
+      // in your face, which can strike and still reposition.
+      const proximity = clamp01((envelope - d) / envelope);
       // Standing well above an attacker is genuinely safer: it costs Jump and
       // movement to come up after you.
       const dz = pos.z - src.unit.pos.z;
@@ -887,6 +942,23 @@ export interface AiContext {
   budget: AiBudget;
   /** True when the personality's survival mindset is engaged. */
   survival: boolean;
+  /**
+   * The distance this unit actually wants to hold, which is the personality's
+   * intent clamped by what it can reach from there. See `effectiveStandoff`.
+   */
+  standoff: number;
+  /**
+   * Separation at which terrain and facing tactics stop meaning anything —
+   * the furthest a hostile could strike us from, or we them. See `scorePosition`.
+   */
+  contactRadius: number;
+  /** Board-scale denominator for the long tail of the approach term. */
+  approachScale: number;
+  /**
+   * 1 early in a battle, decaying toward `MIN_CAUTION` as the clock runs.
+   * Scales the self-preservation terms. See `battleCaution`.
+   */
+  caution: number;
 }
 
 export interface BuildContextOptions {
@@ -936,6 +1008,9 @@ export function buildContext(
 
   const guardUnit = opts.guardTarget !== undefined ? state.units.get(opts.guardTarget) : undefined;
 
+  const threat = buildThreatField(state, actor, opts.world);
+  const standoff = effectiveStandoff(state, actor, opts.world, opts.personality);
+
   const ctx: AiContext = {
     state,
     actor,
@@ -945,14 +1020,66 @@ export function buildContext(
     hostiles,
     friends,
     downedFriends,
-    threat: buildThreatField(state, actor, opts.world),
+    threat,
     occupied: occupancyMap(state),
     budget: opts.budget ?? DEFAULT_BUDGET,
     survival: opts.survival,
+    standoff,
+    contactRadius: contactRadius(actor, threat, standoff),
+    approachScale: Math.max(APPROACH_SPAN, state.field.width + state.field.height),
+    caution: battleCaution(state.tick),
   };
   if (taunter !== undefined) ctx.taunter = taunter;
   if (guardUnit !== undefined && isActive(guardUnit)) ctx.guardTarget = guardUnit;
   return ctx;
+}
+
+/** Tiles of separation over which the approach term pulls hardest. */
+const APPROACH_SPAN = 12;
+
+/**
+ * The distance this unit actually wants to hold from the nearest hostile.
+ *
+ * A personality's `standoff` is an *intent* ("casters hang back"), not a
+ * capability. A unit whose longest offensive reach is a dagger cannot pot-shot
+ * from five tiles, and scoring it as though it could is what turns two cautious
+ * squads into a staring contest: both sides sit at their nominal standoff, both
+ * are out of range of everything they own, and nobody ever throws a punch.
+ */
+function effectiveStandoff(
+  state: BattleState,
+  actor: Unit,
+  world: AiWorld,
+  personality: Personality,
+): number {
+  let reach = 1;
+  for (const ability of world.abilitiesFor(state, actor)) {
+    if (ability.slot !== 'action') continue;
+    if (ability.range.self === true) continue;
+    if (isBeneficialFormula(ability)) continue;
+    if (ability.mp > actor.stats.mp) continue;
+    if (ability.range.range > reach) reach = ability.range.range;
+  }
+  return Math.max(1, Math.min(personality.standoff, reach));
+}
+
+/**
+ * The separation beyond which terrain and facing stop being tactics and become
+ * decoration: the furthest a hostile could strike us from, or we them.
+ *
+ * Height, chokepoints, clustering and body-blocking are all priced against the
+ * *engagement that is about to happen*. Priced against units half a map away
+ * they are noise with a large weight attached, and that noise is a landscape:
+ * every archetype rolls downhill into whichever corner of the map is tallest
+ * and stays there. Ramping those terms off with distance is what lets the
+ * approach term own the open field without lobotomising the tactician.
+ */
+function contactRadius(actor: Unit, threat: ThreatField, standoff: number): number {
+  let radius = actor.stats.move + standoff;
+  for (const source of threat.sources) {
+    if (source.reach > radius) radius = source.reach;
+  }
+  return Math.max(2, radius);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1051,7 +1178,7 @@ function pruneDestinations(ctx: AiContext, options: readonly MoveOption[]): Move
       value += (option.pos.z - hostile.pos.z) * 0.15;
     }
     if (Number.isFinite(nearest)) {
-      value -= Math.abs(nearest - ctx.personality.standoff) * 0.8;
+      value -= Math.abs(nearest - ctx.standoff) * 0.8;
     }
     value -= ctx.threat.at(option.pos) / Math.max(1, ctx.actor.stats.maxHp) * 2;
     if (sameTile(option.pos, origin)) value += 5; // always keep "stand still"
@@ -1531,7 +1658,12 @@ export function scoreCandidate(
       if (ctx.taunter !== undefined && primary.id === ctx.taunter.id && dealt > 0) terms.taunt = 1;
     }
   } else {
-    terms.idle = candidate.move === undefined ? 1 : 0.25;
+    // A turn that lands no ability is idle whether or not we shuffled our feet.
+    // Discounting the penalty for having moved pays a unit to wander: parked on
+    // a positional optimum it will step off and step back forever, because both
+    // halves of the shuffle score better than holding still. Whatever a step is
+    // actually worth is already priced by the positional terms.
+    terms.idle = 1;
   }
 
   // ── positional terms (independent of the action) ──
@@ -1548,7 +1680,7 @@ export function scoreCandidate(
 
 /** Positional half of the evaluation: where we end up and which way we look. */
 export function scorePosition(ctx: AiContext, candidate: Candidate): void {
-  const { actor, state, threat, personality } = ctx;
+  const { actor, state, threat } = ctx;
   const terms = candidate.terms;
   const pos = candidate.pos;
   const maxHp = Math.max(1, actor.stats.maxHp);
@@ -1560,13 +1692,35 @@ export function scorePosition(ctx: AiContext, candidate: Candidate): void {
     const d = manhattan(pos, hostile.pos);
     if (d < nearest) nearest = d;
   }
+  const standoff = ctx.standoff;
   if (Number.isFinite(nearest)) {
-    terms.closeDistance = 1 - clamp01(Math.abs(nearest - personality.standoff) / 8);
-    terms.keepDistance = clamp01(nearest / 12);
+    const gap = nearest - standoff;
+    if (gap <= 0) {
+      // Inside our preferred range: still fine, but crowding a caster's face is
+      // worse than sitting at the sweet spot.
+      terms.closeDistance = clamp01(1 + gap / Math.max(2, standoff));
+    } else {
+      // Two pieces. The near band is the one that actually drives an advance;
+      // the shallow board-scale tail exists so that a unit stranded on the far
+      // side of a large map still gains something by taking the step in, rather
+      // than sitting on a plateau where every destination scores identically.
+      const near = 1 - clamp01(gap / APPROACH_SPAN);
+      const far = 1 - clamp01(gap / ctx.approachScale);
+      terms.closeDistance = near * 0.8 + far * 0.2;
+    }
+    // Backing off only buys anything up to the range we can still shoot from.
+    terms.keepDistance = clamp01(nearest / Math.max(1, standoff)) * ctx.caution;
   } else {
     terms.closeDistance = 0;
     terms.keepDistance = 1;
   }
+
+  // How much the positional game matters here: 1 in contact, tapering to 0 out
+  // where nobody can reach anybody. Smooth on purpose — a hard cutoff is a cliff
+  // in the score landscape, and a unit straddling a cliff oscillates across it.
+  const engagement = Number.isFinite(nearest)
+    ? clamp01((ctx.contactRadius + 2 - nearest) / (ctx.contactRadius + 2))
+    : 0;
 
   // Height advantage over the hostiles that matter (the three nearest).
   const nearestHostiles = [...ctx.hostiles]
@@ -1575,14 +1729,14 @@ export function scorePosition(ctx: AiContext, candidate: Candidate): void {
   if (nearestHostiles.length > 0) {
     let sum = 0;
     for (const hostile of nearestHostiles) sum += pos.z - hostile.pos.z;
-    terms.height = clamp(sum / nearestHostiles.length / 4, -1.5, 1.5);
+    terms.height = clamp(sum / nearestHostiles.length / 4, -1.5, 1.5) * engagement;
   }
 
   // Threat and lethality.
   const incoming = threat.at(pos);
-  terms.threatExposure = incoming / maxHp;
+  terms.threatExposure = (incoming / maxHp) * ctx.caution;
   const lethality = clamp01(incoming / Math.max(1, actor.stats.hp));
-  terms.selfRisk = lethality * lethality;
+  terms.selfRisk = lethality * lethality * ctx.caution;
 
   // Facing: never end a turn with your back to a real threat.
   let exposure = 0;
@@ -1618,12 +1772,11 @@ export function scorePosition(ctx: AiContext, candidate: Candidate): void {
   let adjacentFriends = 0;
   for (const friend of ctx.friends) if (manhattan(pos, friend.pos) <= 1) adjacentFriends++;
   const enemyHasAoe = threat.sources.some((s) => s.aoe);
-  terms.clusterRisk = (adjacentFriends / 3) * (enemyHasAoe ? 1 : 0.25);
+  terms.clusterRisk = (adjacentFriends / 3) * (enemyHasAoe ? 1 : 0.25) * engagement;
 
   // Chokepoint: a narrow tile is only worth holding if it actually gates them.
   const openNeighbours = countOpenNeighbours(field, pos);
-  const gated = Number.isFinite(nearest) && nearest <= actor.stats.move + 4;
-  terms.chokepoint = gated ? clamp01((4 - openNeighbours) / 3) : 0;
+  terms.chokepoint = clamp01((4 - openNeighbours) / 3) * engagement;
 
   // Guarding: stand adjacent to the charge and between it and the threat.
   if (ctx.guardTarget !== undefined) {
@@ -1637,7 +1790,7 @@ export function scorePosition(ctx: AiContext, candidate: Candidate): void {
       if (meToEnemy < guardToEnemy) blocking++;
     }
     if (ctx.hostiles.length > 0) value += (blocking / ctx.hostiles.length) * 0.5;
-    terms.guardAlly = value;
+    terms.guardAlly = value * engagement;
   }
 
   // Terrain hazard at the destination.

@@ -12,7 +12,9 @@
  *
  * Ability id convention (see docs/JOBS.md): globally-unique kebab-case slug of the
  * ability's canonical name — `head-break`, `equip-armor`, `move-plus-1`, `fira`.
- * Ability *set* ids are the kebab-case command name — `battle-skill`, `white-magic`.
+ * Ability *set* ids are the kebab-case command name — `battle-skill`, `white-magick` —
+ * and are the canonical spelling registered in `core/abilities/sets.ts`, not one of
+ * the aliases `SET_ALIASES` tolerates.
  */
 
 import type { Job, LearnableAbility } from '../types';
@@ -43,7 +45,7 @@ export const FFT_JOBS: readonly Job[] = [
     actionSet: 'basic-skill',
     learnable: [
       a('throw-stone', 100),
-      a('heal', 100),
+      a('heal-wounds', 100),
       a('dash', 180),
       a('accumulate', 200),
       a('yell', 220),
@@ -74,20 +76,20 @@ export const FFT_JOBS: readonly Job[] = [
     requires: [],
     actionSet: 'item',
     learnable: [
-      a('potion', 50),
-      a('antidote', 50),
-      a('eye-drop', 50),
-      a('echo-herbs', 50),
-      a('maidens-kiss', 100),
-      a('soft', 100),
-      a('hi-potion', 200),
-      a('phoenix-down', 200),
-      a('holy-water', 200),
-      a('ether', 300),
-      a('x-potion', 400),
-      a('remedy', 400),
-      a('hi-ether', 500),
-      a('elixir', 900),
+      a('use-potion', 50),
+      a('use-antidote', 50),
+      a('use-eye-drops', 50),
+      a('use-echo-herbs', 50),
+      a('use-maiden-kiss', 100),
+      a('use-soft', 100),
+      a('use-hi-potion', 200),
+      a('use-phoenix-down', 200),
+      a('use-holy-water', 200),
+      a('use-ether', 300),
+      a('use-x-potion', 400),
+      a('use-remedy', 400),
+      a('use-hi-ether', 500),
+      a('use-elixir', 900),
       a('auto-potion', 500),
       a('throw-item', 180),
       a('move-find-item', 900),
@@ -122,9 +124,9 @@ export const FFT_JOBS: readonly Job[] = [
       a('speed-break', 180),
       a('power-break', 180),
       a('mind-break', 180),
-      a('magic-break', 180),
+      a('magick-break', 180),
       a('weapon-break', 250),
-      a('parry', 400),
+      a('riposte', 400),
       a('equip-armor', 400),
       a('equip-shield', 250),
     ],
@@ -159,7 +161,7 @@ export const FFT_JOBS: readonly Job[] = [
       a('charge-plus-10', 800),
       a('charge-plus-20', 1200),
       a('arrow-guard', 300),
-      a('equip-crossbow', 250),
+      a('equip-bow', 250),
     ],
     equip: ['bow', 'crossbow', 'knife', 'shield', 'hat', 'clothing', 'accessory'],
     innate: [],
@@ -188,7 +190,7 @@ export const FFT_JOBS: readonly Job[] = [
       a('secret-fist', 300),
       a('earth-slash', 300),
       a('wave-fist', 400),
-      a('stigma-magic', 400),
+      a('stigma-magick', 400),
       a('chakra', 400),
       a('revive', 500),
       a('counter', 500),
@@ -217,14 +219,14 @@ export const FFT_JOBS: readonly Job[] = [
     actionSet: 'steal',
     learnable: [
       a('steal-heart', 180),
-      a('steal-helm', 200),
+      a('steal-helmet', 200),
       a('steal-gil', 250),
       a('steal-shield', 250),
       a('steal-armor', 300),
       a('steal-accessory', 350),
       a('steal-weapon', 400),
       a('move-plus-2', 400),
-      a('sticky-fingers', 300),
+      a('treasure-hunter', 300),
     ],
     equip: ['knife', 'hat', 'clothing', 'accessory'],
     innate: [],
@@ -248,7 +250,7 @@ export const FFT_JOBS: readonly Job[] = [
     growth: { hp: 12, mp: 10, pa: 70, ma: 45, spd: 100 },
     mult: { hp: 80, mp: 120, pa: 90, ma: 110, spd: 100 },
     requires: [{ job: 'chemist', level: 2 }],
-    actionSet: 'white-magic',
+    actionSet: 'white-magick',
     learnable: [
       a('cure', 50),
       a('cura', 180),
@@ -263,7 +265,7 @@ export const FFT_JOBS: readonly Job[] = [
       a('curaja', 700),
       a('holy', 800),
       a('arise', 800),
-      a('magic-defend-up', 400),
+      a('magick-defense-up', 400),
     ],
     equip: ['staff', 'hat', 'robe', 'clothing', 'accessory'],
     innate: [],
@@ -285,7 +287,7 @@ export const FFT_JOBS: readonly Job[] = [
     growth: { hp: 12, mp: 10, pa: 75, ma: 45, spd: 100 },
     mult: { hp: 75, mp: 120, pa: 80, ma: 120, spd: 100 },
     requires: [{ job: 'chemist', level: 2 }],
-    actionSet: 'black-magic',
+    actionSet: 'black-magick',
     learnable: [
       a('fire', 100),
       a('blizzard', 100),
@@ -297,10 +299,10 @@ export const FFT_JOBS: readonly Job[] = [
       a('firaga', 400),
       a('blizzaga', 400),
       a('thundaga', 400),
-      a('frog', 400),
+      a('toad', 400),
       a('death', 600),
       a('flare', 900),
-      a('magic-attack-up', 500),
+      a('magick-attack-up', 500),
     ],
     equip: ['rod', 'hat', 'robe', 'clothing', 'accessory'],
     innate: [],
@@ -322,7 +324,7 @@ export const FFT_JOBS: readonly Job[] = [
     growth: { hp: 12, mp: 10, pa: 70, ma: 50, spd: 100 },
     mult: { hp: 75, mp: 115, pa: 80, ma: 110, spd: 100 },
     requires: [{ job: 'black-mage', level: 2 }],
-    actionSet: 'time-magic',
+    actionSet: 'time-magick',
     learnable: [
       a('haste', 200),
       a('slow', 200),
@@ -334,11 +336,11 @@ export const FFT_JOBS: readonly Job[] = [
       a('reflect', 400),
       a('demi', 400),
       a('stop', 500),
-      a('demi-2', 600),
+      a('demiga', 600),
       a('quick', 800),
       a('meteor', 1200),
       a('short-charge', 900),
-      a('half-of-mp', 1200),
+      a('half-mp', 1200),
       a('teleport', 600),
     ],
     equip: ['staff', 'hat', 'robe', 'clothing', 'accessory'],
@@ -361,7 +363,7 @@ export const FFT_JOBS: readonly Job[] = [
     growth: { hp: 13, mp: 10, pa: 70, ma: 40, spd: 100 },
     mult: { hp: 70, mp: 125, pa: 80, ma: 120, spd: 100 },
     requires: [{ job: 'time-mage', level: 3 }],
-    actionSet: 'summon-magic',
+    actionSet: 'summon-magick',
     learnable: [
       a('moogle', 200),
       a('shiva', 300),
@@ -379,7 +381,7 @@ export const FFT_JOBS: readonly Job[] = [
       a('lich', 900),
       a('cyclops', 900),
       a('zodiark', 1500),
-      a('half-of-mp-summon', 900),
+      a('half-mp', 900),
     ],
     equip: ['rod', 'staff', 'hat', 'robe', 'clothing', 'accessory'],
     innate: [],
@@ -401,7 +403,7 @@ export const FFT_JOBS: readonly Job[] = [
     growth: { hp: 12, mp: 12, pa: 60, ma: 50, spd: 100 },
     mult: { hp: 75, mp: 110, pa: 80, ma: 110, spd: 100 },
     requires: [{ job: 'white-mage', level: 2 }],
-    actionSet: 'mystic-arts',
+    actionSet: 'yin-yang-magick',
     learnable: [
       a('blind', 180),
       a('spell-absorb', 200),
@@ -416,8 +418,8 @@ export const FFT_JOBS: readonly Job[] = [
       a('sleep', 300),
       a('paralyze', 350),
       a('petrify', 400),
-      a('dispel-magic', 500),
-      a('absorb-used-mp', 400),
+      a('dispel-magick', 500),
+      a('absorb-mp', 400),
     ],
     equip: ['rod', 'staff', 'hat', 'robe', 'clothing', 'accessory'],
     innate: [],
@@ -452,12 +454,12 @@ export const FFT_JOBS: readonly Job[] = [
       a('demon-fire', 300),
       a('quicksand', 300),
       a('sand-storm', 300),
-      a('blizzard-terrain', 300),
+      a('blizzard-geo', 300),
       a('gusty-wind', 300),
       a('lava-ball', 300),
       a('counter-flood', 500),
       a('attack-up', 800),
-      a('move-on-lava', 480),
+      a('walk-on-lava', 480),
     ],
     equip: ['sword', 'axe', 'shield', 'hat', 'clothing', 'accessory'],
     innate: [],
@@ -491,6 +493,8 @@ export const FFT_JOBS: readonly Job[] = [
       a('vertical-jump-5', 500),
       a('level-jump-8', 700),
       a('vertical-jump-8', 700),
+      a('high-jump', 600),
+      a('dragon-dive', 900),
       a('equip-spear', 200),
       a('ignore-height', 400),
     ],
@@ -514,7 +518,7 @@ export const FFT_JOBS: readonly Job[] = [
     growth: { hp: 12, mp: 15, pa: 60, ma: 50, spd: 100 },
     mult: { hp: 80, mp: 75, pa: 90, ma: 90, spd: 100 },
     requires: [{ job: 'mystic', level: 3 }],
-    actionSet: 'speechcraft',
+    actionSet: 'talk-skill',
     learnable: [
       a('praise', 150),
       a('threaten', 200),
@@ -555,7 +559,7 @@ export const FFT_JOBS: readonly Job[] = [
       { job: 'knight', level: 4 },
       { job: 'monk', level: 5 },
     ],
-    actionSet: 'iaido',
+    actionSet: 'draw-out',
     learnable: [
       a('asura', 200),
       a('koutetsu', 300),
@@ -568,8 +572,8 @@ export const FFT_JOBS: readonly Job[] = [
       a('masamune', 800),
       a('chirijiraden', 900),
       a('blade-grasp', 900),
-      a('weapon-guard', 300),
-      a('doublehand', 900),
+      a('reflexes', 300),
+      a('two-hands', 900),
     ],
     equip: ['katana', 'helm', 'armor', 'accessory'],
     innate: [],
@@ -606,8 +610,8 @@ export const FFT_JOBS: readonly Job[] = [
       a('throw-hammer', 300),
       a('throw-spear', 350),
       a('throw-ninja-blade', 400),
-      a('dual-wield', 900),
-      a('vanish', 500),
+      a('two-swords', 900),
+      a('shadow-walk', 500),
       a('move-plus-3', 800),
     ],
     equip: ['knife', 'hat', 'clothing', 'accessory'],
@@ -635,7 +639,7 @@ export const FFT_JOBS: readonly Job[] = [
       { job: 'time-mage', level: 3 },
       { job: 'mystic', level: 4 },
     ],
-    actionSet: 'arithmeticks',
+    actionSet: 'math-skill',
     learnable: [
       a('multiple-of-3', 400),
       a('multiple-of-4', 400),
@@ -677,7 +681,7 @@ export const FFT_JOBS: readonly Job[] = [
       a('life-song', 350),
       a('cheer-song', 350),
       a('battle-song', 400),
-      a('magic-song', 400),
+      a('magick-song', 400),
       a('nameless-song', 500),
       a('space-storage', 600),
       a('sky-demon', 700),
@@ -751,7 +755,10 @@ export const FFT_JOBS: readonly Job[] = [
     // Authentic to FFT: the Mime learns nothing. Its power is entirely innate.
     learnable: [],
     equip: ['hat', 'clothing', 'accessory'],
-    innate: ['mimicry', 'cannot-equip', 'no-secondary'],
+    // `bare-mimicry` and `sole-command` are the two rules of the job written as
+    // real passives rather than engine flags: the first pays for carrying no
+    // gear, the second is the cost — no secondary, no reaction, no support.
+    innate: ['mimic', 'bare-mimicry', 'sole-command'],
   },
 
   // ──────────────────────────────────────────────── War of the Lions ──
@@ -765,7 +772,11 @@ export const FFT_JOBS: readonly Job[] = [
       'the wielder\'s own life to inflict dark-elemental damage that ignores most defences, ' +
       'crush a target\'s equipment outright, or offer up a fallen ally for a field-wide ' +
       'detonation. It is the only common job that gets stronger the closer it is to dying.',
-    sprite: { male: '1110_Dark_Knight_Male_hd', female: '1112_Dark_Knight_Female_hd' },
+    // Borrowed art. The WotL Dark Knight sheets (1110/1112) are broken in this
+    // rip — 18-pixel grey noise strips with no artwork, flagged `broken: true` in
+    // the manifest — so this borrows the Knight sheet, which is the same
+    // silhouette the Dark Knight was drawn from anyway. Recolour is in docs/JOBS.md.
+    sprite: { male: '1000_Knight_Male_hd', female: '1002_Knight_Female_hd' },
     move: 3,
     jump: 3,
     cEvade: 10,
@@ -775,15 +786,19 @@ export const FFT_JOBS: readonly Job[] = [
       { job: 'knight', level: 8 },
       { job: 'black-mage', level: 8 },
     ],
-    actionSet: 'dark-arts',
+    actionSet: 'dark-sword',
     learnable: [
       a('crush-helm', 500),
       a('crush-armor', 500),
       a('crush-accessory', 550),
       a('crush-weapon', 600),
-      a('infernal-strike', 750),
+      a('crushing-blow', 450),
       a('sanguine-sword', 700),
+      a('night-sword', 750),
+      a('infernal-strike', 750),
       a('abyssal-blade', 800),
+      a('duskblade', 850),
+      a('unyielding-blade', 850),
       a('unholy-sacrifice', 900),
       a('unholy-darkness', 900),
     ],
@@ -800,7 +815,10 @@ export const FFT_JOBS: readonly Job[] = [
       'unremarkable growth — but it can wear any weapon and any armour in Ivalice, and its ' +
       'multipliers rise with the number of jobs the unit has taken to level 8. Early it is ' +
       'worthless. Late, in full Onion gear, it outclasses everything.',
-    sprite: { male: '1114_Onion_Knight_Male_hd', female: '1116_Onion_Knight_Female_hd' },
+    // Borrowed art, same reason as the Dark Knight: 1114/1116 are broken stubs.
+    // The Squire sheet is the right donor on its own merits — an Onion Knight is
+    // a levy soldier who never specialised, which is exactly what a Squire is.
+    sprite: { male: '924_Squire_Male_hd', female: '994_Squire_Female_hd' },
     move: 3,
     jump: 3,
     cEvade: 5,
@@ -811,8 +829,20 @@ export const FFT_JOBS: readonly Job[] = [
       { job: 'chemist', level: 6 },
     ],
     actionSet: 'onion-skills',
-    // Authentic to FFT: the Onion Knight has no learnable abilities at all.
-    learnable: [],
+    // FFT gives the Onion Knight nothing to learn, which reads as a bug rather
+    // than a joke in a game with a job-detail panel. Onion Skills is the joke
+    // played straight instead: six plain, cheap, unspecialised soldier's actions
+    // whose ceiling is `onion-mastery`, not the abilities themselves.
+    learnable: [
+      a('onion-slash', 100),
+      a('onion-guard', 150),
+      a('onion-hurl', 200),
+      a('onion-mend', 250),
+      a('onion-resolve', 400),
+      a('onion-blade', 800),
+      a('equip-change', 500),
+      a('move-plus-1', 300),
+    ],
     equip: [
       'knife', 'sword', 'knightsword', 'katana', 'axe', 'hammer', 'spear', 'staff', 'rod',
       'flail', 'bow', 'crossbow', 'gun', 'instrument', 'cloth', 'book', 'fist', 'shield',

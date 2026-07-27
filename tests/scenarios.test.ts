@@ -12,13 +12,14 @@ import { describe, expect, it } from 'vitest';
 
 import { decideTurn } from '../src/core/ai';
 import { advance, applyCommand } from '../src/core/battle';
-import { getAbility } from '../src/core/unit';
+import { effectiveRange, getAbility } from '../src/core/unit';
 import { allJobs } from '../src/core/jobs';
 import { reachableDestinations, pathTo, buildOccupancy } from '../src/core/grid';
 import { ALL_ABILITIES, ATTACK, bootstrapContent } from '../src/state/content';
 import { jobActions, jobSkillset } from '../src/state/abilityIndex';
 import { SCENARIOS, buildScenario, getScenario } from '../src/state/scenarios';
-import { commandItemsFor, unitVM, turnOrderVM } from '../src/state/viewModels';
+import { canAimAt, legalTargets } from '../src/state/targeting';
+import { abilityItemsFor, commandItemsFor, unitVM, turnOrderVM } from '../src/state/viewModels';
 import type { BattleState, Command } from '../src/core/types';
 
 bootstrapContent();
@@ -99,6 +100,64 @@ describe('scenarios', () => {
     const order = turnOrderVM(state);
     expect(order.length).toBeGreaterThan(0);
     expect(order[0]?.current).toBe(true);
+  });
+});
+
+describe('targeting agrees with the reducer', () => {
+  /**
+   * The bug class this catches: the UI paints a range overlay, the player clicks
+   * inside it, and `applyCommand` throws because it computed the legal set with a
+   * different rule. It happened twice during integration — once for `line`/`cone`
+   * shapes (facing is derived from the aim point, not read from the caster) and
+   * once for the generic Attack (reach comes from the weapon, not the record).
+   */
+  it('every tile the UI offers is a tile the reducer accepts', () => {
+    const { state } = buildScenario(getScenario('battle-open'));
+    advance(state);
+    const unit = state.units.get(state.active!)!;
+
+    let checked = 0;
+    for (const item of commandItemsFor(state, unit)) {
+      const ids =
+        item.id === 'attack'
+          ? ['attack']
+          : item.id.startsWith('set:')
+            ? abilityItemsFor(state, unit, item.id.slice(4)).map((a) => a.id)
+            : [];
+      for (const id of ids) {
+        const ability = getAbility(id);
+        if (!ability) continue;
+        const { tiles } = legalTargets(state, unit, ability);
+        for (const tile of tiles) {
+          if (!canAimAt(state, unit, ability, tile)) continue;
+          // Fresh state per probe: applying the command mutates the battle.
+          const probe = buildScenario(getScenario('battle-open')).state;
+          advance(probe);
+          const actor = probe.units.get(unit.id)!;
+          expect(
+            () =>
+              applyCommand(probe, {
+                kind: 'act',
+                unit: actor.id,
+                ability: ability.id,
+                target: tile,
+              }),
+            `${ability.name} aimed at (${tile.x},${tile.y})`,
+          ).not.toThrow();
+          checked++;
+        }
+      }
+    }
+    expect(checked, 'no aim points were exercised').toBeGreaterThan(0);
+  });
+
+  it('offers a weapon-ranged Attack to an archer and a one-tile one to a knight', () => {
+    const { state } = buildScenario(getScenario('battle-open'));
+    const attack = getAbility('attack')!;
+    const archer = state.units.get('p-belric')!;
+    const knight = state.units.get('p-aldric')!;
+    expect(effectiveRange(archer, attack).range).toBe(5);
+    expect(effectiveRange(knight, attack).range).toBe(1);
   });
 });
 

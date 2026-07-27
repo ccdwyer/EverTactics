@@ -68,6 +68,7 @@ export const ATTACK: Ability = {
   formula: 'physical',
   power: 1,
   accuracy: 100,
+  usesWeaponRange: true,
   vfx: 'slash-arc',
   castAnim: 'attack',
 };

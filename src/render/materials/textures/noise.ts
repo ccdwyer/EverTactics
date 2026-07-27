@@ -130,23 +130,24 @@ export function warpedFbm(
  * wood grain, erosion runs and brush strokes are all this.
  */
 export function streak(
-  x: number,
-  y: number,
+  u: number,
+  v: number,
   period: number,
   seed: number,
   angle: number,
   aniso: number,
   octaves = 3,
 ): number {
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  // Rotation would break tileability, so the anisotropy is applied on the *scale*
-  // and the rotation is folded into a small warp instead.
-  const wx = x + (fbm(x * 0.6, y * 0.6, Math.max(1, Math.round(period * 0.6)), seed + 33, 2) - 0.5) * 0.6 * c;
-  const wy = y + (fbm(x * 0.6 + 3.1, y * 0.6 + 7.7, Math.max(1, Math.round(period * 0.6)), seed + 37, 2) - 0.5) * 0.6 * s;
+  // NOTE: unlike `fbm`, this takes *normalised* u,v in 0..1 and scales by the period
+  // itself — the anisotropy has to be applied to the lattice, not to the caller's
+  // coordinates, or the two cancel out and the result is featureless.
   const px = Math.max(1, Math.round(period));
   const py = Math.max(1, Math.round(period * aniso));
-  return fbm2p(wx, wy * aniso, px, py, seed, octaves);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const wu = u + (fbm(u * 5, v * 5, 5, seed + 33, 2) - 0.5) * 0.09 * c;
+  const wv = v + (fbm(u * 5 + 3.1, v * 5 + 7.7, 5, seed + 37, 2) - 0.5) * 0.09 * s;
+  return fbm2p(wu * px, wv * py, px, py, seed, octaves);
 }
 
 /** fBm with independent x/y lattice periods (for stretched features). */

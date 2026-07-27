@@ -45,6 +45,7 @@ import {
   Object3D,
   OctahedronGeometry,
   PlaneGeometry,
+  PointLight,
   Quaternion,
   RingGeometry,
   ShaderMaterial,
@@ -1391,6 +1392,176 @@ class RisingShapes {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// VFX lights — the part that makes an effect belong to the scene
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every effect in this file emits a real `PointLight`.
+ *
+ * This is not garnish. In `refs/curated/triangle/press_002_gematsu_1920x1080.jpg`
+ * the entire village is lit *by* the fires: the ground under each flame is
+ * orange, the grass twenty units away is black, and the sprite standing between
+ * two of them is warm on both sides and dark in the middle. A particle system
+ * that glows without illuminating anything produces the opposite reading — a
+ * bright decal floating in front of an unaffected scene, which is the single
+ * most common tell that a game is not doing its own lighting.
+ *
+ * Three constraints shape the implementation:
+ *
+ *  1. **Fixed pool.** Adding or removing a light changes `NUM_POINT_LIGHTS`,
+ *     which recompiles every material in the scene. That hitch would land on
+ *     precisely the frame a spell detonates. So the pool is allocated once, and
+ *     idle lights sit at intensity 0.
+ *  2. **Clock-driven, not timeline-driven.** Envelopes are evaluated from the
+ *     system clock in `update()` rather than from a `VfxTimeline` span, because
+ *     a timeline can be `cancel()`ed mid-flight and a light left switched on at
+ *     full intensity is a far worse artefact than a missing one.
+ *  3. **Priority eviction.** Six lights is not many. A detonation outranks a
+ *     charge glow, so when the pool is full the lowest-priority slot is stolen.
+ */
+const MAX_VFX_LIGHTS = 6;
+
+export interface VfxLightOptions {
+  /** Linear HDR colour. Element palettes feed this directly. */
+  color: Color;
+  /** Peak intensity in candela; irradiance at distance d is `intensity / d²`. */
+  intensity: number;
+  /** Cutoff radius in TILES. Past this the light contributes exactly nothing. */
+  radius: number;
+  /** Seconds to reach peak. Impact flashes want ~0.02; a gathering glow wants ~0.6. */
+  rise?: number;
+  /** Seconds held at peak. */
+  hold?: number;
+  /** Seconds of decay. Quadratic, so it reads as a real falloff rather than a dissolve. */
+  fall?: number;
+  /** Height above `position`, in tiles. Ground-level lights bury themselves in the terrain. */
+  lift?: number;
+  /** Flicker depth 0..1 applied across the whole envelope. */
+  flicker?: number;
+  /** Flicker rate, Hz. */
+  flickerRate?: number;
+  /** Eviction rank. Impacts 3, casts 2, sustained glows 1. */
+  priority?: number;
+}
+
+/** Live control over a spawned light, for travelling projectiles and charges. */
+export interface VfxLightHandle {
+  /** Follow a projectile. */
+  moveTo(position: Vector3): void;
+  /** Retint mid-flight (a bolt that turns from white to blue as it cools). */
+  setColor(color: Color): void;
+  /** Start the decay now rather than after `hold` expires. */
+  release(fallSeconds?: number): void;
+}
+
+interface LightSlot {
+  light: PointLight;
+  home: Vector3;
+  start: number;
+  rise: number;
+  hold: number;
+  fall: number;
+  peak: number;
+  flicker: number;
+  flickerRate: number;
+  priority: number;
+  seed: number;
+  active: boolean;
+}
+
+const IDLE_HANDLE: VfxLightHandle = {
+  moveTo: () => {},
+  setColor: () => {},
+  release: () => {},
+};
+
+class VfxLightPool {
+  readonly slots: LightSlot[] = [];
+
+  constructor(group: Group, count: number) {
+    for (let i = 0; i < count; i++) {
+      const light = new PointLight(0xffffff, 0, 10, 2);
+      light.name = `VfxLight${i}`;
+      light.castShadow = false;
+      group.add(light);
+      this.slots.push({
+        light,
+        home: new Vector3(),
+        start: -1e9,
+        rise: 0.02,
+        hold: 0,
+        fall: 0.2,
+        peak: 0,
+        flicker: 0,
+        flickerRate: 9,
+        priority: 0,
+        seed: i * 7.31,
+        active: false,
+      });
+    }
+  }
+
+  acquire(priority: number, now: number): LightSlot | null {
+    for (const s of this.slots) if (!s.active) return s;
+    // Full: steal the weakest slot, preferring one already deep into its decay.
+    let victim: LightSlot | null = null;
+    let worst = Infinity;
+    for (const s of this.slots) {
+      const age = (now - s.start) / Math.max(1e-3, s.rise + s.hold + s.fall);
+      const score = s.priority - Math.min(1, age) * 0.5;
+      if (score < worst) {
+        worst = score;
+        victim = s;
+      }
+    }
+    return victim && worst <= priority ? victim : null;
+  }
+
+  update(now: number): void {
+    for (const s of this.slots) {
+      if (!s.active) continue;
+      const t = now - s.start;
+      const total = s.rise + s.hold + s.fall;
+      if (t >= total) {
+        s.active = false;
+        s.light.intensity = 0;
+        continue;
+      }
+      let env: number;
+      if (t <= 0) {
+        env = 0;
+      } else if (t < s.rise) {
+        // Front-loaded: a detonation is at 70% of peak within the first fifth of
+        // its rise. A linear ramp reads as a lamp being switched on.
+        env = Math.pow(t / s.rise, 0.45);
+      } else if (t < s.rise + s.hold) {
+        env = 1;
+      } else {
+        const x = (t - s.rise - s.hold) / Math.max(1e-4, s.fall);
+        env = Math.pow(1 - x, 2.2);
+      }
+      if (s.flicker > 0) {
+        const x = t * s.flickerRate + s.seed;
+        const n = Math.sin(x) * 0.6 + Math.sin(x * 2.37 + 1.1) * 0.27 + Math.sin(x * 5.11 + 2.4) * 0.13;
+        env *= 1 + s.flicker * n;
+      }
+      s.light.intensity = Math.max(0, s.peak * env);
+    }
+  }
+
+  releaseAll(): void {
+    for (const s of this.slots) {
+      s.active = false;
+      s.light.intensity = 0;
+    }
+  }
+
+  dispose(): void {
+    for (const s of this.slots) s.light.dispose();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Camera shake + time control
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1664,6 +1835,12 @@ export interface VfxSystemOptions {
   /** Layer to put VFX objects on, if the renderer wants to isolate them. */
   layer?: number;
   seed?: number;
+  /**
+   * Size of the dynamic light pool. Fixed for the lifetime of the system: each
+   * slot costs one point-light evaluation per lit fragment whether or not it is
+   * on, and changing the count would recompile every material in the scene.
+   */
+  lightCount?: number;
 }
 
 export interface VfxPlayOptions {
@@ -1702,6 +1879,8 @@ export class VfxSystem {
   private readonly spikes: RisingShapes;
   private readonly shards: RisingShapes;
   private readonly timelines: VfxTimeline[] = [];
+  private readonly lights: VfxLightPool;
+  private readonly lightColor = new Color();
 
   private readonly rng: VfxRng;
   private readonly tileSize: number;
@@ -1806,6 +1985,12 @@ export class VfxSystem {
       this.group.traverse((o: Object3D) => o.layers.set(opts.layer!));
     }
 
+    // Deliberately created *after* the layer traversal. VFX geometry can be
+    // isolated onto its own channel for post, but a light restricted to that
+    // channel would stop illuminating the terrain and sprites, which is the
+    // entire reason it exists.
+    this.lights = new VfxLightPool(this.group, opts.lightCount ?? MAX_VFX_LIGHTS);
+
     this.group.matrixAutoUpdate = false;
     this.group.updateMatrix();
   }
@@ -1848,6 +2033,7 @@ export class VfxSystem {
       if (!tl.update(dt)) this.timelines.splice(i, 1);
     }
 
+    this.lights.update(this.clock);
     for (const c of this.circles) c.material.uniforms['uTime']!.value = this.clock;
     for (const p of this.pillars) p.material.uniforms['uTime']!.value = this.clock;
     this.spikes.update(dt);
@@ -2010,6 +2196,84 @@ export class VfxSystem {
     return null;
   }
 
+  // ── Dynamic light ───────────────────────────────────────────────────────
+
+  /**
+   * Emit a real point light that illuminates terrain and sprites.
+   *
+   * Call this from every effect that produces visible light. The envelope runs
+   * on the system clock, so it survives the caller's timeline being cancelled,
+   * and it decays quadratically — a flash that fades linearly reads as a
+   * dimmer switch rather than as something burning out.
+   */
+  spawnLight(position: Vector3, o: VfxLightOptions): VfxLightHandle {
+    const priority = o.priority ?? 2;
+    const slot = this.lights.acquire(priority, this.clock);
+    if (!slot) return IDLE_HANDLE;
+
+    slot.active = true;
+    slot.start = this.clock;
+    slot.rise = Math.max(1e-3, o.rise ?? 0.03);
+    slot.hold = Math.max(0, o.hold ?? 0.04);
+    slot.fall = Math.max(1e-3, o.fall ?? 0.34);
+    slot.peak = o.intensity;
+    slot.flicker = o.flicker ?? 0;
+    slot.flickerRate = o.flickerRate ?? 11;
+    slot.priority = priority;
+
+    const lift = (o.lift ?? 0.55) * this.tileSize;
+    slot.home.set(position.x, position.y + lift, position.z);
+    slot.light.position.copy(slot.home);
+    slot.light.color.copy(o.color);
+    slot.light.distance = Math.max(0.5, o.radius * this.tileSize);
+    slot.light.decay = 2;
+    slot.light.intensity = 0;
+
+    return {
+      moveTo: (p: Vector3) => {
+        if (!slot.active) return;
+        slot.home.set(p.x, p.y + lift, p.z);
+        slot.light.position.copy(slot.home);
+      },
+      setColor: (c: Color) => {
+        if (slot.active) slot.light.color.copy(c);
+      },
+      release: (fallSeconds?: number) => {
+        if (!slot.active) return;
+        // Rewrite the envelope so the decay starts on this frame, preserving
+        // whatever intensity the light currently has as the new peak.
+        const t = this.clock - slot.start;
+        const held = Math.min(1, t < slot.rise ? Math.pow(t / slot.rise, 0.45) : 1);
+        slot.peak *= held;
+        slot.start = this.clock;
+        slot.rise = 1e-3;
+        slot.hold = 0;
+        slot.fall = Math.max(1e-3, fallSeconds ?? 0.35);
+      },
+    };
+  }
+
+  /**
+   * Convenience: spawn a light coloured by an element palette. The palette's
+   * `core` is already linear HDR (fire peaks at 5.5 red), so it doubles as a
+   * light colour without a second set of authored constants — the flame and the
+   * light it casts can never drift out of agreement.
+   */
+  spawnElementLight(
+    position: Vector3,
+    element: Element,
+    o: Omit<VfxLightOptions, 'color'> & { color?: Color },
+  ): VfxLightHandle {
+    if (o.color) return this.spawnLight(position, { ...o, color: o.color });
+    const p = ELEMENT_COLORS[element];
+    // Normalise the palette to unit luminance: the palette encodes *brightness*
+    // in its magnitude for bloom purposes, and folding that into the light too
+    // would make fire six times stronger than ice for no authored reason.
+    const peak = Math.max(p.core[0], p.core[1], p.core[2], 1e-3);
+    this.lightColor.setRGB(p.core[0] / peak, p.core[1] / peak, p.core[2] / peak);
+    return this.spawnLight(position, { ...o, color: this.lightColor });
+  }
+
   // ── Composite primitives used by effect definitions ─────────────────────
 
   /**
@@ -2037,6 +2301,27 @@ export class VfxSystem {
 
     const growAt = o.growAt ?? 0;
     const holdUntil = o.holdUntil ?? growAt + 0.9;
+
+    // A sigil that glows but leaves the flagstones it is painted on unlit reads
+    // as a decal. Low, wide and dim: this is bounce off the ground, not a lamp.
+    const sigilColor = (o.color ?? new Color(0.4, 0.7, 1.3)).clone();
+    const sigilPeak = Math.max(sigilColor.r, sigilColor.g, sigilColor.b, 1e-3);
+    sigilColor.multiplyScalar(1 / sigilPeak);
+    tl.at(growAt, () => {
+      this.spawnLight(centre, {
+        color: sigilColor,
+        intensity: 9 * (radius / this.tileSize),
+        radius: radius / this.tileSize + 3.2,
+        lift: 0.22,
+        rise: 0.34,
+        hold: Math.max(0.1, holdUntil - growAt),
+        fall: 0.3,
+        flicker: 0.1,
+        flickerRate: 3.4,
+        priority: 1,
+      });
+    });
+
     tl.span(growAt, growAt + 0.36, (t) => {
       u['uGrow']!.value = t;
       u['uOpacity']!.value = t;
@@ -2083,6 +2368,38 @@ export class VfxSystem {
       r.material.uniforms['uCoreWidth']!.value = 0.3;
       r.material.uniforms['uTail']!.value = 0; // ribbons are pooled; clear the slash's tail
     }
+
+    // A strike lights the whole approach, not just where it lands: two lights,
+    // one at the origin and one at the impact, both violently short.
+    const boltColor = core.clone();
+    const boltPeak = Math.max(boltColor.r, boltColor.g, boltColor.b, 1e-3);
+    boltColor.multiplyScalar(1 / boltPeak);
+    tl.at(at, () => {
+      this.spawnLight(to, {
+        color: boltColor,
+        intensity: 46,
+        radius: 8,
+        lift: 0.5,
+        rise: 0.012,
+        hold: 0.02,
+        fall: duration * 1.1,
+        flicker: 0.5,
+        flickerRate: 34,
+        priority: 3,
+      });
+      this.spawnLight(from, {
+        color: boltColor,
+        intensity: 18,
+        radius: 5.5,
+        lift: 1.1,
+        rise: 0.012,
+        hold: 0.01,
+        fall: duration * 0.7,
+        flicker: 0.5,
+        flickerRate: 29,
+        priority: 2,
+      });
+    });
 
     const segments = 18;
     const buildPath = (a: Vector3, b: Vector3, amp: number, seedOffset: number): Vector3[] => {
@@ -2191,6 +2508,23 @@ export class VfxSystem {
       pts.push(p);
     }
 
+    // A blade stroke throws a brief cold kick onto whatever it passes over.
+    const arcColor = (o.color ?? new Color(3.2, 3.2, 3.6)).clone();
+    const arcPeak = Math.max(arcColor.r, arcColor.g, arcColor.b, 1e-3);
+    arcColor.multiplyScalar(1 / arcPeak);
+    tl.at(at, () => {
+      this.spawnLight(centre, {
+        color: arcColor,
+        intensity: 16,
+        radius: radius / this.tileSize + 3,
+        lift: 0.7,
+        rise: 0.015,
+        hold: 0.02,
+        fall: duration * 1.4,
+        priority: 2,
+      });
+    });
+
     tl.span(at, at + duration, (t) => {
       ribbon.mesh.visible = true;
       ribbon.setPath(pts, width * (1.2 - 0.6 * t), this.cameraDir);
@@ -2242,6 +2576,27 @@ export class VfxSystem {
     u['uScroll']!.value = o.scroll ?? 0.35;
     u['uOpacity']!.value = 0;
     u['uRise']!.value = 0;
+
+    // The pillar is the brightest thing on the board while it stands, so it owns
+    // the light too: a tall, wide, sustained source that pushes the whole
+    // surrounding area a stop up and re-tints it.
+    const pillarColor = (o.core ?? new Color(5.0, 4.6, 3.2)).clone();
+    const pillarPeak = Math.max(pillarColor.r, pillarColor.g, pillarColor.b, 1e-3);
+    pillarColor.multiplyScalar(1 / pillarPeak);
+    tl.at(at, () => {
+      this.spawnLight(base, {
+        color: pillarColor,
+        intensity: 70,
+        radius: radius / this.tileSize + 9,
+        lift: height / this.tileSize * 0.28,
+        rise: rise * 0.6,
+        hold: hold + rise * 0.4,
+        fall,
+        flicker: 0.09,
+        flickerRate: 6.5,
+        priority: 3,
+      });
+    });
 
     tl.span(at, at + rise, (t) => {
       pillar.mesh.visible = true;
@@ -2300,14 +2655,39 @@ export class VfxSystem {
     this.shards.begin(instances);
   }
 
-  /** Screen shake + optional hit-stop + optional distortion ring, in one call. */
-  impactPunch(position: Vector3, power: number): void {
+  /**
+   * Screen shake + hit-stop + distortion ring + **the impact light**, in one call.
+   *
+   * Every ability in this file routes its detonation through here, which is why
+   * the light lives here rather than in forty separate effect definitions: it
+   * guarantees that nothing can land a hit without lighting the scene. The
+   * envelope is a hard flash (12ms rise) decaying over a third of a second,
+   * which is what a real explosion does to a photograph and what the reference
+   * frames show happening to the ground around a spell.
+   */
+  impactPunch(position: Vector3, power: number, element: Element = 'none'): void {
     this.shake.add(0.28 + 0.55 * power);
     if (power >= 0.55) this.time.stop(0.035 + 0.075 * power, 0.03);
     this.post?.addShockwave(position, {
       amplitude: 0.006 + 0.016 * power,
       duration: 0.32 + 0.2 * power,
       maxRadius: 0.28 + 0.28 * power,
+    });
+    // Sized so the pool stays *coloured*. Push a point light past roughly 100
+    // candela at this scale and every surface inside it clips to white — the
+    // flash reads as an exposure error rather than as fire, and the grass it
+    // lands on loses its green. The reference frames blow out the emitter core
+    // and nothing else.
+    this.spawnElementLight(position, element, {
+      intensity: 32 + 78 * power,
+      radius: 5 + 5.5 * power,
+      lift: 0.5,
+      rise: 0.012,
+      hold: 0.03 + 0.05 * power,
+      fall: 0.3 + 0.35 * power,
+      flicker: 0.16,
+      flickerRate: 17,
+      priority: 3,
     });
   }
 
@@ -2359,6 +2739,21 @@ export class VfxSystem {
       });
     }
 
+    // The caster is underlit by what they are gathering. Held open for the whole
+    // charge and released by `close()`, so the light's lifetime is exactly the
+    // ability's — this is why `spawnLight` returns a handle.
+    const chargeLight = this.spawnElementLight(origin, element, {
+      intensity: 26,
+      radius: 6.5,
+      lift: 0.8,
+      rise: 0.55,
+      hold: 3600,
+      fall: 0.4,
+      flicker: 0.14,
+      flickerRate: 5.5,
+      priority: 1,
+    });
+
     // Motes spiralling up into the caster's hands.
     let acc = 0;
     tl.span(0, 3600, (_t, ctx) => {
@@ -2395,7 +2790,17 @@ export class VfxSystem {
         circle.mesh.visible = false;
         circle.active = false;
       }
+      chargeLight.release(burst ? 0.5 : 0.22);
       if (burst) {
+        this.spawnElementLight(origin, element, {
+          intensity: 65,
+          radius: 8,
+          lift: 0.8,
+          rise: 0.02,
+          hold: 0.04,
+          fall: 0.4,
+          priority: 3,
+        });
         this.emit({
           count: 22,
           position: origin.clone().setY(origin.y + 0.7 * this.tileSize),
@@ -2447,6 +2852,17 @@ export class VfxSystem {
 
   playHitSpark(position: Vector3, power = 0.5, element: Element = 'none'): void {
     const pal = ELEMENT_COLORS[element];
+    // Small, tight and very short — a weapon hit should tick the surrounding
+    // stone a shade brighter, not floodlight the courtyard.
+    this.spawnElementLight(position, element, {
+      intensity: 14 + 26 * power,
+      radius: 3.2 + 1.8 * power,
+      lift: 0.15,
+      rise: 0.01,
+      hold: 0.015,
+      fall: 0.16 + 0.1 * power,
+      priority: 2,
+    });
     this.emit({
       count: Math.round(8 + 16 * power),
       position,
@@ -2513,10 +2929,12 @@ export class VfxSystem {
       p.active = false;
       p.mesh.visible = false;
     }
+    this.lights.releaseAll();
   }
 
   dispose(): void {
     this.clear();
+    this.lights.dispose();
     this.additive.dispose();
     this.alpha.dispose();
     for (const r of this.ribbons) r.dispose();
@@ -2612,7 +3030,7 @@ const genericBurst: EffectBuilder = (sys, tl, o) => {
       fadeIn: 0.06,
       fadeOut: 0.2,
     });
-    sys.impactPunch(o.target, power * 0.6);
+    sys.impactPunch(o.target, power * 0.6, o.element);
     o.onImpact?.(0, o.target);
   });
   tl.hold(0.7);
@@ -2724,7 +3142,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           fadeIn: 0.2,
           fadeOut: 0.3,
         });
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -2802,7 +3220,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           fadeIn: 0.05,
           fadeOut: 0.2,
         });
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -2875,7 +3293,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           fadeIn: 0.05,
           fadeOut: 0.25,
         });
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -2946,7 +3364,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           sprite: SPR.streak,
           stretch: 2.0,
         });
-        sys.impactPunch(pt, power * 0.8);
+        sys.impactPunch(pt, power * 0.8, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -3022,7 +3440,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           fadeIn: 0.1,
           fadeOut: 0.3,
         });
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -3105,7 +3523,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           color1: fadeOf(p),
           sprite: SPR.bubble,
         });
-        sys.impactPunch(pt, power * 0.85);
+        sys.impactPunch(pt, power * 0.85, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -3200,7 +3618,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           fadeIn: 0.06,
           fadeOut: 0.3,
         });
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -3295,7 +3713,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           fadeIn: 0.06,
           fadeOut: 0.4,
         });
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -3492,7 +3910,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
       for (const pt of pts) {
         sys.playHitSpark(pt.clone().setY(pt.y + 0.85 * sys.scale), power, o.element ?? 'none');
         sys.playBloodBurst(pt.clone().setY(pt.y + 0.9 * sys.scale), power);
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -3543,7 +3961,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           stretch: 2.6,
           fadeIn: 0.03,
         });
-        sys.impactPunch(pt, power);
+        sys.impactPunch(pt, power, o.element);
       }
       pts.forEach((pt, i) => o.onImpact?.(i, pt));
     });
@@ -3679,7 +4097,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
         fadeIn: 0.05,
         fadeOut: 0.3,
       });
-      sys.impactPunch(centre, power);
+      sys.impactPunch(centre, power, o.element);
       sys.time.stop(0.09, 0.02);
       o.onImpact?.(0, centre);
     });

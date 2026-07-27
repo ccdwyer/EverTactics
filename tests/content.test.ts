@@ -9,7 +9,7 @@
  * These tests make that class of mistake loud.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   JOBS,
@@ -52,24 +52,46 @@ describe('job roster', () => {
     expect(jobsByOrigin('wow').length).toBeGreaterThanOrEqual(6);
   });
 
-  it('gives every job a sprite sheet that exists on disk', () => {
-    const missing: string[] = [];
+  it('gives every job a sprite sheet that is present AND actually usable', () => {
+    // 22 sheets in the rip are broken stubs — 18-pixel noise strips with no art
+    // (the WotL-exclusive jobs among them). A job pointed at one of those renders
+    // nothing on the battlefield, so "the file exists" is not a sufficient check:
+    // the sheet must be unbroken and must yield whole-body pose frames.
+    const manifestPath = resolve(REPO, 'public/assets/manifest.json');
+    expect(existsSync(manifestPath), 'run `npm run assets` to build the manifest').toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      sheets: Record<string, { broken?: boolean; poses?: unknown[]; files?: string[] }>;
+    };
+
+    /** Job sprite keys are file basenames; manifest keys are slugs. Match either. */
+    const lookup = (key: string) => {
+      const direct = manifest.sheets[key];
+      if (direct) return direct;
+      const needle = `${key}.png`;
+      for (const entry of Object.values(manifest.sheets)) {
+        if (entry.files?.some((f) => f.endsWith(needle))) return entry;
+      }
+      return undefined;
+    };
+
+    const bad: string[] = [];
     for (const job of allJobs()) {
       for (const key of [job.sprite.male, job.sprite.female]) {
         if (!key) {
-          missing.push(`${job.id}: empty sprite key`);
+          bad.push(`${job.id}: empty sprite key`);
           continue;
         }
-        // Sprite keys resolve through the manifest; accept either a manifest
-        // entry or a direct file, since the pipeline writes both.
-        const direct = resolve(REPO, 'public/assets/sprites', `${key}.png`);
-        const manifest = resolve(REPO, 'public/assets/manifest.json');
-        if (!existsSync(direct) && !existsSync(manifest)) {
-          missing.push(`${job.id}: no sprite for "${key}"`);
+        const entry = lookup(key);
+        if (!entry) {
+          bad.push(`${job.id}: "${key}" is not in the sprite manifest`);
+        } else if (entry.broken) {
+          bad.push(`${job.id}: "${key}" is a broken rip with no artwork`);
+        } else if (!entry.poses || entry.poses.length === 0) {
+          bad.push(`${job.id}: "${key}" yields no whole-body pose frames`);
         }
       }
     }
-    expect(missing).toEqual([]);
+    expect(bad).toEqual([]);
   });
 
   it('only requires jobs that exist, and has no circular prerequisites', () => {

@@ -40,8 +40,14 @@ export function portraitForId(id: string): string {
 
 export type PortraitSize = 'xs' | 'sm' | 'md' | 'lg';
 
-/** Displayed widths in CSS pixels; heights follow the 128:192 (2:3) aspect. */
-const SIZES: Record<PortraitSize, number> = { xs: 32, sm: 44, md: 64, lg: 96 };
+/**
+ * Displayed widths in CSS pixels; heights follow the 128:192 (2:3) aspect.
+ *
+ * Sized against the reference games at 1080p, where a unit-panel face is roughly
+ * 150px wide and a turn-order face roughly 60px — the portrait is a primary read,
+ * not a decoration beside the name.
+ */
+const SIZES: Record<PortraitSize, number> = { xs: 36, sm: 58, md: 80, lg: 132 };
 
 export interface PortraitOptions {
   size?: PortraitSize;

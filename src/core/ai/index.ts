@@ -30,6 +30,7 @@ import type {
 import {
   DEFAULT_PERSONALITY,
   PERSONALITIES,
+  battleCaution,
   effectiveWeights,
   inSurvivalMode,
   inferPersonality,
@@ -143,7 +144,7 @@ export function planTurn(
 
   const personality = pickPersonality(actor, opts);
   const survival = inSurvivalMode(personality, actor);
-  const weights = effectiveWeights(personality, actor);
+  const weights = effectiveWeights(personality, actor, battleCaution(state.tick));
 
   const guardTarget = resolveGuardTarget(state, actor, personality, opts);
 

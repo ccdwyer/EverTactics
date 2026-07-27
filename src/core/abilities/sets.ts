@@ -148,11 +148,13 @@ const SET_LIST: readonly AbilitySetMeta[] = [
     description: 'Call the Espers. Vast, slow, and indifferent to who stands where.' },
   { id: 'steal', name: 'Steal', icon: 'cmd/steal', order: 100, origin: 'fft', job: 'thief',
     description: 'Quick fingers. Take the coin, the blade, or the will to fight.' },
-  { id: 'snatch', name: 'Snatch', icon: 'cmd/snatch', order: 110, origin: 'fft', job: 'rogue',
+  // No job carries Snatch as its primary command; it exists as a secondary for
+  // anyone who wants theft with an edge on it, and for enemy cutpurse units.
+  { id: 'snatch', name: 'Snatch', icon: 'cmd/snatch', order: 110, origin: 'fft',
     description: 'Thievery that also wounds — the refined trade of a working cutpurse.' },
   { id: 'talk-skill', name: 'Talk Skill', icon: 'cmd/talk', order: 120, origin: 'fft', job: 'orator',
     description: 'Words as weapons: recruit, cow, flatter and sentence without drawing steel.' },
-  { id: 'yin-yang-magick', name: 'Yin-Yang Magick', icon: 'cmd/yinyang', order: 130, origin: 'fft', job: 'oracle',
+  { id: 'yin-yang-magick', name: 'Yin-Yang Magick', icon: 'cmd/yinyang', order: 130, origin: 'fft', job: 'mystic',
     description: 'Old hedge-sorcery. Curses, blindings and the quiet theft of faith.' },
   { id: 'geomancy', name: 'Geomancy', icon: 'cmd/geo', order: 140, origin: 'fft', job: 'geomancer',
     description: 'Strike with the ground you stand on; every surface answers differently.' },
@@ -178,25 +180,31 @@ const SET_LIST: readonly AbilitySetMeta[] = [
   { id: 'mimicry', name: 'Mimicry', icon: 'cmd/mime', order: 240, origin: 'fft', job: 'mime',
     primaryOnly: true,
     description: 'Repeat what your allies do, without gear, without cost, without hesitation.' },
+  { id: 'onion-skills', name: 'Onion Skills', icon: 'cmd/onion', order: 250, origin: 'fft', job: 'onion-knight',
+    description: 'Plain soldiering, sharpened by every job the wearer has ever mastered.' },
   // ── EQ2 / WoW lineage ──────────────────────────────────────────────────────
-  { id: 'threat-arts', name: 'Threat Arts', icon: 'cmd/threat', order: 300, origin: 'eq2', job: 'guardian',
-    description: 'Make yourself the only target worth swinging at, then survive being right.' },
-  { id: 'ward-craft', name: 'Ward Craft', icon: 'cmd/ward', order: 310, origin: 'eq2', job: 'mystic',
-    description: 'Ancestral shielding that absorbs harm before it lands — prevention, not repair.' },
+  { id: 'dread-arts', name: 'Dread Arts', icon: 'cmd/threat', order: 300, origin: 'eq2', job: 'shadowknight',
+    description: 'Make yourself the only target worth swinging at, then drink what they spend on you.' },
+  { id: 'sacraments', name: 'Sacraments', icon: 'cmd/ward', order: 310, origin: 'eq2', job: 'templar',
+    description: 'Shielding laid on before the blow lands — prevention, not repair.' },
   { id: 'enthrall', name: 'Enthrall', icon: 'cmd/charm', order: 320, origin: 'eq2', job: 'coercer',
     description: 'Take an enemy\'s mind off the battle, or take it over entirely.' },
-  { id: 'beast-command', name: 'Beast Command', icon: 'cmd/beast', order: 330, origin: 'eq2', job: 'beastlord',
+  { id: 'primal-bond', name: 'Primal Bond', icon: 'cmd/beast', order: 330, origin: 'eq2', job: 'beastlord',
     description: 'Orders for a bonded warder — and the strikes you two only land together.' },
+  { id: 'anthems', name: 'Anthems', icon: 'cmd/anthem', order: 335, origin: 'eq2', job: 'troubador',
+    description: 'A standing chord anchored to the ground you occupy. Stand in it, or gain nothing.' },
+  { id: 'dirges', name: 'Dirges', icon: 'cmd/dirge', order: 337, origin: 'eq2', job: 'dirge',
+    description: 'Funeral music that marks the enemy and makes everyone else\'s numbers bigger.' },
   { id: 'affliction', name: 'Affliction', icon: 'cmd/dot', order: 340, origin: 'wow', job: 'warlock',
     description: 'Damage that lives inside the enemy and keeps working after your turn ends.' },
-  { id: 'subterfuge', name: 'Subterfuge', icon: 'cmd/combo', order: 350, origin: 'wow', job: 'assassin',
+  { id: 'subterfuge', name: 'Subterfuge', icon: 'cmd/combo', order: 350, origin: 'wow', job: 'rogue',
     description: 'Build the opening with fast strikes, then spend it all in one finisher.' },
-  { id: 'stances', name: 'Stances', icon: 'cmd/stance', order: 360, origin: 'wow', job: 'berserker',
-    description: 'Postures that trade one virtue for another. Only one may be held at a time.' },
+  { id: 'wild-shape', name: 'Wild Shape', icon: 'cmd/stance', order: 360, origin: 'wow', job: 'druid',
+    description: 'Bear, cat or neither. The form decides what the rest of the menu is for.' },
   { id: 'totemcraft', name: 'Totemcraft', icon: 'cmd/totem', order: 370, origin: 'wow', job: 'shaman',
     description: 'Plant a spirit-totem on a tile; it works on its own until something breaks it.' },
-  { id: 'auras', name: 'Auras', icon: 'cmd/aura', order: 380, origin: 'wow', job: 'paladin',
-    description: 'A standing field of consecration centred on you. One aura, always burning.' },
+  { id: 'judgement', name: 'Judgement', icon: 'cmd/aura', order: 380, origin: 'wow', job: 'paladin',
+    description: 'Seal the enemy, keep the aura burning, and collect the whole debt at once.' },
   { id: 'runic-strike', name: 'Runic Strike', icon: 'cmd/rune', order: 390, origin: 'wow', job: 'death-knight',
     description: 'Blood, frost and unholy runes spent through the weapon and out the other side.' },
 ];
@@ -262,22 +270,36 @@ export const SET_ALIASES: Readonly<Record<string, AbilitySetId>> = {
   'sword-spirit': 'holy-sword',
   'mighty-swordplay': 'mighty-sword',
   'mimic': 'mimicry',
-  'threat': 'threat-arts',
-  'taunt-arts': 'threat-arts',
-  'defiance': 'threat-arts',
-  'wards': 'ward-craft',
-  'warding': 'ward-craft',
+  // The seven names below are the *superseded* halves of the job-table /
+  // ability-table split (see docs/JOBS.md § Canonical set names). They are kept
+  // as aliases so any consumer still holding an old id keeps working.
+  'threat-arts': 'dread-arts',
+  'threat': 'dread-arts',
+  'taunt-arts': 'dread-arts',
+  'defiance': 'dread-arts',
+  'ward-craft': 'sacraments',
+  'wards': 'sacraments',
+  'warding': 'sacraments',
+  'coercion': 'enthrall',
   'charm-arts': 'enthrall',
   'mesmerism': 'enthrall',
-  'pet-command': 'beast-command',
-  'beastcraft': 'beast-command',
+  'beast-command': 'primal-bond',
+  'pet-command': 'primal-bond',
+  'beastcraft': 'primal-bond',
+  'anthem': 'anthems',
+  'dirge': 'dirges',
   'afflictions': 'affliction',
   'curses': 'affliction',
+  'subtlety': 'subterfuge',
   'combo-arts': 'subterfuge',
   'shadow-arts': 'subterfuge',
-  'stance': 'stances',
+  'stances': 'wild-shape',
+  'stance': 'wild-shape',
+  'shapeshift': 'wild-shape',
   'totems': 'totemcraft',
-  'aura': 'auras',
+  'auras': 'judgement',
+  'aura': 'judgement',
+  'onion-skill': 'onion-skills',
   'runic-strikes': 'runic-strike',
   'runeblade': 'runic-strike',
 };
@@ -401,7 +423,7 @@ const BATTLE_SKILL = actions('battle-skill', [
 
 function charge(n: number, ct: number, power: number, mp: number): AbilitySpec {
   return {
-    id: `charge-${n}`,
+    id: `charge-plus-${n}`,
     name: `Charge +${n}`,
     description: `Hold the draw for ${ct} ticks. The shot lands at +${n} weapon power — and everyone can see you doing it.`,
     mp,
@@ -480,13 +502,13 @@ const WHITE_MAGICK = actions('white-magick', [
   { id: 'protect', name: 'Protect', description: 'A hardened aura across the skin. Physical blows land at two-thirds weight.',
     mp: 6, ct: 3, range: R(3, 1), formula: 'buff', vfx: 'white/protect', castAnim: 'cast',
     inflicts: [inf('protect', 100, LONG)] },
-  { id: 'protectga', name: 'Protectga', description: 'The same ward, thrown wide enough to cover the whole front rank.',
+  { id: 'protectja', name: 'Protectja', description: 'The same ward, thrown wide enough to cover the whole front rank.',
     mp: 16, ct: 5, range: R(4, 2), formula: 'buff', vfx: 'white/protect-2', castAnim: 'cast',
     inflicts: [inf('protect', 100, LONG)] },
   { id: 'shell', name: 'Shell', description: 'A lattice of resistance against magick. Spells arrive muted.',
     mp: 6, ct: 3, range: R(3, 1), formula: 'buff', vfx: 'white/shell', castAnim: 'cast',
     inflicts: [inf('shell', 100, LONG)] },
-  { id: 'shellga', name: 'Shellga', description: 'Shell laid over a formation, for when the enemy line is all mages.',
+  { id: 'shellja', name: 'Shellja', description: 'Shell laid over a formation, for when the enemy line is all mages.',
     mp: 16, ct: 5, range: R(4, 2), formula: 'buff', vfx: 'white/shell-2', castAnim: 'cast',
     inflicts: [inf('shell', 100, LONG)] },
   { id: 'wall', name: 'Wall', description: 'Protect, Shell and Haste at once. Expensive, slow, and worth it on the right unit.',
@@ -568,6 +590,9 @@ const TIME_MAGICK = actions('time-magick', [
   { id: 'immobilize', name: 'Immobilize', description: 'Fix the feet in place. They may still swing, but they will not close the gap.',
     mp: 12, ct: 4, range: R(4), formula: 'status-only', accuracy: 70, vfx: 'time/immobilize', castAnim: 'cast',
     inflicts: [inf('rooted', 100, LONG)] },
+  { id: 'disable', name: 'Disable', description: 'Seize the hands rather than the clock. The target may still walk; they may not act.',
+    mp: 14, ct: 5, range: R(4), formula: 'status-only', accuracy: 65, vfx: 'time/disable', castAnim: 'cast',
+    inflicts: [inf('stop', 100, 16)] },
   { id: 'reflect', name: 'Reflect', description: 'A mirrored skin. Single-target spells bounce back at whoever cast them.',
     mp: 16, ct: 5, range: R(3), formula: 'buff', vfx: 'time/reflect', castAnim: 'cast',
     inflicts: [inf('reflect', 100, LONG)] },
@@ -731,6 +756,12 @@ const TALK_SKILL = actions('talk-skill', [
   { id: 'refute', name: 'Refute', description: 'Dismantle their reasoning so thoroughly that they lose track of who they are fighting.',
     range: TALK_RANGE, formula: 'status-only', accuracy: 60, vfx: 'talk/refute', castAnim: 'cast',
     inflicts: [inf('confuse', 100, MEDIUM)] },
+  { id: 'monster-talk', name: 'Beast Tongue', description: 'The old drover\'s cant. Beasts do not reason, but they do listen, and they can be sent home.',
+    range: TALK_RANGE, formula: 'status-only', accuracy: 60, vfx: 'talk/beast', castAnim: 'cast',
+    inflicts: [inf('charm', 100, LONG)] },
+  { id: 'train', name: 'Train', description: 'Break a beast to the harness mid-battle. It fights beside you afterward, and keeps doing so.',
+    range: TALK_RANGE, mp: 20, ct: 4, formula: 'status-only', accuracy: 35, vfx: 'talk/train', castAnim: 'cast',
+    inflicts: [inf('charm', 100)] },
   { id: 'rehabilitate', name: 'Rehabilitate', description: 'Reason a charmed, berserk or confused ally back to themselves.',
     range: TALK_RANGE, formula: 'status-only', vfx: 'talk/rehab', castAnim: 'cast',
     cures: ['charm', 'confuse', 'berserk', 'sleep', 'taunted'] },
@@ -855,19 +886,50 @@ export const GEOMANCY_BY_SURFACE: Readonly<Record<string, AbilityId>> = {
 // Dragoon — Jump
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * FFT models Jump as one command whose reach is bought a rung at a time: Level
+ * Jump buys horizontal distance, Vertical Jump buys the height the spear can be
+ * driven down through. Each rung is a separate learnable, and the Dragoon's menu
+ * shows every rung it has paid for.
+ */
+function levelJump(n: number): AbilitySpec {
+  return {
+    id: `level-jump-${n}`,
+    name: `Level Jump ${n}`,
+    description: `Take off flat and land ${n} tiles away, point first. Nothing on the ground between here and there gets a say.`,
+    range: R(n + 1, 0, { vertical: Infinity, los: false }),
+    formula: 'physical', power: 2, accuracy: 100,
+    vfx: `jump/level-${n}`, castAnim: 'jump', targetsTiles: true,
+    inflicts: [inf('jumping', 100)],
+  };
+}
+
+function verticalJump(n: number): AbilitySpec {
+  return {
+    id: `vertical-jump-${n}`,
+    name: `Vertical Jump ${n}`,
+    description: `Straight up, ${n} levels of clearance, and straight back down through whatever is standing underneath.`,
+    range: R(3, 0, { vertical: Infinity, los: false }),
+    formula: 'physical', power: 2 + Math.round(n / 4), accuracy: 100,
+    vfx: `jump/vertical-${n}`, castAnim: 'jump', targetsTiles: true,
+    inflicts: [inf('jumping', 100)],
+  };
+}
+
 const JUMP = actions('jump', [
   { id: 'jump', name: 'Jump', description: 'Leave the field. Return point-first two turns later for doubled weapon damage.',
     range: R(3, 0, { vertical: Infinity, los: false }), formula: 'physical', power: 2, accuracy: 100,
     vfx: 'jump/basic', castAnim: 'jump', targetsTiles: true, inflicts: [inf('jumping', 100)] },
-  { id: 'level-jump-3', name: 'Level Jump 3', description: 'A flatter arc that covers three tiles of ground before the spear comes down.',
-    range: R(4, 0, { vertical: Infinity, los: false }), formula: 'physical', power: 2, accuracy: 100,
-    vfx: 'jump/level-3', castAnim: 'jump', targetsTiles: true, inflicts: [inf('jumping', 100)] },
-  { id: 'level-jump-5', name: 'Level Jump 5', description: 'Cross most of a battlefield in the air. Nothing intercepts you on the way.',
-    range: R(6, 0, { vertical: Infinity, los: false }), formula: 'physical', power: 2, accuracy: 100,
-    vfx: 'jump/level-5', castAnim: 'jump', targetsTiles: true, inflicts: [inf('jumping', 100)] },
-  { id: 'vertical-jump-4', name: 'Vertical Jump 4', description: 'Straight up, four levels of clearance, then straight down through a roof if need be.',
-    range: R(3, 0, { vertical: Infinity, los: false }), formula: 'physical', power: 3, accuracy: 100,
-    vfx: 'jump/vertical-4', castAnim: 'jump', targetsTiles: true, inflicts: [inf('jumping', 100)] },
+  levelJump(2),
+  levelJump(3),
+  levelJump(4),
+  levelJump(5),
+  levelJump(8),
+  verticalJump(2),
+  verticalJump(3),
+  verticalJump(4),
+  verticalJump(5),
+  verticalJump(8),
   { id: 'high-jump', name: 'High Jump', description: 'A longer hang time for a heavier landing. Triple weapon power on descent.',
     mp: 10, range: R(4, 0, { vertical: Infinity, los: false }), formula: 'physical', power: 3, accuracy: 100,
     vfx: 'jump/high', castAnim: 'jump', targetsTiles: true, inflicts: [inf('jumping', 100)] },
@@ -932,6 +994,24 @@ const THROW = actions('throw', [
   { id: 'throw-knife', name: 'Knife', description: 'A thrown blade carries its own weapon power the whole way.',
     range: R(5, 0, { vertical: 4 }), formula: 'physical', power: 2, accuracy: 95,
     vfx: 'throw/knife', castAnim: 'throw' },
+  { id: 'throw-ninja-blade', name: 'Ninja Blade', description: 'The short, straight blade of the trade, thrown by someone who owns several.',
+    range: R(5, 0, { vertical: 4 }), formula: 'physical', power: 3, accuracy: 95,
+    vfx: 'throw/ninja-blade', castAnim: 'throw', inflicts: [inf('bleeding', 45, SHORT)] },
+  { id: 'throw-spear', name: 'Spear', description: 'Eight feet of ash and iron, thrown flat. It goes through the first rank and into the second.',
+    range: R(5, 0, { vertical: 5 }), formula: 'physical', power: 4, accuracy: 85,
+    vfx: 'throw/spear', castAnim: 'throw' },
+  { id: 'throw-hammer', name: 'Hammer', description: 'A smith\'s hammer, end over end. Whatever it lands on stops being the shape it was.',
+    range: R(4, 0, { vertical: 5 }), formula: 'physical', power: 5, accuracy: 75,
+    vfx: 'throw/hammer', castAnim: 'throw', inflicts: [inf('vulnerable', 40, SHORT)] },
+  { id: 'throw-ball', name: 'Iron Ball', description: 'A plain weighted sphere. No edge, no craft, and it still breaks ribs at thirty feet.',
+    range: R(4, 0, { vertical: 4 }), formula: 'fixed', power: 24, accuracy: 90,
+    vfx: 'throw/ball', castAnim: 'throw' },
+  { id: 'throw-stick', name: 'Stick', description: 'A mage\'s stick, thrown hard enough to matter. Undignified, and it lands every time.',
+    range: R(5, 0, { vertical: 4 }), formula: 'fixed', power: 18, accuracy: 100,
+    vfx: 'throw/stick', castAnim: 'throw' },
+  { id: 'throw-wand', name: 'Wand', description: 'The charge in the wand goes off on impact rather than on command. Magick damage, thrown.',
+    range: R(5, 0, { vertical: 4 }), formula: 'magical', power: 20, accuracy: 95, element: 'none',
+    vfx: 'throw/wand', castAnim: 'throw', inflicts: [inf('silence', 30, SHORT)] },
   { id: 'throw-sword', name: 'Sword', description: 'Throwing a sword is a waste of a sword. It is also extremely effective.',
     range: R(5, 0, { vertical: 4 }), formula: 'physical', power: 3, accuracy: 90,
     vfx: 'throw/sword', castAnim: 'throw' },
@@ -955,56 +1035,100 @@ const THROW = actions('throw', [
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Math Skill selects every unit on the field whose chosen attribute divides evenly
- * by the chosen number, then casts a known spell on all of them for free, instantly.
- * `power` encodes the divisor; `vfx` and `description` carry the attribute.
- * `combat/` reads `MATH_TERMS` to evaluate the predicate.
+ * Math Skill is two halves of one sentence, exactly as in FFT: an **attribute**
+ * term names what is counted (Charge Time, Level, Experience, Height) and a
+ * **divisor** term names what it must divide by (3, 4, 5, or a prime). The
+ * Arithmetician learns each half separately and pairs them at cast time, so the
+ * ninth attribute the player buys instantly multiplies every divisor they own.
+ * The chosen spell then lands on every unit satisfying the pair — free, instant,
+ * and indifferent to whose side they are on.
+ *
+ * `combat/` reads `MATH_TERMS` to evaluate the predicate; `power` carries the
+ * divisor on a divisor term (0 for prime) and is unused on an attribute term.
  */
+export type MathAttribute = 'ct' | 'level' | 'exp' | 'height';
+export type MathDivisor = 3 | 4 | 5 | 'prime';
+
 export interface MathTerm {
   readonly ability: AbilityId;
-  readonly attribute: 'ct' | 'level' | 'exp' | 'height';
-  readonly divisor: number | 'prime';
+  readonly kind: 'attribute' | 'divisor';
+  /** Set on `kind: 'attribute'` terms. */
+  readonly attribute?: MathAttribute;
+  /** Set on `kind: 'divisor'` terms. */
+  readonly divisor?: MathDivisor;
 }
 
 const MATH_TERM_LIST: readonly MathTerm[] = [
-  { ability: 'math-ct-prime', attribute: 'ct', divisor: 'prime' },
-  { ability: 'math-ct-5', attribute: 'ct', divisor: 5 },
-  { ability: 'math-level-prime', attribute: 'level', divisor: 'prime' },
-  { ability: 'math-level-3', attribute: 'level', divisor: 3 },
-  { ability: 'math-exp-4', attribute: 'exp', divisor: 4 },
-  { ability: 'math-exp-5', attribute: 'exp', divisor: 5 },
-  { ability: 'math-height-3', attribute: 'height', divisor: 3 },
-  { ability: 'math-height-4', attribute: 'height', divisor: 4 },
+  { ability: 'calculate-ct', kind: 'attribute', attribute: 'ct' },
+  { ability: 'calculate-level', kind: 'attribute', attribute: 'level' },
+  { ability: 'calculate-exp', kind: 'attribute', attribute: 'exp' },
+  { ability: 'calculate-height', kind: 'attribute', attribute: 'height' },
+  { ability: 'multiple-of-3', kind: 'divisor', divisor: 3 },
+  { ability: 'multiple-of-4', kind: 'divisor', divisor: 4 },
+  { ability: 'multiple-of-5', kind: 'divisor', divisor: 5 },
+  { ability: 'prime-number', kind: 'divisor', divisor: 'prime' },
 ];
 
 export const MATH_TERMS: ReadonlyMap<AbilityId, MathTerm> = new Map(
   MATH_TERM_LIST.map((t) => [t.ability, t]),
 );
 
-const ATTRIBUTE_LABEL: Readonly<Record<MathTerm['attribute'], string>> = {
+/** Attribute terms, in menu order. Pair one with a `MATH_DIVISOR_TERMS` entry. */
+export const MATH_ATTRIBUTE_TERMS: readonly AbilityId[] =
+  MATH_TERM_LIST.filter((t) => t.kind === 'attribute').map((t) => t.ability);
+
+export const MATH_DIVISOR_TERMS: readonly AbilityId[] =
+  MATH_TERM_LIST.filter((t) => t.kind === 'divisor').map((t) => t.ability);
+
+const ATTRIBUTE_LABEL: Readonly<Record<MathAttribute, string>> = {
   ct: 'Charge Time',
   level: 'Level',
   exp: 'Experience',
   height: 'Height',
 };
 
+const ATTRIBUTE_FLAVOUR: Readonly<Record<MathAttribute, string>> = {
+  ct: 'the position of every unit in the Charge Time queue — the one number nobody else on the field can read',
+  level: 'the levels of everyone present, allies and enemies and the neutral dead alike',
+  exp: 'accumulated experience, which is to say how much living each combatant has already done',
+  height: 'the elevation each unit is standing at, measured off the Arithmetician\'s own feet',
+};
+
 const MATH_SKILL = actions(
   'math-skill',
   MATH_TERM_LIST.map<AbilitySpec>((t) => {
-    const label = ATTRIBUTE_LABEL[t.attribute];
-    const div = t.divisor === 'prime' ? 'a prime number' : `${t.divisor}`;
+    if (t.kind === 'attribute') {
+      const attr = t.attribute as MathAttribute;
+      return {
+        id: t.ability,
+        name: ATTRIBUTE_LABEL[attr],
+        description:
+          `Reckon ${ATTRIBUTE_FLAVOUR[attr]}. On its own this does nothing at all; paired with a divisor it selects the targets of the next spell you cast, wherever on the field they happen to be standing.`,
+        mp: 0,
+        ct: 0,
+        range: FIELD,
+        formula: 'special',
+        power: 0,
+        accuracy: 100,
+        vfx: `math/${attr}`,
+        castAnim: 'cast',
+      };
+    }
+    const div = t.divisor as MathDivisor;
     return {
       id: t.ability,
-      name: t.divisor === 'prime' ? `${label} · Prime` : `${label} · ${t.divisor}`,
+      name: div === 'prime' ? 'Prime Number' : `Multiple of ${div}`,
       description:
-        `Choose a spell you know. Every unit on the field whose ${label} is ${div === 'a prime number' ? div : `divisible by ${div}`} is struck by it — no MP, no charge time, no line of sight, and no regard whatsoever for whose side they are on.`,
+        div === 'prime'
+          ? 'Take the chosen reckoning and keep only those numbers no smaller number divides. The results are scattered, unpredictable, and impossible for the enemy to stand out of.'
+          : `Take the chosen reckoning and keep only those that divide evenly by ${div}. Cast the chosen spell on every one of them at once — no MP, no charge time, no line of sight.`,
       mp: 0,
       ct: 0,
       range: FIELD,
       formula: 'special',
-      power: t.divisor === 'prime' ? 0 : t.divisor,
+      power: div === 'prime' ? 0 : div,
       accuracy: 100,
-      vfx: `math/${t.attribute}`,
+      vfx: div === 'prime' ? 'math/prime' : `math/divisor-${div}`,
       castAnim: 'cast',
     };
   }),
@@ -1038,6 +1162,9 @@ const SING = actions('sing', [
   song('magick-song', 'Magick Song', 'A resonant drone that sharpens every spell your side casts.', 'song/magick'),
   song('nameless-song', 'Nameless Song', 'A song with no words and no author. It grants a random blessing to all allies.', 'song/nameless',
     { inflicts: [inf('performing', 100), inf('protect', 25, MEDIUM), inf('shell', 25, MEDIUM), inf('haste', 25, MEDIUM), inf('regen', 25, MEDIUM), inf('reraise', 10, MEDIUM)] }),
+  song('space-storage', 'Space Storage', 'A note held at a pitch the world does not have a place for. Now and then an enemy simply is not there any more.', 'song/space',
+    { formula: 'status-only', power: 0, accuracy: 40,
+      inflicts: [inf('performing', 100), inf('ko', 8)] }),
   song('last-song', 'Last Song', 'One verse, sung once, that hands every ally their turn immediately. Then you are spent.', 'song/last',
     { mp: 60, ct: 8, formula: 'special', power: 100, inflicts: undefined }),
   song('sky-demon', 'Sky Demon', 'A dissonant note that eats away at every enemy on the field while it holds.', 'song/sky-demon',
@@ -1076,6 +1203,9 @@ const DANCE = actions('dance', [
   dance('nameless-dance', 'Nameless Dance', 'The steps are wrong on purpose. Every enemy risks a different affliction each tick.', 'dance/nameless',
     { formula: 'status-only', power: 0, accuracy: 60,
       inflicts: [inf('performing', 100), inf('sleep', 12, SHORT), inf('confuse', 12, SHORT), inf('blind', 12, SHORT), inf('silence', 12, SHORT), inf('rooted', 12, SHORT), inf('frog', 5, SHORT)] }),
+  dance('void-storage', 'Void Storage', 'The figure closes on a step that is not on the floor. Whoever was watching it too closely goes with her.', 'dance/void',
+    { formula: 'status-only', power: 0, accuracy: 40, element: 'dark',
+      inflicts: [inf('performing', 100), inf('ko', 8)] }),
   dance('last-dance', 'Last Waltz', 'One perfect turn that empties the enemy\'s Charge Time across the whole field.', 'dance/last',
     { mp: 60, ct: 8, formula: 'special', power: 100, accuracy: 100, inflicts: undefined }),
   dance('obsidian-blade', 'Obsidian Blade', 'A knife-edged figure that strips MP away from every foe until they can cast nothing.', 'dance/obsidian',
@@ -1111,6 +1241,28 @@ const DARK_SWORD = actions('dark-sword', [
   { id: 'unyielding-blade', name: 'Unyielding Blade', description: 'The knight refuses to fall while the stroke is still descending. Lands even at zero HP.',
     range: R(3, 0, { shape: 'line', vertical: 3 }), formula: 'physical', power: 5, accuracy: 100,
     element: 'dark', vfx: 'dark/unyielding', castAnim: 'attack' },
+  // The Crush line: FFT's Dark Knight does not break equipment, it destroys it
+  // outright, and pays HP for the privilege. Higher accuracy than the Knight's
+  // Battle Skill breaks, and no chance of the gear being recoverable afterward.
+  { id: 'crush-helm', name: 'Crush Helm', description: 'Take the helm and the head inside it in one downward stroke. What comes off is not repairable.',
+    formula: 'special', power: 0, accuracy: 75, element: 'dark', vfx: 'dark/crush-helm', castAnim: 'attack',
+    inflicts: [inf('vulnerable', 70, LONG), inf('blind', 40, MEDIUM)] },
+  { id: 'crush-armor', name: 'Crush Armor', description: 'Split plate along the weld and leave the wearer standing in the ruins of it.',
+    formula: 'special', power: 0, accuracy: 70, element: 'dark', vfx: 'dark/crush-armor', castAnim: 'attack',
+    inflicts: [inf('vulnerable', 90, LONG)] },
+  { id: 'crush-weapon', name: 'Crush Weapon', description: 'Meet the blade edge-on with something that does not care about edges. Theirs ends.',
+    formula: 'special', power: 0, accuracy: 65, element: 'dark', vfx: 'dark/crush-weapon', castAnim: 'attack' },
+  { id: 'crush-accessory', name: 'Crush Accessory', description: 'Whatever charm was keeping the worst of it off them: gone, and the worst of it arrives.',
+    formula: 'special', power: 0, accuracy: 70, element: 'dark', vfx: 'dark/crush-accessory', castAnim: 'attack',
+    inflicts: [inf('vulnerable', 50, MEDIUM)] },
+  { id: 'unholy-darkness', name: 'Unholy Darkness', description: 'Open the ground under a whole formation and let what is under Ivalice look up at it.',
+    mp: 24, ct: 4, range: R(4, 2, { vertical: 4 }), formula: 'magical', power: 38, accuracy: 90,
+    element: 'dark', vfx: 'dark/unholy-darkness', castAnim: 'cast',
+    inflicts: [inf('blind', 40, MEDIUM)] },
+  { id: 'unholy-sacrifice', name: 'Unholy Sacrifice', description: 'Offer up a fallen comrade where they lie. The detonation takes the field, and they do not come back.',
+    mp: 30, ct: 6, range: R(4, 3, { vertical: 5, los: false }), formula: 'magical', power: 52, accuracy: 100,
+    element: 'dark', vfx: 'dark/sacrifice', castAnim: 'cast', targetsTiles: true,
+    inflicts: [inf('death-sentence', 25, MEDIUM)] },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1174,10 +1326,41 @@ const MIMICRY = actions('mimicry', [
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Guardian — Threat Arts
+// Onion Knight — Onion Skills
 // ─────────────────────────────────────────────────────────────────────────────
 
-const THREAT_ARTS = actions('threat-arts', [
+/**
+ * The joke job's command, played straight. Nothing here is clever: every entry is
+ * a plain soldier's action with no element, no charge time and no MP, priced as
+ * though the Onion Knight had never specialised in anything — because it hasn't.
+ * `power` is deliberately flat; the payoff is that `special` entries scale with
+ * the number of jobs the unit has taken to level 8, which is the whole design.
+ */
+const ONION_SKILLS = actions('onion-skills', [
+  { id: 'onion-slash', name: 'Onion Slash', description: 'A textbook diagonal cut, thrown exactly as the drill book draws it. There is nothing at all wrong with it.',
+    formula: 'physical', power: 2, accuracy: 95, vfx: 'onion/slash', castAnim: 'attack' },
+  { id: 'onion-guard', name: 'Onion Guard', description: 'Every guard position from every manual the wearer has ever been made to copy out, held at once.',
+    range: SELF, formula: 'buff', power: 0, vfx: 'onion/guard', castAnim: 'defend',
+    inflicts: [inf('protect', 100, LONG), inf('shell', 100, LONG)] },
+  { id: 'onion-hurl', name: 'Onion Hurl', description: 'Throws whatever is to hand at whoever is furthest away. Astonishingly, it keeps working.',
+    range: R(5, 0, { vertical: 4 }), formula: 'fixed', power: 22, accuracy: 85,
+    vfx: 'onion/hurl', castAnim: 'throw' },
+  { id: 'onion-resolve', name: 'Onion Resolve', description: 'Remembers, all at once, every job it has ever held. Attack and Magick both rise, and keep rising with each mastery.',
+    range: SELF, formula: 'special', power: 100, vfx: 'onion/resolve', castAnim: 'charge',
+    inflicts: [inf('empowered', 100, VERY_LONG)] },
+  { id: 'onion-mend', name: 'Onion Mend', description: 'Half-remembered field medicine and half-remembered prayer, applied simultaneously to an ally who needs neither done well.',
+    range: R(3, 0, { los: false }), formula: 'heal', power: 34, vfx: 'onion/mend', castAnim: 'item',
+    cures: ['poison', 'blind', 'bleeding'] },
+  { id: 'onion-blade', name: 'Onion Blade', description: 'The stroke of a soldier who has finally been everything. It does not look like much until it lands.',
+    mp: 20, range: R(2, 0, { shape: 'line', vertical: 3 }), formula: 'special', power: 300, accuracy: 90,
+    vfx: 'onion/blade', castAnim: 'attack' },
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shadowknight — Dread Arts
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DREAD_ARTS = actions('dread-arts', [
   { id: 'taunt', name: 'Taunt', description: 'Say the one thing that guarantees they come for you instead of the mage behind you.',
     range: R(4, 0, { vertical: 4 }), formula: 'status-only', accuracy: 90, vfx: 'threat/taunt', castAnim: 'cast',
     inflicts: [inf('taunted', 100, MEDIUM)] },
@@ -1202,34 +1385,87 @@ const THREAT_ARTS = actions('threat-arts', [
   { id: 'last-stand', name: 'Last Stand', description: 'Refuse to fall for a while. You cannot be reduced below one HP until it lapses.',
     mp: 30, range: SELF, formula: 'buff', vfx: 'threat/last-stand', castAnim: 'defend',
     inflicts: [inf('shielded', 100, MEDIUM), inf('empowered', 100, MEDIUM)] },
+  // The lifetap half. Every one of these returns HP to the Shadowknight, which is
+  // why he can hold a line with no healer behind him and why Dread — earned by
+  // being hit — is the resource that gates them.
+  { id: 'siphon-strike', name: 'Siphon Strike', description: 'A workmanlike cut that takes a little life with it on the way out. The cheapest sustain in the roster.',
+    mp: 6, formula: 'drain', power: 16, accuracy: 95, element: 'dark',
+    vfx: 'dread/siphon', castAnim: 'attack' },
+  { id: 'harm-touch', name: 'Harm Touch', description: 'A bare hand laid flat on the breastplate. Whatever passes through it arrives in the knight instead.',
+    mp: 20, ct: 2, range: R(3, 0, { vertical: 3 }), formula: 'drain', power: 36, accuracy: 90,
+    element: 'dark', vfx: 'dread/harm-touch', castAnim: 'cast' },
+  { id: 'malevolence', name: 'Malevolence', description: 'Ill intent, worn openly. It settles on a foe and rots what it touches for as long as the knight keeps looking at them.',
+    mp: 14, ct: 2, range: R(4), formula: 'magical', power: 14, accuracy: 85, element: 'dark',
+    vfx: 'dread/malevolence', castAnim: 'cast',
+    inflicts: [inf('poison', 90, LONG), inf('vulnerable', 60, MEDIUM)] },
+  { id: 'unholy-blessing', name: 'Unholy Blessing', description: 'The covenant pays out early. Spend Dread to raise a black ward over yourself and everything you are standing in front of.',
+    mp: 18, ct: 3, range: AURA(1, 3), formula: 'buff', power: 70, element: 'dark',
+    vfx: 'dread/blessing', castAnim: 'cast',
+    inflicts: [inf('shielded', 100, LONG), inf('regen', 100, MEDIUM)] },
+  { id: 'doom-judgement', name: 'Doom Judgement', description: 'Read a name off the covenant\'s roll. Whoever it belongs to has a fixed number of ticks left and no say in it.',
+    mp: 26, ct: 5, range: R(4), formula: 'status-only', accuracy: 60, element: 'dark',
+    vfx: 'dread/doom', castAnim: 'cast',
+    inflicts: [inf('death-sentence', 100, MEDIUM), inf('slow', 50, MEDIUM)] },
+  { id: 'sanguine-covenant', name: 'Sanguine Covenant', description: 'Spend the whole of the Dread at once. Everything adjacent gives up its blood, and every drop of it goes into the knight.',
+    mp: 40, ct: 4, range: AURA(2, 3), formula: 'drain', power: 44, accuracy: 90, element: 'dark',
+    vfx: 'dread/covenant', castAnim: 'cast', inflicts: [inf('bleeding', 70, LONG)] },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mystic — Ward Craft
+// Templar — Sacraments
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WARD_CRAFT = actions('ward-craft', [
-  { id: 'ancestral-ward', name: 'Ancestral Ward', description: 'A shell of borrowed ancestry that absorbs damage outright until it is spent.',
-    mp: 12, ct: 3, range: R(4), formula: 'buff', power: 60, vfx: 'ward/ancestral', castAnim: 'cast',
+/**
+ * Wards, not cures. Every absorb here lands *before* the blow does and is spent
+ * by damage rather than by time, which is why the Templar's whole rhythm is one
+ * turn ahead of the White Mage's: a ward cast after the hit was a wasted turn.
+ * `JOB_MECHANICS.templar.ward` carries the coefficient the combat layer uses.
+ */
+const SACRAMENTS = actions('sacraments', [
+  { id: 'ward-of-salvation', name: 'Ward of Salvation', description: 'The first sacrament any acolyte is trusted with: a shell of absorption that eats damage outright until it is spent.',
+    mp: 12, ct: 3, range: R(4), formula: 'buff', power: 60, element: 'holy', vfx: 'sacrament/salvation', castAnim: 'cast',
     inflicts: [inf('shielded', 100, LONG)] },
-  { id: 'umbral-barrier', name: 'Umbral Barrier', description: 'A heavier ward, laid over the entire front rank. Costly, and worth every point.',
-    mp: 28, ct: 6, range: R(4, 2), formula: 'buff', power: 90, vfx: 'ward/umbral', castAnim: 'cast',
+  { id: 'smite-of-conviction', name: 'Smite of Conviction', description: 'A flanged mace swung with liturgical certainty. The Templar\'s only honest attack, and it is not a bad one.',
+    mp: 8, range: R(2, 0, { vertical: 3 }), formula: 'physical', power: 3, accuracy: 90,
+    element: 'holy', vfx: 'sacrament/smite', castAnim: 'attack', inflicts: [inf('silence', 30, SHORT)] },
+  { id: 'reprieve', name: 'Reprieve', description: 'Mend what the ward could not stop, and lift the small cruelties that came in with it.',
+    mp: 18, ct: 4, range: R(4, 1), formula: 'heal', power: 40, element: 'holy',
+    vfx: 'sacrament/reprieve', castAnim: 'cast', cures: ['bleeding', 'burning', 'poison'] },
+  { id: 'sanctuary', name: 'Sanctuary', description: 'A blessing that waits. It does nothing until the warded ally is struck, and then it fires before the clock moves at all.',
+    mp: 22, ct: 4, range: R(4), formula: 'buff', power: 45, element: 'holy',
+    vfx: 'sacrament/sanctuary', castAnim: 'cast',
+    inflicts: [inf('shielded', 100, MEDIUM), inf('regen', 100, LONG)] },
+  { id: 'act-of-war', name: 'Act of War', description: 'The Church\'s dispensation to a soldier who needs it now: more strength, more speed, and no time at all to enjoy either.',
+    mp: 20, ct: 4, range: R(3), formula: 'buff', element: 'holy', vfx: 'sacrament/act-of-war', castAnim: 'cast',
+    inflicts: [inf('empowered', 100, MEDIUM), inf('haste', 100, SHORT)] },
+  { id: 'sacrament-of-stone', name: 'Sacrament of Stone', description: 'A heavier ward, laid over the whole front rank at once. Costly, slow, and worth every point of both.',
+    mp: 28, ct: 6, range: R(4, 2), formula: 'buff', power: 90, element: 'holy', vfx: 'sacrament/stone', castAnim: 'cast',
     inflicts: [inf('shielded', 100, MEDIUM)] },
+  { id: 'perseverance', name: 'Perseverance', description: 'Steady a mind against everything that would take it. Nothing that arrives while it holds finds anywhere to settle.',
+    mp: 16, ct: 3, range: R(3, 1), formula: 'status-only', element: 'holy', vfx: 'sacrament/perseverance', castAnim: 'cast',
+    cures: ['confuse', 'charm', 'berserk', 'sleep', 'silence', 'taunted', 'blind'] },
+  { id: 'faithful-bulwark', name: 'Faithful Bulwark', description: 'Set the shield and the doctrine down together. Physical and magickal harm both arrive at a fraction of their weight.',
+    mp: 24, ct: 5, range: R(3, 1), formula: 'buff', element: 'holy', vfx: 'sacrament/bulwark', castAnim: 'defend',
+    inflicts: [inf('protect', 100, LONG), inf('shell', 100, LONG)] },
+  { id: 'divine-arbitration', name: 'Divine Arbitration', description: 'Pool every wound in the company and divide it evenly. Nobody is healed; nobody is dying either.',
+    mp: 30, ct: 5, range: R(4, 2, { los: false }), formula: 'special', power: 100, element: 'holy',
+    vfx: 'sacrament/arbitration', castAnim: 'cast' },
   { id: 'torpor', name: 'Torpor', description: 'Thicken an enemy\'s blood until every movement costs them twice what it should.',
     mp: 16, ct: 4, range: R(4), formula: 'status-only', accuracy: 70, element: 'ice',
-    vfx: 'ward/torpor', castAnim: 'cast', inflicts: [inf('slow', 100, LONG), inf('vulnerable', 50, MEDIUM)] },
-  { id: 'spirit-tap', name: 'Spirit Tap', description: 'Draw on the dead crowding the field and turn what you take into a ward.',
+    vfx: 'sacrament/torpor', castAnim: 'cast', inflicts: [inf('slow', 100, LONG), inf('vulnerable', 50, MEDIUM)] },
+  { id: 'spirit-tap', name: 'Spirit Tap', description: 'Draw on the dead crowding the field and turn what you take into a ward for the living.',
     mp: 8, ct: 3, range: R(4), formula: 'drain', power: 20, accuracy: 80, element: 'dark',
-    vfx: 'ward/spirit-tap', castAnim: 'cast' },
-  { id: 'bolster', name: 'Bolster', description: 'Push an ally past their own limits: more strength, more spirit, and no time to enjoy it.',
-    mp: 20, ct: 4, range: R(3), formula: 'buff', vfx: 'ward/bolster', castAnim: 'cast',
-    inflicts: [inf('empowered', 100, MEDIUM), inf('haste', 100, SHORT)] },
-  { id: 'transcendence', name: 'Transcendence', description: 'The great ward. Absorbs a punishing amount of damage on a single chosen ally.',
-    mp: 44, ct: 8, range: R(4), formula: 'buff', power: 200, vfx: 'ward/transcendence', castAnim: 'cast',
+    vfx: 'sacrament/spirit-tap', castAnim: 'cast' },
+  { id: 'resurrection-rite', name: 'Resurrection Rite', description: 'The full office for the dead, read at speed over someone who has not finished being dead yet.',
+    mp: 34, ct: 8, range: R(4), formula: 'raise', power: 80, accuracy: 90, element: 'holy',
+    vfx: 'sacrament/resurrection', castAnim: 'cast', cures: ['ko'] },
+  { id: 'unyielding-benediction', name: 'Unyielding Benediction', description: 'A blessing spoken over the whole line at once, and it does not stop when the caster does.',
+    mp: 40, ct: 7, range: R(4, 2), formula: 'heal', power: 52, element: 'holy',
+    vfx: 'sacrament/benediction', castAnim: 'cast',
+    inflicts: [inf('regen', 100, LONG), inf('protect', 100, MEDIUM)] },
+  { id: 'shield-of-faith', name: 'Shield of Faith', description: 'The great ward. It absorbs a punishing amount on one chosen ally and stands them back up once if it fails.',
+    mp: 44, ct: 8, range: R(4), formula: 'buff', power: 200, element: 'holy', vfx: 'sacrament/shield-of-faith', castAnim: 'cast',
     inflicts: [inf('shielded', 100, VERY_LONG), inf('reraise', 100)] },
-  { id: 'ancestral-channel', name: 'Ancestral Channel', description: 'Open the way for the ancestors and let them mend what the ward could not stop.',
-    mp: 18, ct: 5, range: R(4, 1), formula: 'heal', power: 40, element: 'holy',
-    vfx: 'ward/channel', castAnim: 'cast', cures: ['bleeding', 'burning', 'poison'] },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1261,14 +1497,34 @@ const ENTHRALL = actions('enthrall', [
   { id: 'breeze', name: 'Breeze', description: 'A clean, cold clarity handed to an ally. Their thoughts — and their turns — come faster.',
     mp: 14, ct: 3, range: R(4, 1), formula: 'buff', vfx: 'mind/breeze', castAnim: 'cast',
     inflicts: [inf('haste', 100, MEDIUM)], cures: ['confuse', 'sleep', 'charm'] },
+  { id: 'peaceful-link', name: 'Peaceful Link', description: 'Tie two hostile minds to one quiet thought. Neither will move while the other is still holding it.',
+    mp: 24, ct: 5, range: R(4, 1), formula: 'status-only', accuracy: 70, vfx: 'mind/link', castAnim: 'cast',
+    inflicts: [inf('sleep', 100, MEDIUM), inf('silence', 80, MEDIUM)] },
+  { id: 'cannibalise-thoughts', name: 'Cannibalise Thoughts', description: 'Eat what a held mind is thinking. Cruel, extremely efficient, and it works best on someone already asleep.',
+    mp: 0, ct: 3, range: R(4), formula: 'drain', power: 32, accuracy: 85, element: 'dark',
+    vfx: 'mind/cannibalise', castAnim: 'cast' },
+  { id: 'possess-essence', name: 'Possess Essence', description: 'Not a suggestion this time. The Coercer steps into the body and wears it, and it fights like it means it.',
+    mp: 52, ct: 9, range: R(4), formula: 'status-only', accuracy: 45, element: 'dark',
+    vfx: 'mind/possess', castAnim: 'cast',
+    inflicts: [inf('charm', 100, LONG), inf('empowered', 100, LONG)] },
+  { id: 'puppetmaster', name: 'Puppetmaster', description: 'Every string at once. Domination drains twice as fast and the Coercer does not care, because the enemy line is now half its own size.',
+    mp: 60, ct: 10, range: R(4, 1), formula: 'status-only', accuracy: 40, element: 'dark',
+    vfx: 'mind/puppetmaster', castAnim: 'cast', inflicts: [inf('charm', 100, MEDIUM)] },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Beastlord — Beast Command
+// Beastlord — Primal Bond
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BEAST_COMMAND = actions('beast-command', [
-  { id: 'summon-warder', name: 'Summon Warder', description: 'Call your bonded beast onto an empty tile. It fights on its own initiative until it falls.',
+/**
+ * Half of this menu is orders given to a body the Beastlord does not control on
+ * its own turn. The warder is on the field from the first tick (see
+ * `JOB_MECHANICS.beastlord.pets`), so `call-of-the-wild` re-anchors a warder that
+ * has wandered rather than conjuring one, and everything else is a paired action:
+ * master and warder striking the same target is what builds Savagery.
+ */
+const PRIMAL_BOND = actions('primal-bond', [
+  { id: 'call-of-the-wild', name: 'Call of the Wild', description: 'Two notes on the fingers. Wherever the warder has got to, it is at your shoulder on the next tick.',
     mp: 24, ct: 4, range: R(3, 0, { vertical: 2, los: true }), formula: 'summon', power: 100,
     vfx: 'beast/summon', castAnim: 'cast', targetsTiles: true },
   { id: 'savage-mauling', name: 'Savage Mauling', description: 'Send the warder in with everything. It opens wounds that will not close on their own.',
@@ -1290,6 +1546,155 @@ const BEAST_COMMAND = actions('beast-command', [
   { id: 'harrying-strike', name: 'Harrying Strike', description: 'The warder circles and snaps at the heels, pinning a foe where you want them.',
     mp: 10, range: R(5, 0, { vertical: 4 }), formula: 'physical', power: 2, accuracy: 85,
     vfx: 'beast/harry', castAnim: 'cast', inflicts: [inf('rooted', 70, MEDIUM)] },
+  { id: 'warder-rush', name: 'Warder Rush', description: 'Point, and let go of the collar. The warder crosses the ground faster than anything with two legs and arrives badly.',
+    mp: 6, range: R(5, 0, { vertical: 4 }), formula: 'physical', power: 3, accuracy: 90,
+    vfx: 'beast/rush', castAnim: 'cast', inflicts: [inf('taunted', 50, SHORT)] },
+  { id: 'rending-maul', name: 'Rending Maul', description: 'Claws worked under the armour rather than through it. Whatever the warder opens does not close on its own.',
+    mp: 12, range: R(5, 0, { vertical: 4 }), formula: 'physical', power: 4, accuracy: 80,
+    vfx: 'beast/rend', castAnim: 'cast',
+    inflicts: [inf('bleeding', 90, LONG), inf('vulnerable', 60, MEDIUM)] },
+  { id: 'bestial-fury', name: 'Bestial Fury', description: 'Spend every point of Savagery at once. Master and warder land in the same heartbeat and the target is between them.',
+    mp: 24, range: MELEE, formula: 'special', power: 320, accuracy: 95,
+    vfx: 'beast/fury', castAnim: 'attack' },
+  { id: 'primal-instinct', name: 'Primal Instinct', description: 'Stop thinking about the fight and start smelling it. Faster feet, quicker eyes, and no patience left for either.',
+    mp: 10, range: SELF, formula: 'buff', vfx: 'beast/instinct', castAnim: 'charge',
+    inflicts: [inf('haste', 100, MEDIUM), inf('evade-next', 100, SHORT)] },
+  { id: 'shared-senses', name: 'Shared Senses', description: 'See out of the warder\'s eyes as well as your own. Nothing on the field is hidden from either of you.',
+    mp: 14, range: SELF, formula: 'buff', power: 100, vfx: 'beast/senses', castAnim: 'cast',
+    inflicts: [inf('empowered', 100, LONG)], cures: ['blind', 'confuse'] },
+  { id: 'bond-of-blood', name: 'Bond of Blood', description: 'Open your own arm over the warder\'s wounds. The only repair it will ever get in the field, and it costs you exactly what it gives.',
+    mp: 0, range: R(4, 0, { vertical: 3, los: false }), formula: 'special', power: 200,
+    vfx: 'beast/blood-bond', castAnim: 'item', cures: ['bleeding', 'poison', 'ko'] },
+  { id: 'warders-guard', name: 'Warder\'s Guard', description: 'The beast puts itself between you and the next thing coming. It has done this since it was a cub and it does not ask first.',
+    mp: 16, range: SELF, formula: 'buff', vfx: 'beast/guard', castAnim: 'defend',
+    inflicts: [inf('shielded', 100, MEDIUM), inf('protect', 100, MEDIUM)] },
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Troubador — Anthems
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * An anthem is anchored to the ground the Troubador is standing on, not to the
+ * army: radius 2, recomputed every time the unit moves, and only one may be held.
+ * The stacking rule is the whole reason the job exists — anthems write to a
+ * different channel from Bard songs, so a Bard and a Troubador in one formation
+ * are additive rather than exclusive (see `JOB_MECHANICS.troubador.notes`).
+ */
+function anthem(
+  id: string, name: string, description: string, mp: number,
+  extra: Partial<AbilitySpec> = {},
+): AbilitySpec {
+  return {
+    id, name, description, mp, ct: 2, element: 'none',
+    range: AURA(2), formula: 'buff', power: 1, accuracy: 100,
+    vfx: `anthem/${id}`, castAnim: 'sing',
+    inflicts: [inf('performing', 100)],
+    ...extra,
+  };
+}
+
+const ANTHEMS = actions('anthems', [
+  anthem('anthem-of-valour', 'Anthem of Valour',
+    'A marching chord in a major key. Every ally standing inside it swings like they have already won.',
+    12, { inflicts: [inf('performing', 100), inf('empowered', 100, VERY_LONG)] }),
+  anthem('allegretto', 'Allegretto',
+    'Take the tempo up and refuse to put it back down. Everyone in earshot moves at the speed of the music.',
+    18, { inflicts: [inf('performing', 100), inf('haste', 100, VERY_LONG)] }),
+  anthem('dodge-and-cover', 'Dodge and Cover',
+    'A jaunty, ridiculous tune that somehow tells every ally exactly when to step sideways.',
+    14, { inflicts: [inf('performing', 100), inf('evade-next', 100, LONG), inf('protect', 100, LONG)] }),
+  anthem('resonance', 'Resonance',
+    'A sustained low note that the aether itself answers. Allies in the field recover magick simply by standing in it.',
+    16, { formula: 'heal', power: 8 }),
+  anthem('lucky-break', 'Lucky Break',
+    'The Troubador plays as though the outcome were already written, and for two tiles in every direction it very nearly is.',
+    20, { inflicts: [inf('performing', 100), inf('shielded', 100, LONG), inf('evade-next', 100, MEDIUM)] }),
+  anthem('reverberation', 'Reverberation',
+    'The chord comes back off the walls out of phase with itself. Enemies inside it flinch a beat early, every time.',
+    18, { accuracy: 80, formula: 'status-only', power: 0,
+      inflicts: [inf('performing', 100), inf('vulnerable', 100, LONG)] }),
+  anthem('bria-entrancing-sonnet', "Bria's Entrancing Sonnet",
+    'Written for a woman four centuries dead, and still the most effective way to make an armed man stand quite still.',
+    22, { accuracy: 70, formula: 'status-only', power: 0,
+      inflicts: [inf('performing', 100), inf('sleep', 100, MEDIUM)] }),
+  anthem('jesters-cap', "Jester's Cap",
+    'Half a bar of the wrong song, played with total conviction. Nobody who hears it is sure whose side they are on.',
+    20, { accuracy: 65, formula: 'status-only', power: 0,
+      inflicts: [inf('performing', 100), inf('confuse', 100, MEDIUM)] }),
+  anthem('demoralising-processional', 'Demoralising Processional',
+    'A funeral march played at an advancing line. It arrives slower than it left, and believing in rather less.',
+    24, { accuracy: 75, formula: 'status-only', power: 0,
+      inflicts: [inf('performing', 100), inf('slow', 100, LONG), inf('innocent', 80, LONG)] }),
+  anthem('perfect-shrill', 'Perfect Shrill',
+    'One note, held past the point of music. Glass, eardrums and concentration all give out at about the same moment.',
+    26, { formula: 'magical', power: 26, accuracy: 90, element: 'wind', castAnim: 'sing',
+      inflicts: [inf('silence', 70, MEDIUM)] }),
+  anthem('countersong', 'Countersong',
+    'Play directly across whatever the enemy performer is playing. Every song, dance and anthem but yours stops inside the radius.',
+    22, { range: AURA(3), formula: 'status-only', power: 0,
+      inflicts: [inf('performing', 100)],
+      cures: ['performing', 'haste', 'empowered', 'shielded', 'reflect', 'faith'] }),
+  anthem('maestros-cadence', "Maestro's Cadence",
+    'The whole composition resolved at once, at a volume the Troubador will pay for afterwards. Valour, speed and cover, together, out to four tiles.',
+    44, { ct: 5, range: AURA(4),
+      inflicts: [inf('performing', 100), inf('empowered', 100, LONG), inf('haste', 100, LONG), inf('protect', 100, LONG), inf('shell', 100, LONG)] }),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dirge — Dirges
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The Dirge sells damage it does not deal. `vulnerable` and `mark` are read by
+ * `combat/damage.ts` as multiplicative damage-taken modifiers applied after
+ * defence, so every one of these makes the Knight, the Black Mage and the Dragoon
+ * hit harder rather than adding to the Dirge's own thin numbers. Keep its direct
+ * damage low on purpose — see `JOB_MECHANICS.dirge.notes`.
+ */
+const DIRGES = actions('dirges', [
+  { id: 'percussion-of-force', name: 'Percussion of Force', description: 'A flat drumbeat struck on the downstroke of somebody else\'s sword. Everything that lands on the marked afterwards lands heavier.',
+    mp: 10, ct: 2, range: R(5, 1), formula: 'status-only', accuracy: 85, vfx: 'dirge/percussion', castAnim: 'sing',
+    inflicts: [inf('vulnerable', 100, LONG)] },
+  { id: 'death-knell', name: 'Death Knell', description: 'One bell, rung once, for a name the Dirge has already written down. The next blow from any source collects on it.',
+    mp: 16, ct: 3, range: R(5), formula: 'status-only', accuracy: 90, element: 'dark',
+    vfx: 'dirge/knell', castAnim: 'sing',
+    inflicts: [inf('mark', 100, LONG), inf('vulnerable', 80, MEDIUM)] },
+  { id: 'hymn-of-horror', name: 'Hymn of Horror', description: 'Plainsong with the words left in. Soldiers who understand them stop being able to hold a line.',
+    mp: 20, ct: 4, range: R(4, 2), formula: 'status-only', accuracy: 70, element: 'dark',
+    vfx: 'dirge/horror', castAnim: 'sing',
+    inflicts: [inf('confuse', 100, MEDIUM), inf('slow', 60, MEDIUM)] },
+  { id: 'gravitas', name: 'Gravitas', description: 'The music acquires weight. Whatever it is played at finds its own feet suddenly very difficult to lift.',
+    mp: 14, ct: 3, range: R(4, 1), formula: 'status-only', accuracy: 80, element: 'earth',
+    vfx: 'dirge/gravitas', castAnim: 'sing',
+    inflicts: [inf('rooted', 100, MEDIUM), inf('slow', 70, LONG)] },
+  { id: 'darksong-blade', name: 'Darksong Blade', description: 'The Dirge does own a sword, and does occasionally use it, in time with whatever it happens to be humming.',
+    mp: 6, formula: 'physical', power: 3, accuracy: 90, element: 'dark',
+    vfx: 'dirge/blade', castAnim: 'attack', inflicts: [inf('bleeding', 60, MEDIUM)] },
+  { id: 'oration-of-sacrifice', name: 'Oration of Sacrifice', description: 'Read the roll of the dead aloud as they are added to it. Every ally within earshot is paid for the loss in magick.',
+    mp: 0, ct: 3, range: AURA(3), formula: 'heal', power: 14, vfx: 'dirge/oration', castAnim: 'sing',
+    inflicts: [inf('performing', 100)] },
+  { id: 'cacophony-of-blades', name: 'Cacophony of Blades', description: 'Percussion made out of the sound of steel meeting steel. Every ally in the field swings into the beat and finds it easier.',
+    mp: 24, ct: 4, range: AURA(2), formula: 'buff', vfx: 'dirge/cacophony', castAnim: 'sing',
+    inflicts: [inf('performing', 100), inf('empowered', 100, LONG), inf('haste', 100, MEDIUM)] },
+  { id: 'shroud-of-the-fallen', name: 'Shroud of the Fallen', description: 'A grave-cloth laid over someone still using their body. What was meant for them goes to the dead instead, for a while.',
+    mp: 18, ct: 3, range: R(4), formula: 'buff', power: 70, element: 'dark',
+    vfx: 'dirge/shroud', castAnim: 'cast',
+    inflicts: [inf('shielded', 100, LONG), inf('transparent', 100, SHORT)] },
+  { id: 'claras-chaotic-cacophony', name: "Clara's Chaotic Cacophony", description: 'Every part of a piece Clara never finished, played simultaneously. What it does to the enemy line is different every time and never good.',
+    mp: 30, ct: 5, range: R(4, 2), formula: 'status-only', accuracy: 65, element: 'dark',
+    vfx: 'dirge/clara', castAnim: 'sing',
+    inflicts: [inf('confuse', 30, MEDIUM), inf('sleep', 25, SHORT), inf('silence', 30, MEDIUM), inf('blind', 30, MEDIUM), inf('slow', 30, MEDIUM)] },
+  { id: 'luda-nefarious-wail', name: "Luda's Nefarious Wail", description: 'The one piece in the repertoire written to kill. It is short, it is very loud, and the Dirge does not enjoy performing it.',
+    mp: 34, ct: 6, range: R(5, 2), formula: 'magical', power: 34, accuracy: 85, element: 'dark',
+    vfx: 'dirge/wail', castAnim: 'sing', inflicts: [inf('silence', 50, MEDIUM)] },
+  { id: 'exuberant-encore', name: 'Exuberant Encore', description: 'The audience is not finished, so neither is the performer. An ally who has fallen gets up for one more verse.',
+    mp: 36, ct: 6, range: R(4), formula: 'raise', power: 70, accuracy: 85,
+    vfx: 'dirge/encore', castAnim: 'sing', cures: ['ko'] },
+  { id: 'requiem', name: 'Requiem', description: 'The full mass, sung over an enemy line that has not died yet. The Dirge considers this a formality.',
+    mp: 46, ct: 8, range: R(5, 3), formula: 'magical', power: 30, accuracy: 90, element: 'dark',
+    vfx: 'dirge/requiem', castAnim: 'sing',
+    inflicts: [inf('vulnerable', 100, LONG), inf('death-sentence', 20, LONG)] },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1324,6 +1729,29 @@ const AFFLICTION = actions('affliction', [
     mp: 26, ct: 3, range: R(5), formula: 'special', power: 150, accuracy: 100, element: 'dark',
     vfx: 'dot/harvest', castAnim: 'cast',
     cures: ['poison', 'burning', 'bleeding'] },
+  { id: 'shadow-bolt', name: 'Shadow Bolt', description: 'The one honest spell in the book. A bolt of nothing at all, thrown hard, while the curses do the real work.',
+    mp: 10, ct: 3, range: R(5), formula: 'magical', power: 20, accuracy: 95, element: 'dark',
+    vfx: 'dot/shadow-bolt', castAnim: 'cast' },
+  { id: 'drain-soul', name: 'Drain Soul', description: 'Take not the blood but the thing underneath it. A target finished this way leaves a shard behind.',
+    mp: 22, ct: 5, range: R(4), formula: 'drain', power: 34, accuracy: 85, element: 'dark',
+    vfx: 'dot/drain-soul', castAnim: 'cast', inflicts: [inf('innocent', 70, LONG)] },
+  { id: 'curse-of-tongues', name: 'Curse of Tongues', description: 'Every word they know arrives in the wrong order. Incantations take twice as long and rarely finish.',
+    mp: 16, ct: 3, range: R(5, 1), formula: 'status-only', accuracy: 80, element: 'dark',
+    vfx: 'dot/tongues', castAnim: 'cast',
+    inflicts: [inf('silence', 100, LONG), inf('slow', 70, LONG)] },
+  { id: 'howl-of-terror', name: 'Howl of Terror', description: 'Something a very long way under Ivalice answers on the Warlock\'s behalf. The front rank stops being a rank.',
+    mp: 28, ct: 5, range: AURA(2, 4), formula: 'status-only', accuracy: 70, element: 'dark',
+    vfx: 'dot/terror', castAnim: 'cast',
+    inflicts: [inf('confuse', 100, MEDIUM), inf('slow', 60, MEDIUM)] },
+  { id: 'shadowburn', name: 'Shadowburn', description: 'Spend a shard to finish what the rot started. Against a target already dying it is simply the end of the sentence.',
+    mp: 24, ct: 2, range: R(4), formula: 'special', power: 280, accuracy: 90, element: 'dark',
+    vfx: 'dot/shadowburn', castAnim: 'cast' },
+  { id: 'soulstone', name: 'Soulstone', description: 'Spend a shard on an ally before they need it. When they fall they get straight back up, once, and the crystal never starts counting.',
+    mp: 30, ct: 4, range: R(4), formula: 'buff', power: 25, element: 'dark',
+    vfx: 'dot/soulstone', castAnim: 'cast', inflicts: [inf('reraise', 100)] },
+  { id: 'summon-felguard', name: 'Summon Felguard', description: 'Two shards and a name spoken correctly. What arrives is bound, enormous, and extremely annoyed about both.',
+    mp: 44, ct: 7, range: R(3, 0, { vertical: 2, los: true }), formula: 'summon', power: 100,
+    element: 'dark', vfx: 'dot/felguard', castAnim: 'cast', targetsTiles: true },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1335,6 +1763,19 @@ const AFFLICTION = actions('affliction', [
  * `combat/` reads `COMBO_BUILDERS` / `COMBO_FINISHERS` to apply the scaling.
  */
 const SUBTERFUGE = actions('subterfuge', [
+  { id: 'stealth', name: 'Stealth', description: 'Stop being somewhere. Untargetable and unselectable until you act, and adjacent enemies still get a look each turn.',
+    mp: 8, range: SELF, formula: 'buff', power: 0, accuracy: 100, vfx: 'combo/stealth', castAnim: 'defend',
+    inflicts: [inf('stealth', 100, VERY_LONG)] },
+  { id: 'vanish', name: 'Vanish', description: 'Do it again, in the middle of a melee, with four people watching. Every eye on the field loses you and the count starts over.',
+    mp: 24, range: SELF, formula: 'buff', power: 0, accuracy: 100, vfx: 'combo/vanish', castAnim: 'defend',
+    inflicts: [inf('stealth', 100, VERY_LONG), inf('transparent', 100, SHORT)],
+    cures: ['taunted', 'mark', 'bleeding'] },
+  { id: 'ambush', name: 'Ambush', description: 'The opener, and only from stealth: the whole weight of a stopped fight put behind one blade. It does not miss and it does not glance.',
+    mp: 12, formula: 'physical', power: 5, accuracy: 100, vfx: 'combo/ambush', castAnim: 'attack',
+    inflicts: [inf('mark', 100, LONG), inf('bleeding', 60, MEDIUM)] },
+  { id: 'backstab', name: 'Backstab', description: 'Between the plates, from behind, where the armourer stopped caring. Builder — and worth two openings when it comes in from the rear.',
+    mp: 6, formula: 'physical', power: 3, accuracy: 90, vfx: 'combo/backstab', castAnim: 'attack',
+    inflicts: [inf('mark', 100, LONG)] },
   { id: 'sinister-strike', name: 'Sinister Strike', description: 'A fast, unremarkable stab whose only purpose is to set up the next one. Builder.',
     formula: 'physical', power: 2, accuracy: 95, vfx: 'combo/sinister', castAnim: 'attack',
     inflicts: [inf('mark', 100, LONG)] },
@@ -1359,59 +1800,92 @@ const SUBTERFUGE = actions('subterfuge', [
   { id: 'rupture', name: 'Rupture', description: 'Finisher. Converts every opening into a bleed that runs for the rest of the fight.',
     mp: 10, formula: 'physical', power: 2, accuracy: 90, vfx: 'combo/rupture', castAnim: 'attack',
     inflicts: [inf('bleeding', 100, VERY_LONG)], cures: ['mark'] },
+  { id: 'expose-armour', name: 'Expose Armour', description: 'Finisher. Spend the openings on the straps rather than the man; everyone else\'s weapons finish the argument.',
+    mp: 12, formula: 'physical', power: 2, accuracy: 95, vfx: 'combo/expose', castAnim: 'attack',
+    inflicts: [inf('vulnerable', 100, VERY_LONG)], cures: ['mark'] },
+  { id: 'slice-and-dice', name: 'Slice and Dice', description: 'Finisher. Spend the openings on your own footwork instead. The more you had, the longer you keep the tempo.',
+    mp: 14, formula: 'physical', power: 2, accuracy: 95, vfx: 'combo/slice', castAnim: 'attack',
+    inflicts: [inf('haste', 100, LONG), inf('bleeding', 60, MEDIUM)], cures: ['mark'] },
   { id: 'deadly-crescendo', name: 'Deadly Crescendo', description: 'Finisher. At full marks it is simply lethal; below that it is merely brutal.',
     mp: 20, formula: 'special', power: 400, accuracy: 85, element: 'dark',
     vfx: 'combo/crescendo', castAnim: 'attack', cures: ['mark'] },
 ]);
 
 export const COMBO_BUILDERS: readonly AbilityId[] = [
-  'sinister-strike', 'hemorrhage', 'garrote', 'cheap-shot', 'shadowstep',
+  'sinister-strike', 'hemorrhage', 'garrote', 'cheap-shot', 'shadowstep', 'backstab', 'ambush',
 ];
 export const COMBO_FINISHERS: readonly AbilityId[] = [
-  'eviscerate', 'kidney-strike', 'rupture', 'deadly-crescendo',
+  'eviscerate', 'kidney-strike', 'rupture', 'deadly-crescendo', 'expose-armour', 'slice-and-dice',
 ];
+/** Abilities that may only be used from `stealth`, and that break it on use. */
+export const STEALTH_OPENERS: readonly AbilityId[] = ['ambush', 'cheap-shot'];
 /** Maximum `mark` stacks a target can carry. */
 export const MAX_COMBO_POINTS = 5;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Berserker — Stances
+// Druid — Wild Shape
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Only one stance may be held at a time; applying one cancels the others. */
-function stance(id: string, name: string, description: string, extra: Partial<AbilitySpec> = {}): AbilitySpec {
+/**
+ * One menu, three jobs. The two form abilities are stances in the
+ * `JOB_MECHANICS.druid.stances` sense — they swap sprite, stat multipliers and
+ * what the rest of this list is good for — and only one may be held at a time.
+ * The feral entries (`mangle`, `swipe`, `shred`) assume cat or bear; the caster
+ * and healing entries assume neither, which is what forces the Druid to pick a
+ * role for the battle instead of drifting between all three.
+ */
+function form(id: string, name: string, description: string, extra: Partial<AbilitySpec> = {}): AbilitySpec {
   return {
     id, name, description,
     mp: 0, ct: 0, element: 'none', range: SELF,
     formula: 'buff', power: 1, accuracy: 100,
-    vfx: `stance/${id}`, castAnim: 'defend',
+    vfx: `form/${id}`, castAnim: 'defend',
     ...extra,
   };
 }
 
-const STANCES = actions('stances', [
-  stance('berserker-stance', 'Berserker Stance',
-    'All weight forward. Half again the damage dealt, and half again the damage taken.',
-    { inflicts: [inf('empowered', 100, VERY_LONG), inf('vulnerable', 100, VERY_LONG)] }),
-  stance('defensive-stance', 'Defensive Stance',
-    'Weight back, guard high. Damage taken falls sharply; so does everything you deal.',
+const WILD_SHAPE = actions('wild-shape', [
+  form('dire-bear-form', 'Dire Bear Form',
+    'Take on the bear. Half again the mass, a voice that carries, and no way whatsoever to cast a spell.',
     { inflicts: [inf('protect', 100, VERY_LONG), inf('shell', 100, VERY_LONG)] }),
-  stance('reckless-stance', 'Reckless Stance',
-    'Stop defending entirely. You never evade again, but nothing you swing at is safe.',
-    { inflicts: [inf('empowered', 100, VERY_LONG), inf('berserk', 100, VERY_LONG)] }),
-  stance('tactical-stance', 'Tactical Stance',
-    'Measured footwork. Accuracy and Speed rise; raw damage does not.',
-    { inflicts: [inf('haste', 100, VERY_LONG), inf('evade-next', 100, MEDIUM)] }),
-  stance('warlord-cry', 'Warlord\'s Cry',
-    'Break stance and roar. Every ally within three tiles takes the stance\'s benefit for a while.',
-    { mp: 20, range: AURA(3), inflicts: [inf('empowered', 100, MEDIUM), inf('haste', 100, SHORT)] }),
-  stance('unbreakable', 'Unbreakable',
-    'Refuse the concept of a killing blow. Damage cannot reduce you below one HP while it holds.',
-    { mp: 28, inflicts: [inf('shielded', 100, MEDIUM), inf('protect', 100, MEDIUM)] }),
+  form('feral-cat-form', 'Feral Cat Form',
+    'Take on the cat. Five tiles of ground a turn and claws that open the same wound repeatedly, on a frame that breaks easily.',
+    { inflicts: [inf('empowered', 100, VERY_LONG), inf('haste', 100, VERY_LONG), inf('vulnerable', 100, VERY_LONG)] }),
+  { id: 'mangle', name: 'Mangle', description: 'Bear or cat: both hands, the same spot, twice. Whatever else lands on that wound afterwards lands deeper.',
+    formula: 'physical', power: 3, accuracy: 90, vfx: 'feral/mangle', castAnim: 'attack',
+    inflicts: [inf('bleeding', 80, MEDIUM), inf('vulnerable', 70, MEDIUM)] },
+  { id: 'swipe', name: 'Swipe', description: 'One arc of claw across every tile in front of you. Crude, unavoidable, and it does not care how many of them there are.',
+    range: AURA(1, 2), formula: 'physical', power: 2, accuracy: 100, vfx: 'feral/swipe', castAnim: 'attack' },
+  { id: 'shred', name: 'Shred', description: 'The cat\'s finisher. Spends every opening built on the target at once and leaves very little to identify.',
+    mp: 10, formula: 'special', power: 340, accuracy: 90, vfx: 'feral/shred', castAnim: 'attack',
+    cures: ['mark'] },
+  { id: 'wrath', name: 'Wrath', description: 'A bolt of the wood\'s own temper, thrown unshifted. Cheap, quick and entirely unromantic.',
+    mp: 8, ct: 3, range: R(5), formula: 'magical', power: 18, accuracy: 95, element: 'earth',
+    vfx: 'wild/wrath', castAnim: 'cast' },
+  { id: 'moonfire', name: 'Moonfire', description: 'Cold silver light dropped straight down on one tile, and it keeps burning after the caster has looked away.',
+    mp: 14, ct: 4, range: R(5, 1), formula: 'magical', power: 20, accuracy: 95, element: 'holy',
+    vfx: 'wild/moonfire', castAnim: 'cast', inflicts: [inf('burning', 90, LONG)] },
+  { id: 'entangling-roots', name: 'Entangling Roots', description: 'The ground remembers being a forest. Whoever is standing on it discovers this at the worst possible moment.',
+    mp: 12, ct: 3, range: R(5, 1), formula: 'status-only', accuracy: 80, element: 'earth',
+    vfx: 'wild/roots', castAnim: 'cast', targetsTiles: true,
+    inflicts: [inf('rooted', 100, LONG), inf('slow', 60, MEDIUM)] },
+  { id: 'rejuvenation', name: 'Rejuvenation', description: 'A green thread laid into a wound that mends it slowly and does not stop when the Druid moves on.',
+    mp: 10, ct: 2, range: R(4), formula: 'buff', power: 12, element: 'earth',
+    vfx: 'wild/rejuvenation', castAnim: 'cast', inflicts: [inf('regen', 100, VERY_LONG)] },
+  { id: 'regrowth', name: 'Regrowth', description: 'The fast version, and the expensive one: most of the wound closed at once, and the rest over the following ticks.',
+    mp: 20, ct: 4, range: R(4), formula: 'heal', power: 44, element: 'earth',
+    vfx: 'wild/regrowth', castAnim: 'cast', inflicts: [inf('regen', 100, MEDIUM)] },
+  { id: 'natures-swiftness', name: "Nature's Swiftness", description: 'One spell, right now, with no incantation at all. Then the Druid stands there breathing for a while.',
+    mp: 18, range: SELF, formula: 'buff', power: 0, vfx: 'wild/swiftness', castAnim: 'charge',
+    inflicts: [inf('haste', 100, LONG), inf('evade-next', 100, MEDIUM)] },
+  { id: 'tranquillity', name: 'Tranquillity', description: 'Stop fighting entirely and let the wood do what it does to a clearing full of wounded. Everything friendly in it mends.',
+    mp: 46, ct: 8, range: AURA(3), formula: 'heal', power: 48, element: 'earth',
+    vfx: 'wild/tranquillity', castAnim: 'cast',
+    inflicts: [inf('regen', 100, LONG)], cures: ['poison', 'bleeding', 'burning', 'blind'] },
 ]);
 
-export const STANCE_ABILITIES: readonly AbilityId[] = [
-  'berserker-stance', 'defensive-stance', 'reckless-stance', 'tactical-stance',
-];
+/** The two shapes. Applying either cancels the other; see `JOB_MECHANICS.druid`. */
+export const DRUID_FORMS: readonly AbilityId[] = ['dire-bear-form', 'feral-cat-form'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shaman — Totemcraft
@@ -1450,14 +1924,51 @@ const TOTEMCRAFT = actions('totemcraft', [
   totem('earthbind-totem', 'Earthbind Totem',
     'Roots grasp at every enemy within two tiles. Nothing walks past it comfortably.',
     14, 'earth', { power: 0, accuracy: 75, inflicts: [inf('rooted', 80, MEDIUM), inf('slow', 60, MEDIUM)] }),
+  totem('healing-stream-totem', 'Healing Stream Totem',
+    'A hollow post running with water that is not there. Mends every ally within two tiles, a little at a time, indefinitely.',
+    18, 'water', { power: 14, formula: 'summon' }),
+  totem('tremor-totem', 'Tremor Totem',
+    'A low, constant shudder in the ground. Nothing that works on a mind holds inside its radius — the direct answer to an enemy Coercer.',
+    16, 'earth', { power: 0, cures: ['charm', 'confuse', 'sleep', 'berserk', 'taunted'] }),
   totem('totemic-recall', 'Totemic Recall',
     'Shatter your own totems and take the unspent spirit back into yourself.',
     0, 'none', { range: SELF, formula: 'special', power: 60, ct: 0, targetsTiles: false }),
+  // The Shaman's own hands. Totems are the identity, but a job that can only
+  // place furniture is unplayable on a turn where the line has already moved.
+  { id: 'lightning-bolt', name: 'Lightning Bolt', description: 'The bargain a Shaman can strike fastest: a single white line from the air to a chosen head.',
+    mp: 10, ct: 3, range: R(5), formula: 'magical', power: 20, accuracy: 95, element: 'lightning',
+    vfx: 'shaman/bolt', castAnim: 'cast' },
+  { id: 'chain-lightning', name: 'Chain Lightning', description: 'The same bargain, made once and honoured three times. It finds the next body on its own.',
+    mp: 30, ct: 6, range: R(5, 2), formula: 'magical', power: 28, accuracy: 90, element: 'lightning',
+    vfx: 'shaman/chain', castAnim: 'cast' },
+  { id: 'earth-shock', name: 'Earth Shock', description: 'A fistful of the ground driven up under someone mid-incantation. Instant, and it ends the sentence.',
+    mp: 12, range: R(4), formula: 'magical', power: 18, accuracy: 90, element: 'earth',
+    vfx: 'shaman/earth-shock', castAnim: 'cast', inflicts: [inf('silence', 70, MEDIUM)] },
+  { id: 'frost-shock', name: 'Frost Shock', description: 'Cold poured into the joints without warning. They keep their turn; they do not keep their pace.',
+    mp: 12, range: R(4), formula: 'magical', power: 16, accuracy: 90, element: 'ice',
+    vfx: 'shaman/frost-shock', castAnim: 'cast',
+    inflicts: [inf('slow', 80, LONG), inf('rooted', 40, SHORT)] },
+  { id: 'ancestral-spirit', name: 'Ancestral Spirit', description: 'Ask an ancestor to give a place back. They usually agree, and the fallen stands up where they fell.',
+    mp: 34, ct: 7, range: R(4), formula: 'raise', power: 75, accuracy: 85, element: 'holy',
+    vfx: 'shaman/ancestral', castAnim: 'cast', cures: ['ko'] },
+  { id: 'bloodlust', name: 'Bloodlust', description: 'Every spirit the Shaman has ever bargained with, called in at once and spent on the company. Once a battle is generous.',
+    mp: 52, ct: 6, range: AURA(3), formula: 'buff', power: 0, element: 'fire',
+    vfx: 'shaman/bloodlust', castAnim: 'cast',
+    inflicts: [inf('haste', 100, LONG), inf('empowered', 100, LONG)] },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Paladin — Auras
+// Paladin — Judgement
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Two halves that need each other. The auras are the passive floor — exactly one
+ * burns at a time, centred on the Paladin and recomputed as they move — and the
+ * seals are the active loop: seal a target, strike it twice to accrue Judgement
+ * Debt (`JOB_MECHANICS.paladin.resources`), then collect the whole stack with
+ * `divine-judgement`. Neither half is worth much without the other, which is the
+ * point: the Paladin is paid for standing still and being patient.
+ */
 
 /** One aura at a time; each is a persistent self-centred field. */
 function auraSpec(
@@ -1473,7 +1984,7 @@ function auraSpec(
   };
 }
 
-const AURAS = actions('auras', [
+const JUDGEMENT = actions('judgement', [
   auraSpec('devotion-aura', 'Devotion Aura',
     'A standing field of protection. Every ally in it takes physical damage at reduced weight.',
     12, 'holy', { inflicts: [inf('protect', 100, VERY_LONG)] }),
@@ -1492,11 +2003,49 @@ const AURAS = actions('auras', [
   auraSpec('aura-mastery', 'Aura Mastery',
     'Blaze the current aura at double strength across four tiles for a short, glorious while.',
     30, 'holy', { range: AURA(4), inflicts: [inf('empowered', 100, MEDIUM), inf('shielded', 100, MEDIUM)] }),
+  // ── Seals, the strike, and the collection ─────────────────────────────────
+  { id: 'holy-strike', name: 'Holy Strike', description: 'A hammer blow with a prayer already attached to it. The Paladin\'s workaday attack, and it accrues debt on a sealed target.',
+    mp: 6, formula: 'physical', power: 3, accuracy: 95, element: 'holy',
+    vfx: 'judge/holy-strike', castAnim: 'attack' },
+  { id: 'seal-of-righteousness', name: 'Seal of Righteousness', description: 'Set a mark of the Order on an enemy. Every blow that lands on it afterwards is written down somewhere they cannot reach.',
+    mp: 10, ct: 2, range: R(4), formula: 'status-only', accuracy: 90, element: 'holy',
+    vfx: 'judge/seal-righteous', castAnim: 'cast',
+    inflicts: [inf('mark', 100, VERY_LONG)] },
+  { id: 'seal-of-justice', name: 'Seal of Justice', description: 'The harsher seal: it accrues the same debt and pins the feet of whoever is carrying it while it does.',
+    mp: 16, ct: 3, range: R(4), formula: 'status-only', accuracy: 80, element: 'holy',
+    vfx: 'judge/seal-justice', castAnim: 'cast',
+    inflicts: [inf('mark', 100, VERY_LONG), inf('rooted', 100, MEDIUM)] },
+  { id: 'divine-judgement', name: 'Judgement', description: 'Call in the whole of the debt at once. Against a target sealed and struck three times it is the largest single number in the roster.',
+    mp: 20, range: R(4, 0, { vertical: 4 }), formula: 'special', power: 300, accuracy: 95,
+    element: 'holy', vfx: 'judge/judgement', castAnim: 'attack', cures: ['mark'] },
+  { id: 'hammer-of-justice', name: 'Hammer of Justice', description: 'A thrown warhammer with a writ of arrest behind it. Whoever it reaches is not going anywhere for a while.',
+    mp: 18, range: R(4, 0, { vertical: 4 }), formula: 'physical', power: 3, accuracy: 85,
+    element: 'holy', vfx: 'judge/hammer', castAnim: 'throw',
+    inflicts: [inf('stop', 100, SHORT), inf('silence', 60, MEDIUM)] },
+  { id: 'consecration', name: 'Consecration', description: 'Bless the ground rather than the people standing on it. It burns anything unholy that stays there, and it stays where it was laid.',
+    mp: 24, ct: 4, range: R(3, 2, { vertical: 3 }), formula: 'magical', power: 22, accuracy: 90,
+    element: 'holy', vfx: 'judge/consecration', castAnim: 'cast', targetsTiles: true,
+    inflicts: [inf('burning', 60, LONG)] },
+  { id: 'blessing-of-protection', name: 'Blessing of Protection', description: 'Put the Order between an ally and the physical world for a moment. Nothing lands on them, and they cannot swing either.',
+    mp: 26, ct: 3, range: R(4), formula: 'buff', power: 0, element: 'holy',
+    vfx: 'judge/blessing', castAnim: 'cast',
+    inflicts: [inf('shielded', 100, MEDIUM), inf('protect', 100, LONG), inf('rooted', 100, SHORT)] },
+  { id: 'lay-on-hands', name: 'Lay on Hands', description: 'Every point of magick the Paladin has, spent at once, through both palms. The ally stands up whole. Once, in a battle.',
+    mp: 60, range: R(2, 0, { vertical: 3, los: false }), formula: 'heal', power: 400, accuracy: 100,
+    element: 'holy', vfx: 'judge/lay-on-hands', castAnim: 'cast',
+    cures: ['poison', 'blind', 'silence', 'bleeding', 'burning', 'undead', 'death-sentence'] },
+  { id: 'divine-shield', name: 'Divine Shield', description: 'Total immunity for one round, and every enemy immediately forgets it was ever angry at you. The escape valve, not a weapon.',
+    mp: 40, range: SELF, formula: 'buff', power: 0, accuracy: 100, element: 'holy',
+    vfx: 'judge/divine-shield', castAnim: 'defend',
+    inflicts: [inf('shielded', 100, SHORT), inf('transparent', 100, SHORT), inf('protect', 100, MEDIUM), inf('shell', 100, MEDIUM)] },
 ]);
 
 export const AURA_ABILITIES: readonly AbilityId[] = [
   'devotion-aura', 'retribution-aura', 'concentration-aura', 'sanctity-aura', 'crusader-aura',
 ];
+
+/** Seals accrue Judgement Debt on their target; `divine-judgement` spends it. */
+export const SEAL_ABILITIES: readonly AbilityId[] = ['seal-of-righteousness', 'seal-of-justice'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Death Knight — Runic Strike
@@ -1526,6 +2075,24 @@ const RUNIC_STRIKE = actions('runic-strike', [
   { id: 'raise-thrall', name: 'Raise Thrall', description: 'Stand a corpse back up on the tile where it fell and set it against its own side.',
     mp: 36, ct: 6, range: R(3, 0, { vertical: 2 }), formula: 'summon', power: 80, accuracy: 100,
     element: 'dark', vfx: 'rune/thrall', castAnim: 'cast', targetsTiles: true },
+  { id: 'obliterate', name: 'Obliterate', description: 'Two runes spent on one downward stroke with nothing clever in it at all. The largest plain number the Death Knight owns.',
+    mp: 22, formula: 'physical', power: 6, accuracy: 90, element: 'ice',
+    vfx: 'rune/obliterate', castAnim: 'attack' },
+  { id: 'chains-of-ice', name: 'Chains of Ice', description: 'Rime crawls out along the ground and closes round the ankles. Cheap, instant, and nobody walks out of it.',
+    mp: 8, range: R(4, 0, { vertical: 4 }), formula: 'magical', power: 10, accuracy: 90, element: 'ice',
+    vfx: 'rune/chains', castAnim: 'cast',
+    inflicts: [inf('rooted', 100, LONG), inf('slow', 80, MEDIUM)] },
+  { id: 'anti-magic-shell', name: 'Anti-Magic Shell', description: 'A dead man\'s indifference to sorcery, made briefly literal. Spells arrive, find nothing that cares, and leave.',
+    mp: 20, range: SELF, formula: 'buff', power: 0, element: 'dark',
+    vfx: 'rune/anti-magic', castAnim: 'defend',
+    inflicts: [inf('shell', 100, LONG), inf('reflect', 100, MEDIUM)] },
+  { id: 'death-and-decay', name: 'Death and Decay', description: 'Consecrate a patch of ground to the opposite of consecration. Everything standing in it rots for as long as it stands there.',
+    mp: 34, ct: 5, range: R(4, 2, { vertical: 3 }), formula: 'magical', power: 22, accuracy: 90,
+    element: 'dark', vfx: 'rune/decay', castAnim: 'cast', targetsTiles: true,
+    inflicts: [inf('poison', 90, LONG), inf('vulnerable', 60, MEDIUM)] },
+  { id: 'army-of-the-dead', name: 'Army of the Dead', description: 'Every corpse still on the field, all at once, all standing. It costs everything the runes have and it usually ends the battle.',
+    mp: 70, ct: 10, range: R(5, 3, { vertical: 4, los: false }), formula: 'summon', power: 120,
+    accuracy: 100, element: 'dark', vfx: 'rune/army', castAnim: 'cast', targetsTiles: true },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1558,15 +2125,18 @@ export const ACTION_ABILITIES: readonly Ability[] = [
   ...HOLY_SWORD,
   ...MIGHTY_SWORD,
   ...MIMICRY,
-  ...THREAT_ARTS,
-  ...WARD_CRAFT,
+  ...ONION_SKILLS,
+  ...DREAD_ARTS,
+  ...SACRAMENTS,
   ...ENTHRALL,
-  ...BEAST_COMMAND,
+  ...PRIMAL_BOND,
+  ...ANTHEMS,
+  ...DIRGES,
   ...AFFLICTION,
   ...SUBTERFUGE,
-  ...STANCES,
+  ...WILD_SHAPE,
   ...TOTEMCRAFT,
-  ...AURAS,
+  ...JUDGEMENT,
   ...RUNIC_STRIKE,
 ];
 
@@ -1587,7 +2157,6 @@ export const JOB_ACTION_SETS: Readonly<Record<JobId, AbilitySetId>> = {
   'time-mage': 'time-magick',
   summoner: 'summon-magick',
   thief: 'steal',
-  rogue: 'snatch',
   orator: 'talk-skill',
   mediator: 'talk-skill',
   oracle: 'yin-yang-magick',
@@ -1605,25 +2174,30 @@ export const JOB_ACTION_SETS: Readonly<Record<JobId, AbilitySetId>> = {
   'holy-knight': 'holy-sword',
   'divine-knight': 'mighty-sword',
   mime: 'mimicry',
+  'onion-knight': 'onion-skills',
   // EQ2 / WoW line
-  guardian: 'threat-arts',
-  warrior: 'threat-arts',
-  paladin: 'auras',
-  templar: 'auras',
-  shaman: 'totemcraft',
-  defiler: 'ward-craft',
+  shadowknight: 'dread-arts',
+  guardian: 'dread-arts',
+  warrior: 'dread-arts',
+  templar: 'sacraments',
+  defiler: 'sacraments',
   coercer: 'enthrall',
   illusionist: 'enthrall',
-  beastlord: 'beast-command',
-  hunter: 'beast-command',
+  beastlord: 'primal-bond',
+  hunter: 'primal-bond',
+  troubador: 'anthems',
+  dirge: 'dirges',
   warlock: 'affliction',
   necromancer: 'affliction',
+  rogue: 'subterfuge',
   assassin: 'subterfuge',
   brigand: 'subterfuge',
   swashbuckler: 'subterfuge',
-  berserker: 'stances',
+  druid: 'wild-shape',
+  berserker: 'wild-shape',
+  shaman: 'totemcraft',
+  paladin: 'judgement',
   'death-knight': 'runic-strike',
-  shadowknight: 'runic-strike',
 };
 
 /** Set id for a job, using the job table's own value when one is supplied. */

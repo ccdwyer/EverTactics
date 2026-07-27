@@ -30,9 +30,18 @@ export interface GradeParams {
   gain: [number, number, number];
   /** ASC-CDL offset, per channel. 0 = neutral. Lifts the black point. */
   lift: [number, number, number];
-  /** ASC-CDL power, per channel. 1 = neutral. */
+  /** ASC-CDL power, per channel. 1 = neutral. >1 lifts midtones. */
   gamma: [number, number, number];
-  /** S-curve strength around `pivot`, in log space. 0 = off. */
+  /**
+   * S-curve strength around `pivot`, in display space. 0 = off.
+   *
+   * `pivot` matters more than it looks. The curve pushes everything above the pivot up and
+   * everything below it down, so a pivot chosen for a well-exposed image (0.4-0.45) simply
+   * crushes a dark one — measured on our own frame, a 0.44 pivot dropped median luminance
+   * from 23/255 to 17/255 while the reference frames sit at 66-80. These presets therefore
+   * pivot LOW, around the actual median of an HD-2D diorama, so the curve separates the
+   * lit surfaces upward instead of dragging the whole frame into the floor.
+   */
   contrast: number;
   pivot: number;
   /** Global saturation. 1 = neutral. */
@@ -48,10 +57,30 @@ export interface GradeParams {
    * green and blue. A little of this is the single biggest "this was graded" cue.
    */
   crosstalk: number;
-  /** Toe lift: raises the very bottom of the curve so blacks are milky, not crushed. */
-  toe: number;
+  /**
+   * Black crush, in display-domain code values. Everything below this is clipped and the
+   * remaining range is stretched back out. This is what makes shadows read as *black*
+   * rather than as dark grey — VISUAL_TARGET.md lists neutral grey as a fail condition and
+   * both reference games clip their shadows hard.
+   */
+  crush: number;
+  /**
+   * The colour the crushed blacks actually land on, display domain. Never leave this
+   * neutral: "blacks are blue, not neutral" is the single most repeated note in
+   * VISUAL_TARGET.md's colour section. Triangle sits around [0.02, 0.03, 0.07];
+   * FFT's night frames sit around [0.05, 0.03, 0.02].
+   */
+  blackPoint: [number, number, number];
   /** Shoulder: compresses the top so highlights roll off instead of clipping. */
   shoulder: number;
+  /**
+   * Colour the very top of the curve is pulled toward, display domain. Both references
+   * push highlights warm — a pure white highlight next to a graded midtone is the other
+   * half of the "this was never graded" tell.
+   */
+  highlightPoint: [number, number, number];
+  /** How far highlights travel toward `highlightPoint`. 0 = off. */
+  highlightPull: number;
 }
 
 export const NEUTRAL_GRADE: GradeParams = {
@@ -62,15 +91,18 @@ export const NEUTRAL_GRADE: GradeParams = {
   lift: [0, 0, 0],
   gamma: [1, 1, 1],
   contrast: 0,
-  pivot: 0.42,
+  pivot: 0.24,
   saturation: 1,
   vibrance: 0,
   shadowTint: [1, 1, 1],
   midTint: [1, 1, 1],
   highlightTint: [1, 1, 1],
   crosstalk: 0,
-  toe: 0,
+  crush: 0,
+  blackPoint: [0, 0, 0],
   shoulder: 0,
+  highlightPoint: [1, 1, 1],
+  highlightPull: 0,
 };
 
 export function grade(partial: Partial<GradeParams>): GradeParams {
@@ -78,147 +110,194 @@ export function grade(partial: Partial<GradeParams>): GradeParams {
 }
 
 /**
- * Per-map moods. These are deliberately gentle — the reference games grade for *readability*
- * first. Every one of these should survive an A/B against `neutral` without a viewer saying
- * "that one is doing too much".
+ * Per-map moods.
+ *
+ * These used to be deliberately gentle. That was the wrong call and the reference frames say
+ * so: `refs/curated/triangle/official_005_steam.jpg` is amber highlights against near-black
+ * warm shadows with no neutral value anywhere in it, and `official_019_se_screenshot.jpg`
+ * runs cream highlights against a deep blue-teal floor. Both are graded far past "tasteful".
+ * VISUAL_TARGET.md is explicit: "Neither uses neutral greys. Crush blacks toward the map's
+ * cool tone and push highlights warm."
+ *
+ * So every preset here now commits: real contrast, a crushed and *tinted* black point, and a
+ * warm highlight point. The test is not "would a viewer say this is doing too much" — it is
+ * "can a critic pick our frame out of a Triangle Strategy pair".
  */
 export const GRADE_PRESETS: Record<string, GradeParams> = {
-  neutral: grade({ contrast: 0.08, saturation: 1.02, toe: 0.006 }),
+  neutral: grade({ contrast: 0.08, saturation: 1.02 }),
 
   /** Open plains at midday. Warm key, cool shadows, gentle film contrast. */
   'ivalice-noon': grade({
-    exposure: 0.05,
-    temperature: 0.16,
-    contrast: 0.18,
-    pivot: 0.44,
-    saturation: 1.06,
-    vibrance: 0.1,
-    shadowTint: [0.93, 0.97, 1.09],
-    midTint: [1.02, 1.0, 0.98],
-    highlightTint: [1.04, 1.01, 0.95],
-    crosstalk: 0.05,
-    toe: 0.005,
-    shoulder: 0.12,
+    exposure: 0.04,
+    temperature: 0.2,
+    gamma: [1.2, 1.2, 1.2],
+    contrast: 0.3,
+    pivot: 0.24,
+    saturation: 1.12,
+    vibrance: 0.14,
+    shadowTint: [0.86, 0.95, 1.18],
+    midTint: [1.03, 1.0, 0.96],
+    highlightTint: [1.07, 1.02, 0.92],
+    crosstalk: 0.06,
+    crush: 0.035,
+    blackPoint: [0.018, 0.028, 0.056],
+    shoulder: 0.16,
+    highlightPoint: [1.0, 0.98, 0.9],
+    highlightPull: 0.3,
   }),
 
   /** Late-afternoon golden hour. The FFT battlefield default look. */
   'dusk-plains': grade({
-    exposure: -0.05,
-    temperature: 0.34,
-    tint: 0.04,
-    contrast: 0.22,
-    pivot: 0.4,
-    saturation: 1.04,
-    vibrance: 0.14,
-    gain: [1.05, 1.0, 0.95],
-    shadowTint: [0.88, 0.94, 1.14],
-    midTint: [1.04, 1.0, 0.95],
-    highlightTint: [1.09, 1.02, 0.9],
-    crosstalk: 0.08,
-    toe: 0.007,
-    shoulder: 0.18,
+    exposure: -0.04,
+    temperature: 0.42,
+    tint: 0.05,
+    gamma: [1.22, 1.22, 1.22],
+    contrast: 0.36,
+    pivot: 0.22,
+    saturation: 1.1,
+    vibrance: 0.2,
+    gain: [1.07, 1.0, 0.93],
+    shadowTint: [0.8, 0.9, 1.24],
+    midTint: [1.06, 1.0, 0.92],
+    highlightTint: [1.12, 1.02, 0.85],
+    crosstalk: 0.09,
+    crush: 0.05,
+    blackPoint: [0.03, 0.026, 0.052],
+    shoulder: 0.22,
+    highlightPoint: [1.0, 0.95, 0.82],
+    highlightPull: 0.5,
   }),
 
-  /** Stone interiors lit by stained glass. Cool with warm practicals. */
+  /**
+   * Stone interiors lit by stained glass — the `battle-open` look.
+   *
+   * Modelled on official_019: a cold blue-teal floor with warm practicals cutting through
+   * it. The blue is carried by the black point, not by desaturating everything, so the
+   * warm side of the split survives.
+   */
   cathedral: grade({
-    exposure: -0.12,
-    temperature: -0.14,
-    contrast: 0.26,
-    pivot: 0.36,
-    saturation: 0.95,
-    vibrance: 0.16,
-    lift: [0.004, 0.005, 0.010],
-    shadowTint: [0.86, 0.92, 1.16],
-    midTint: [0.98, 0.99, 1.04],
-    highlightTint: [1.08, 1.03, 0.94],
+    exposure: -0.08,
+    temperature: -0.1,
+    gamma: [1.26, 1.26, 1.26],
+    contrast: 0.4,
+    pivot: 0.20,
+    saturation: 1.04,
+    vibrance: 0.24,
+    gain: [1.0, 1.0, 1.04],
+    shadowTint: [0.72, 0.86, 1.3],
+    midTint: [0.98, 0.99, 1.08],
+    highlightTint: [1.16, 1.04, 0.86],
     crosstalk: 0.1,
-    toe: 0.008,
-    shoulder: 0.16,
+    crush: 0.06,
+    blackPoint: [0.016, 0.028, 0.062],
+    shoulder: 0.2,
+    highlightPoint: [1.0, 0.96, 0.85],
+    highlightPull: 0.55,
   }),
 
   /** Snowfield under a full moon. Desaturated, blue, high key with protected highlights. */
   'moonlit-snow': grade({
-    exposure: -0.2,
-    temperature: -0.36,
+    exposure: -0.18,
+    temperature: -0.4,
     tint: -0.04,
-    contrast: 0.14,
-    pivot: 0.46,
-    saturation: 0.8,
-    gain: [0.95, 0.99, 1.08],
-    shadowTint: [0.84, 0.9, 1.2],
-    midTint: [0.95, 0.98, 1.08],
-    highlightTint: [1.0, 1.01, 1.04],
+    gamma: [1.18, 1.18, 1.18],
+    contrast: 0.24,
+    pivot: 0.26,
+    saturation: 0.86,
+    vibrance: 0.12,
+    gain: [0.94, 0.99, 1.1],
+    shadowTint: [0.78, 0.88, 1.28],
+    midTint: [0.94, 0.98, 1.1],
+    highlightTint: [1.02, 1.02, 1.04],
     crosstalk: 0.12,
-    toe: 0.009,
-    shoulder: 0.26,
+    crush: 0.03,
+    blackPoint: [0.02, 0.034, 0.072],
+    shoulder: 0.3,
+    highlightPoint: [1.0, 0.99, 0.96],
+    highlightPull: 0.25,
   }),
 
   /** Volcanic. Hot core, crushed cyan shadows, strong shoulder so lava does not clip flat. */
   volcano: grade({
-    exposure: -0.1,
-    temperature: 0.44,
-    contrast: 0.3,
-    pivot: 0.34,
-    saturation: 1.1,
-    vibrance: 0.1,
-    gain: [1.1, 0.98, 0.9],
-    shadowTint: [0.8, 0.9, 1.05],
-    midTint: [1.06, 0.98, 0.92],
-    highlightTint: [1.12, 1.0, 0.86],
+    exposure: -0.08,
+    temperature: 0.5,
+    gamma: [1.22, 1.22, 1.22],
+    contrast: 0.44,
+    pivot: 0.20,
+    saturation: 1.18,
+    vibrance: 0.14,
+    gain: [1.12, 0.98, 0.88],
+    shadowTint: [0.7, 0.86, 1.12],
+    midTint: [1.08, 0.97, 0.9],
+    highlightTint: [1.18, 1.0, 0.8],
     crosstalk: 0.09,
-    toe: 0.006,
-    shoulder: 0.3,
+    crush: 0.06,
+    blackPoint: [0.045, 0.022, 0.03],
+    shoulder: 0.34,
+    highlightPoint: [1.0, 0.92, 0.74],
+    highlightPull: 0.6,
   }),
 
   /** Marsh. Sickly green midtones, muddy blacks, low saturation in the highlights. */
   'swamp-fog': grade({
-    exposure: -0.08,
-    temperature: -0.06,
-    tint: -0.14,
-    contrast: 0.12,
-    pivot: 0.42,
-    saturation: 0.88,
-    lift: [0.006, 0.010, 0.006],
-    shadowTint: [0.9, 1.02, 0.94],
-    midTint: [0.96, 1.04, 0.94],
-    highlightTint: [1.0, 1.02, 0.97],
+    exposure: -0.06,
+    temperature: -0.04,
+    tint: -0.18,
+    gamma: [1.2, 1.2, 1.2],
+    contrast: 0.26,
+    pivot: 0.24,
+    saturation: 0.94,
+    vibrance: 0.1,
+    shadowTint: [0.84, 1.04, 0.92],
+    midTint: [0.94, 1.06, 0.92],
+    highlightTint: [1.02, 1.04, 0.94],
     crosstalk: 0.14,
-    toe: 0.010,
-    shoulder: 0.2,
+    crush: 0.04,
+    blackPoint: [0.022, 0.036, 0.03],
+    shoulder: 0.24,
+    highlightPoint: [1.0, 0.99, 0.88],
+    highlightPull: 0.35,
   }),
 
   /** Night skirmish. Deep, cool, saturated only where torches are. */
   'night-battle': grade({
-    exposure: -0.28,
-    temperature: -0.3,
-    contrast: 0.24,
-    pivot: 0.32,
-    saturation: 0.86,
-    vibrance: 0.22,
-    gain: [0.94, 0.97, 1.1],
-    shadowTint: [0.8, 0.88, 1.22],
-    midTint: [0.94, 0.97, 1.1],
-    highlightTint: [1.06, 1.0, 0.95],
+    exposure: -0.24,
+    temperature: -0.34,
+    gamma: [1.26, 1.26, 1.26],
+    contrast: 0.42,
+    pivot: 0.18,
+    saturation: 0.94,
+    vibrance: 0.3,
+    gain: [0.92, 0.96, 1.14],
+    shadowTint: [0.66, 0.82, 1.36],
+    midTint: [0.92, 0.96, 1.14],
+    highlightTint: [1.14, 1.0, 0.88],
     crosstalk: 0.12,
-    toe: 0.007,
-    shoulder: 0.14,
+    crush: 0.07,
+    blackPoint: [0.012, 0.022, 0.058],
+    shoulder: 0.18,
+    highlightPoint: [1.0, 0.94, 0.8],
+    highlightPull: 0.6,
   }),
 
   /** Underground / mines. Almost monochrome, lit by a single warm source. */
   underground: grade({
-    exposure: -0.24,
-    temperature: 0.1,
-    contrast: 0.3,
-    pivot: 0.3,
-    saturation: 0.74,
-    vibrance: 0.24,
-    lift: [0.006, 0.006, 0.01],
-    shadowTint: [0.9, 0.9, 1.02],
-    midTint: [1.03, 0.99, 0.93],
-    highlightTint: [1.1, 1.0, 0.85],
+    exposure: -0.2,
+    temperature: 0.14,
+    gamma: [1.26, 1.26, 1.26],
+    contrast: 0.44,
+    pivot: 0.18,
+    saturation: 0.82,
+    vibrance: 0.3,
+    shadowTint: [0.84, 0.88, 1.1],
+    midTint: [1.04, 0.98, 0.9],
+    highlightTint: [1.16, 1.0, 0.8],
     crosstalk: 0.16,
-    toe: 0.008,
-    shoulder: 0.1,
+    crush: 0.065,
+    blackPoint: [0.034, 0.026, 0.024],
+    shoulder: 0.14,
+    highlightPoint: [1.0, 0.93, 0.76],
+    highlightPull: 0.6,
   }),
 };
 
@@ -326,12 +405,13 @@ export function applyGrade(p: GradeParams, rIn: number, gIn: number, bIn: number
   g = l + (g - l) * sat;
   b = l + (b - l) * sat;
 
-  // Toe and shoulder. Applied last so they always own the extremes.
+  // Crush and shoulder. Applied last so they always own the extremes.
   const KNEE = 0.6;
   const shape = (v: number): number => {
     let o = clamp01(v);
-    // Toe: raise the floor so blacks are film-black, not void-black.
-    if (p.toe > 0) o = p.toe + (1 - p.toe) * o;
+    // Crush: clip the bottom of the range and rescale. Shadows become genuinely black
+    // instead of dark grey, which is what lets the tinted black point below be seen at all.
+    if (p.crush > 0) o = clamp01((o - p.crush) / Math.max(1 - p.crush, 1e-3));
     // Shoulder: above the knee, a monotone rational curve whose slope falls below 1 as it
     // approaches white. Highlights roll off instead of clipping to a flat plate.
     if (p.shoulder > 0 && o > KNEE) {
@@ -343,7 +423,25 @@ export function applyGrade(p: GradeParams, rIn: number, gIn: number, bIn: number
     return clamp01(o);
   };
 
-  return [shape(r), shape(g), shape(b)];
+  r = shape(r);
+  g = shape(g);
+  b = shape(b);
+
+  // Tinted black and white points. The curve now runs blackPoint -> highlightPoint rather
+  // than 0 -> 1, so there is no neutral value anywhere in the output range.
+  const l2 = r * LUMA_R + g * LUMA_G + b * LUMA_B;
+  const hw = p.highlightPull * Math.pow(clamp01(l2), 2.0);
+  const place = (v: number, bp: number, hp: number): number => {
+    const lifted = bp + (1 - bp) * v;
+    // Highlights slide toward highlightPoint, weighted by luminance so midtones are untouched.
+    return clamp01(lifted * (1 - hw) + lifted * hp * hw);
+  };
+
+  return [
+    place(r, p.blackPoint[0], p.highlightPoint[0]),
+    place(g, p.blackPoint[1], p.highlightPoint[1]),
+    place(b, p.blackPoint[2], p.highlightPoint[2]),
+  ];
 }
 
 /** Bake a grade into a trilinear-filtered 3D LUT texture. */

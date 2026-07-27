@@ -31,7 +31,10 @@ export const WOW_JOBS: readonly Job[] = [
       'puzzle rather than a spell list. Blood strikes heal him, Frost strikes root and slow, ' +
       'and Unholy raises the corpse of anything that has fallen on the field as a ghoul that ' +
       'fights until it is destroyed. Cold, slow, and extremely hard to remove.',
-    sprite: { male: '1110_Dark_Knight_Male_hd', female: '1112_Dark_Knight_Female_hd' },
+    // 1110/1112 Dark Knight is a broken rip. The Samurai sheet carries the same
+    // mass of heavy plate with much larger pauldrons, which takes a frost palette
+    // better than anything else in the generic block.
+    sprite: { male: '1048_Samurai_Male_hd', female: '1050_Samurai_Female_hd' },
     move: 3,
     jump: 3,
     cEvade: 10,
@@ -41,15 +44,15 @@ export const WOW_JOBS: readonly Job[] = [
       { job: 'dark-knight', level: 3 },
       { job: 'mystic', level: 3 },
     ],
-    actionSet: 'runeblade',
+    actionSet: 'runic-strike',
     learnable: [
       a('blood-strike', 200),
-      a('icy-touch', 200),
-      a('plague-strike', 250),
+      a('frost-strike', 200),
+      a('unholy-blight', 250),
       a('death-coil', 350),
       a('howling-blast', 450),
       a('chains-of-ice', 300),
-      a('raise-ghoul', 600),
+      a('raise-thrall', 600),
       a('death-and-decay', 700),
       a('rune-tap', 400),
       a('anti-magic-shell', 500),
@@ -57,7 +60,7 @@ export const WOW_JOBS: readonly Job[] = [
       a('army-of-the-dead', 1200),
     ],
     equip: ['sword', 'knightsword', 'axe', 'hammer', 'shield', 'helm', 'armor', 'accessory'],
-    innate: ['rune-economy', 'unholy-vigour'],
+    innate: ['runic-focus', 'unyielding-will'],
   },
   {
     id: 'warlock',
@@ -84,8 +87,8 @@ export const WOW_JOBS: readonly Job[] = [
     actionSet: 'affliction',
     learnable: [
       a('corruption', 200),
-      a('immolate', 250),
-      a('curse-of-agony', 300),
+      a('immolation', 250),
+      a('agony', 300),
       a('drain-life', 350),
       a('drain-soul', 400),
       a('shadow-bolt', 250),
@@ -168,7 +171,7 @@ export const WOW_JOBS: readonly Job[] = [
       a('concentration-aura', 350),
       a('seal-of-righteousness', 250),
       a('seal-of-justice', 300),
-      a('judgement', 400),
+      a('divine-judgement', 400),
       a('holy-strike', 200),
       a('hammer-of-justice', 450),
       a('lay-on-hands', 900),
@@ -177,7 +180,7 @@ export const WOW_JOBS: readonly Job[] = [
       a('divine-shield', 800),
     ],
     equip: ['sword', 'hammer', 'flail', 'knightsword', 'shield', 'helm', 'armor', 'accessory'],
-    innate: ['aura-bearer'],
+    innate: ['resonant-aura'],
   },
   {
     id: 'rogue',
@@ -202,7 +205,7 @@ export const WOW_JOBS: readonly Job[] = [
       { job: 'thief', level: 4 },
       { job: 'ninja', level: 2 },
     ],
-    actionSet: 'subtlety',
+    actionSet: 'subterfuge',
     learnable: [
       a('stealth', 300),
       a('ambush', 450),
@@ -210,15 +213,15 @@ export const WOW_JOBS: readonly Job[] = [
       a('backstab', 350),
       a('rupture', 400),
       a('eviscerate', 500),
-      a('kidney-shot', 450),
+      a('kidney-strike', 450),
       a('cheap-shot', 400),
-      a('vanish-rogue', 700),
+      a('vanish', 700),
       a('expose-armour', 350),
       a('slice-and-dice', 400),
       a('shadowstep', 600),
     ],
     equip: ['knife', 'sword', 'hat', 'clothing', 'accessory'],
-    innate: ['shadow-training'],
+    innate: ['subtlety'],
   },
   {
     id: 'shaman',
@@ -258,7 +261,7 @@ export const WOW_JOBS: readonly Job[] = [
       a('totemic-recall', 250),
     ],
     equip: ['hammer', 'axe', 'staff', 'shield', 'hat', 'clothing', 'armlet', 'accessory'],
-    innate: ['totemic-focus'],
+    innate: ['totemic-mastery'],
   },
 ];
 
@@ -327,7 +330,7 @@ export const WOW_MECHANICS: readonly JobMechanics[] = [
     ],
     stances: [],
     threat: { generated: 1.5, hasTaunt: true, perDamage: 1.0, perHeal: 0.5 },
-    keyAbilities: ['blood-strike', 'icy-touch', 'raise-ghoul', 'death-coil', 'army-of-the-dead'],
+    keyAbilities: ['blood-strike', 'frost-strike', 'raise-thrall', 'death-coil', 'army-of-the-dead'],
     notes:
       'Runes are the identity: each ability declares which rune types it costs, and the UI must ' +
       'show three small pip bars rather than an MP bar. The Death Knight has an MP pool for ' +
@@ -338,13 +341,13 @@ export const WOW_MECHANICS: readonly JobMechanics[] = [
       'the master falls. `army-of-the-dead` raises every eligible corpse on the field at once ' +
       'and is priced accordingly.',
     spriteBorrow: {
-      from: '1110_Dark_Knight_Male_hd / 1112_Dark_Knight_Female_hd (ghoul: 1078_Skeleton_hd)',
+      from: '1048_Samurai_Male_hd / 1050_Samurai_Female_hd (ghoul: 1078_Skeleton_hd)',
       recolour:
         'Frost palette: desaturated steel-blue plate, rime-white edge highlights, cyan pinpoint ' +
-        'eyes in the helm slit. This is the same base sheet as the Shadowknight and the FFT ' +
-        'Dark Knight — three jobs distinguished entirely by palette, which is exactly what the ' +
-        'GPU palette-LUT pipeline is for. Add frost fume to the idle cells; the shoulder shape ' +
-        'is already correct.',
+        'eyes under the helm. The Samurai\'s oversized pauldrons and skirted tassets already read ' +
+        'as a heavy dead thing; drop the topknot from the head cells, square off the helm, and ' +
+        'add frost fume to the idle cells. Katana cells repaint to a two-handed greatsword. ' +
+        '(Was 1110/1112 Dark Knight, which is a broken rip: 18-pixel noise, no artwork.)',
     },
   },
   {
@@ -376,7 +379,7 @@ export const WOW_MECHANICS: readonly JobMechanics[] = [
       },
     ],
     stances: [],
-    keyAbilities: ['corruption', 'immolate', 'curse-of-agony', 'drain-soul', 'summon-felguard'],
+    keyAbilities: ['corruption', 'immolation', 'agony', 'drain-soul', 'summon-felguard'],
     notes:
       'Damage-over-time stacking is the whole job. Corruption (shadow), Immolate (fire) and ' +
       'Curse of Agony (dark) occupy three separate channels and coexist on one target; the ' +
@@ -418,7 +421,7 @@ export const WOW_MECHANICS: readonly JobMechanics[] = [
         id: 'dire-bear',
         name: 'Dire Bear Form',
         sprite: { male: '1090_Minotaur_hd', female: '1090_Minotaur_hd' },
-        actionSet: 'bear-form',
+        actionSet: 'wild-shape',
         mult: { hp: 45, pa: 15, ma: -50, spd: -10 },
         move: 3,
         jump: 3,
@@ -432,7 +435,7 @@ export const WOW_MECHANICS: readonly JobMechanics[] = [
         id: 'feral-cat',
         name: 'Feral Cat Form',
         sprite: { male: '1137_Coeurl_2_hd', female: '1137_Coeurl_2_hd' },
-        actionSet: 'cat-form',
+        actionSet: 'wild-shape',
         mult: { hp: -15, pa: 25, ma: -50, spd: 15 },
         move: 5,
         jump: 5,
@@ -484,7 +487,7 @@ export const WOW_MECHANICS: readonly JobMechanics[] = [
     pets: [],
     stances: [],
     threat: { generated: 1.4, hasTaunt: false, perDamage: 1.0, perHeal: 0.6 },
-    keyAbilities: ['devotion-aura', 'seal-of-righteousness', 'judgement', 'lay-on-hands'],
+    keyAbilities: ['devotion-aura', 'seal-of-righteousness', 'divine-judgement', 'lay-on-hands'],
     notes:
       'Exactly one aura is active at a time; it is a persistent radius-3 effect centred on the ' +
       'Paladin, recomputed on move, and it stacks with Troubador anthems and Bard songs because ' +
@@ -524,7 +527,7 @@ export const WOW_MECHANICS: readonly JobMechanics[] = [
     pets: [],
     stances: [],
     threat: { generated: 0.5, hasTaunt: false, perDamage: 1.0, perHeal: 0.0 },
-    keyAbilities: ['stealth', 'ambush', 'sinister-strike', 'eviscerate', 'vanish-rogue'],
+    keyAbilities: ['stealth', 'ambush', 'sinister-strike', 'eviscerate', 'vanish'],
     notes:
       'Stealth is a board state the targeting layer must respect: while the `stealth` status is ' +
       'held the unit is excluded from enemy ability target lists and from AI target selection ' +

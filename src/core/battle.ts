@@ -53,7 +53,7 @@ import {
 } from './ct';
 
 import { restoreRng } from './rng';
-import { deriveStats, gainExp, gainJp, getAbility, getItem } from './unit';
+import { deriveStats, effectiveRange, gainExp, gainJp, getAbility, getItem } from './unit';
 
 import {
   areHostile,
@@ -808,17 +808,21 @@ function checkTargetLegality(state: BattleState, actor: Unit, ability: Ability, 
   if (!tile) fail(`act: target tile (${target.x},${target.y}) is off the map`);
   const resolved: Vec3 = { x: target.x, y: target.y, z: tile.height };
 
-  if (ability.range.self) {
+  // The generic Attack reaches as far as the equipped weapon, not as far as the
+  // ability record says; everything else uses its declared range unchanged.
+  const range = effectiveRange(actor, ability);
+
+  if (range.self) {
     if (!sameTile(resolved, actor.pos)) fail(`act: ${ability.name} can only be aimed at the caster`);
     return resolved;
   }
 
   const facing = sameTile(actor.pos, resolved) ? actor.facing : facingBetween(actor.pos, resolved);
-  if (!isInRange(state.field, actor.pos, resolved, ability.range, { facing })) {
+  if (!isInRange(state.field, actor.pos, resolved, range, { facing })) {
     fail(`act: (${target.x},${target.y}) is out of range for ${ability.name}`);
   }
 
-  if (!ability.targetsTiles && ability.range.radius === 0 && !livingUnitAt(state, resolved.x, resolved.y)) {
+  if (!ability.targetsTiles && range.radius === 0 && !livingUnitAt(state, resolved.x, resolved.y)) {
     fail(`act: ${ability.name} needs a unit on the target tile`);
   }
   return resolved;

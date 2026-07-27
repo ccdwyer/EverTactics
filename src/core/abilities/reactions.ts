@@ -65,6 +65,7 @@ const REACTION_META_LIST: readonly ReactionMeta[] = [
   { ability: 'last-word', trigger: 'ko' },
   { ability: 'thorned-hide', trigger: 'physical-hit' },
   { ability: 'shadow-recoil', trigger: 'any-hit' },
+  { ability: 'counter-flood', trigger: 'physical-hit' },
 ];
 
 export const REACTION_TRIGGERS: ReadonlyMap<AbilityId, ReactionMeta> = new Map(
@@ -147,6 +148,9 @@ const SPECS: readonly AbilitySpec[] = [
   { id: 'shadow-recoil', name: 'Shadow Recoil', description: 'Slip a step out of the world when hit, reappearing behind your attacker.',
     range: SELF, formula: 'move', power: 2, accuracy: 55, vfx: 'react/shadow-recoil', castAnim: 'run',
     inflicts: [inf('stealth', 100, SHORT)] },
+  { id: 'counter-flood', name: 'Counter Flood', description: 'The ground answers on your behalf. Anyone who strikes you takes the geomancy of whatever tile you are standing on.',
+    range: R(3, 1, { vertical: 3 }), formula: 'magical', power: 18, accuracy: 70,
+    vfx: 'react/counter-flood', castAnim: 'cast' },
 ];
 
 /** Adjacent-tile range for counter-flavoured reactions. */

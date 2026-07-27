@@ -486,11 +486,22 @@ function canvasTexture(canvas: HTMLCanvasElement, srgb = true): THREE.CanvasText
   return texture;
 }
 
+/** How far the contact decal floats above the tile surface, in world units. */
+const CONTACT_SHADOW_LIFT = 0.01;
+
 /**
- * Contact darkening. A cast shadow alone leaves a visible gap at the feet at
- * grazing light angles; this small, very tight multiply blob is what actually
- * glues the unit to the tile. It is *not* a substitute for the shadow map — both
- * are used together.
+ * Contact darkening — ambient occlusion in the crack where the feet meet the
+ * tile, not a fake shadow.
+ *
+ * The cast shadow (real, from the shadow map, in the key light's direction) does
+ * the directional work. What it cannot do is close the hairline of unoccluded
+ * ground *directly under* the figure at grazing light angles, and that hairline
+ * is precisely what makes a billboard look like it is hovering a texel above the
+ * floor. So this stays tight and centred: a hard core inside roughly a third of
+ * the tile, a fast falloff, nothing wide enough to read as an ellipse decal.
+ *
+ * It multiplies, and it is cooled slightly toward blue because occluded ground
+ * in both reference games picks up the sky rather than going neutral grey.
  */
 let contactShadowTexture: THREE.CanvasTexture | null = null;
 function getContactShadowTexture(): THREE.CanvasTexture {
@@ -503,21 +514,29 @@ function getContactShadowTexture(): THREE.CanvasTexture {
     for (let x = 0; x < size; x++) {
       // Slightly elliptical: a standing figure's contact patch is wider than deep.
       const dx = (x - half + 0.5) / half;
-      const dy = ((y - half + 0.5) / half) * 1.25;
+      const dy = ((y - half + 0.5) / half) * 1.2;
       const r = Math.min(1, Math.hypot(dx, dy));
-      // Tight core, quick falloff — a wide soft blob reads as a decal.
-      const occlusion = Math.pow(1 - r, 2.1);
-      const value = Math.round(255 * (1 - occlusion * 0.72));
+      // Flat core out to r≈0.34, then a quick smooth shoulder. A single pow()
+      // falloff from the centre reads as an airbrushed blob; a plateau plus a
+      // shoulder reads as occlusion.
+      const core = 1 - smoothstep(0.3, 0.86, r);
+      const occlusion = core * core;
+      const value = Math.round(255 * (1 - occlusion * 0.88));
       const o = (y * size + x) * 4;
       image.data[o] = value;
-      image.data[o + 1] = Math.round(value * 0.985);
-      image.data[o + 2] = Math.round(value * 0.96); // cool the shadow slightly
+      image.data[o + 1] = Math.round(value * 0.99);
+      image.data[o + 2] = Math.round(Math.min(255, value * 1.04 + 4)); // cool it
       image.data[o + 3] = 255;
     }
   }
   ctx.putImageData(image, 0, 0);
   contactShadowTexture = canvasTexture(canvas);
   return contactShadowTexture;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 }
 
 /** Selection ring: a notched annulus that reads at any zoom. */
@@ -1330,7 +1349,7 @@ export class UnitSprite {
     this.animator = new SpriteAnimator(sheet.animations);
 
     if (this.options.contactShadow) {
-      const size = TILE_SIZE * 0.95;
+      const size = TILE_SIZE * 0.86;
       const geometry = new THREE.PlaneGeometry(size, size);
       geometry.rotateX(-Math.PI / 2);
       const material = new THREE.MeshBasicMaterial({
@@ -1441,9 +1460,41 @@ export class UnitSprite {
     );
   }
 
+  /**
+   * Point the impostor shading and the warm rim at the scene's key light.
+   *
+   * The cool counter-rim is derived rather than passed: the lighting rig always
+   * places its back light at roughly `keyAzimuth + 150°` and a shallower
+   * elevation, so mirroring the key through the vertical axis and flattening it
+   * lands within a few degrees of the real fill without adding a second call
+   * every caller would have to remember to make.
+   */
   setKeyLight(direction: THREE.Vector3, rimColor?: THREE.ColorRepresentation): void {
-    this.bundle.uniforms.uKeyLightDir.value.copy(direction).normalize();
+    const key = this.bundle.uniforms.uKeyLightDir.value.copy(direction).normalize();
+    this.bundle.uniforms.uFillLightDir.value
+      .set(-key.x, -Math.abs(key.y) * 0.5, -key.z)
+      .normalize();
     if (rimColor !== undefined) this.bundle.uniforms.uRimColor.value.set(rimColor);
+  }
+
+  /**
+   * The rest of the scene's tone: the light a shadowed unit still receives, the
+   * colour the ground bounces up into its legs, and the cool back rim.
+   * Defaults suit a cool-shadow dawn map; a night or lava map should override.
+   */
+  setSceneTone(tone: {
+    ambientFloor?: THREE.ColorRepresentation;
+    bounceColor?: THREE.ColorRepresentation;
+    bounceStrength?: number;
+    backRimColor?: THREE.ColorRepresentation;
+    backRimStrength?: number;
+  }): void {
+    const u = this.bundle.uniforms;
+    if (tone.ambientFloor !== undefined) u.uAmbientFloor.value.set(tone.ambientFloor);
+    if (tone.bounceColor !== undefined) u.uBounceColor.value.set(tone.bounceColor);
+    if (tone.bounceStrength !== undefined) u.uBounceStrength.value = tone.bounceStrength;
+    if (tone.backRimColor !== undefined) u.uBackRimColor.value.set(tone.backRimColor);
+    if (tone.backRimStrength !== undefined) u.uBackRimStrength.value = tone.backRimStrength;
   }
 
   setLightInfluence(value: number): void {
@@ -1725,10 +1776,14 @@ export class UnitSprite {
 
     // 5 — world placement, then the view-space pixel snap.
     const camera = view.camera;
+    // `terrain.ts` centres tile (x, y) on world (x, y) — the top face spans
+    // ±TILE_SIZE/2 about the integer coordinate. Anchoring at (x + 0.5) put every
+    // unit on the corner where four tiles meet, which is why nothing looked
+    // planted. Anchor on the tile centre, exactly like `tileWorldPosition`.
     const world = this.scratchWorld.set(
-      (this.cell.x + 0.5) * TILE_SIZE,
+      this.cell.x * TILE_SIZE,
       this.groundY(),
-      (this.cell.y + 0.5) * TILE_SIZE,
+      this.cell.y * TILE_SIZE,
     );
 
     const viewPos = this.scratchView.copy(world).applyMatrix4(camera.matrixWorldInverse);
@@ -1754,18 +1809,23 @@ export class UnitSprite {
     // 6 — ground decals live in world space at the tile surface. `object` is a
     //     plain world-space container: everything under it is positioned in world
     //     coordinates, so the layer group must stay at the origin.
-    const groundX = (this.cell.x + 0.5) * TILE_SIZE;
-    const groundZ = (this.cell.y + 0.5) * TILE_SIZE;
+    const groundX = this.cell.x * TILE_SIZE;
+    const groundZ = this.cell.y * TILE_SIZE;
+
+    // Height of the feet above the tile they are over. Zero while standing;
+    // positive over the top of a hop. Both the contact patch and the in-art foot
+    // occlusion fade out with it, so nothing stays welded to a unit in mid-air.
+    const walkSample = this.walker?.current;
+    const shadowY = (walkSample?.groundZ ?? this.cell.z) * HEIGHT_UNIT;
+    const lift = Math.max(0, this.cell.z * HEIGHT_UNIT - shadowY);
+    this.bundle.uniforms.uGrounded.value = 1 / (1 + lift * 6);
 
     if (this.contactShadow) {
       // During a hop the sprite arcs above the tile, but its contact patch has to
       // stay on the surface and shrink — a blob that flies with the unit is the
       // classic "sticker on the screen" giveaway.
-      const walk = this.walker?.current;
-      const shadowY = (walk?.groundZ ?? this.cell.z) * HEIGHT_UNIT;
-      const lift = Math.max(0, this.cell.z * HEIGHT_UNIT - shadowY);
       const shrink = 1 / (1 + lift * 1.4);
-      this.contactShadow.position.set(groundX, shadowY + 0.012, groundZ);
+      this.contactShadow.position.set(groundX, shadowY + CONTACT_SHADOW_LIFT, groundZ);
       this.contactShadow.scale.setScalar(shrink);
       this.contactShadow.material.opacity = this.ko ? 0.5 : 1;
       this.contactShadow.visible = this.crystalPhase < 0;
@@ -1904,6 +1964,7 @@ export class SpriteLayer {
   private readonly options: SpriteLayerOptions;
   private readonly keyLight = new THREE.Vector3(-0.5, -1, -0.35).normalize();
   private rimColor: THREE.ColorRepresentation = 0xffe6b8;
+  private tone: Parameters<UnitSprite['setSceneTone']>[0] = {};
 
   constructor(options: SpriteLayerOptions = {}) {
     this.options = options;
@@ -1951,6 +2012,7 @@ export class SpriteLayer {
     const sprite = new UnitSprite(unit.id, sheet, this.options.sprite);
     sprite.setFromUnit(unit);
     sprite.setKeyLight(this.keyLight, this.rimColor);
+    sprite.setSceneTone(this.tone);
     this.sprites.set(unit.id, sprite);
     this.group.add(sprite.object);
     return sprite;
@@ -1979,6 +2041,12 @@ export class SpriteLayer {
     this.keyLight.copy(direction).normalize();
     if (rimColor !== undefined) this.rimColor = rimColor;
     for (const sprite of this.sprites.values()) sprite.setKeyLight(this.keyLight, this.rimColor);
+  }
+
+  /** Scene tone (shadow floor, ground bounce, cool back rim) for every unit. */
+  setSceneTone(tone: Parameters<UnitSprite['setSceneTone']>[0]): void {
+    this.tone = { ...this.tone, ...tone };
+    for (const sprite of this.sprites.values()) sprite.setSceneTone(this.tone);
   }
 
   update(dt: number, view: SpriteViewContext): void {

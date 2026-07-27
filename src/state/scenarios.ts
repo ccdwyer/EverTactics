@@ -64,6 +64,11 @@ export interface ScenarioCamera {
   focusTile?: { x: number; y: number; z: number };
   /** Downward tilt in degrees. */
   pitchDegrees?: number;
+  /**
+   * Honour the contain-fit even when it puts characters below the camera's
+   * composition floor, so the whole diorama is in shot. For overview scenarios.
+   */
+  fitWholeField?: boolean;
 }
 
 export interface UnitPlacement {
@@ -332,7 +337,7 @@ const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
   {
     id: 'p-aldric', name: 'Aldric', job: 'knight', gender: 'male', team: 'player',
     level: 14, zodiac: 'leo', brave: 72, faith: 58,
-    at: { x: 6, y: 10 }, facing: 'N', equipment: KNIGHT_KIT,
+    at: { x: 7, y: 9 }, facing: 'N', equipment: KNIGHT_KIT,
     secondary: 'squire', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
     ct: 82,
   },
@@ -444,11 +449,11 @@ const BATTLE_OPEN: Scenario = {
   layers: { terrain: true, sprites: true, ui: true, post: true, highlights: true },
   // 40 degrees rather than the 30-degree default: a walled cloister seen from
   // 30 shows mostly its own outer wall. This looks down into the garden.
-  camera: { yawIndex: 0, frameField: true, pitchDegrees: 40 },
+  camera: { yawIndex: 0, frameField: true, fitWholeField: true, pitchDegrees: 40 },
   // The reference games are clean. A tactics board has to stay readable across
   // the whole frame, so the tilt-shift band is a hint of miniature depth rather
   // than the wall of blur the stack defaults to.
-  post: { exposure: 1.55, dof: 0.3, ao: 0.85, bloom: 1.0, vignette: 0.7 },
+  post: { exposure: 1.0, dof: 0.35, vignette: 0.8 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,
@@ -465,7 +470,6 @@ const TERRAIN_ONLY: Scenario = {
   name: 'Orbonne Monastery — terrain only',
   blurb: 'The diorama with no units, no UI and no overlays. For judging geometry and light.',
   layers: { terrain: true, sprites: false, ui: false, post: true, highlights: false },
-  camera: { yawIndex: 0, frameField: true, focusTile: { x: 6, y: 6, z: 3 } },
   openCommandMenu: false,
   units: [],
 };

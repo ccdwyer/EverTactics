@@ -23,12 +23,14 @@
 import * as THREE from 'three';
 
 import { SPRITE_LAYER, installPostStack, markAsSprite, type PostStackPipeline } from './render';
-import { ALL_ABILITIES, ALL_ITEMS, bootstrapContent } from './content';
+import { ALL_ABILITIES, bootstrapContent } from './content';
 import { actionSetOf } from './abilityIndex';
+import { canAimAt, coveredTiles, legalTargets, primaryTargetAt } from './targeting';
 import {
   abilityById,
-  commandItemsFor,
   abilityItemsFor,
+  commandItemsFor,
+  portraitFor,
   targetPreviewVM,
   turnOrderVM,
   unitVM,
@@ -46,6 +48,7 @@ import { decideTurn } from '@core/ai';
 import { IllegalCommandError, advance, affectedTiles, applyCommand } from '@core/battle';
 import {
   buildOccupancy,
+  facingBetween,
   isInRange,
   pathTo,
   reachableDestinations,
@@ -53,13 +56,14 @@ import {
   tilesInBurst,
 } from '@core/grid';
 import { getJob } from '@core/jobs';
-import { isKO } from '@core/unit';
+import { deriveStats, effectiveRange, isKO, jobProgress } from '@core/unit';
 import type {
   Ability,
   BattleEvent,
   BattleState,
   Command,
   Unit,
+  UnitId,
   Vec3,
 } from '@core/types';
 
@@ -70,7 +74,7 @@ import { Stage } from '@render/stage';
 import { Terrain, buildTerrain, tileWorldPosition } from '@render/terrain';
 import { VFX_KEYS, VfxSystem } from '@render/vfx';
 import { UIRoot } from '@ui/UIRoot';
-import type { FloatTextVM, UIIntent } from '@ui/types';
+import type { FloatTextVM, ResultUnitVM, UIIntent } from '@ui/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Interaction state
@@ -150,6 +154,7 @@ export class Game {
     this.built = buildScenario(this.scenario);
     this.state = this.built.state;
     this.shot = options.shot ?? false;
+    this.snapshotProgress();
 
     const stageOptions: ConstructorParameters<typeof Stage>[0] = {
       autoStart: false,
@@ -244,20 +249,32 @@ export class Game {
     const profile = this.scenario.post ?? {};
     stack.settings.exposure = (profile.exposure ?? 1) * this.lighting.current.exposure;
 
+    // `post.ts` derives its defocus shape from a measured reference rubric
+    // (`REFERENCE_FLOOR`). A scenario should be able to say "less of that" without
+    // replacing the shape, so every term scales from whatever the stack chose —
+    // otherwise a tuning pass in post.ts silently stops applying here.
     const dof = profile.dof ?? 1;
     if (dof <= 0) {
       stack.setEffectEnabled('dof', false);
-    } else {
-      stack.settings.dof.intensity = dof;
-      // Widen the sharp band as the effect is dialled down, so the readable
-      // part of the board grows rather than the blur simply getting softer.
-      stack.settings.dof.tiltBand = 0.12 + (1 - Math.min(1, dof)) * 0.2;
-      stack.settings.dof.tiltFalloff = 0.3 + (1 - Math.min(1, dof)) * 0.18;
-      stack.settings.dof.maxCoCPixels = 14 * Math.min(1, dof) + 4;
+    } else if (dof !== 1) {
+      const d = stack.settings.dof;
+      d.intensity *= dof;
+      d.maxCoCPixels *= dof;
+      d.tiltRadial *= dof;
+      // A weaker blur wants a wider sharp band, or the picture just goes soft
+      // everywhere instead of having a subject.
+      d.tiltBand = Math.min(0.5, d.tiltBand / dof);
+      d.tiltFalloff = Math.min(0.6, d.tiltFalloff / Math.sqrt(dof));
     }
-    if (profile.ao !== undefined) stack.setEffectIntensity('ao', profile.ao);
-    if (profile.bloom !== undefined) stack.setEffectIntensity('bloom', profile.bloom * 0.055);
-    if (profile.vignette !== undefined) stack.setEffectIntensity('vignette', profile.vignette * 0.26);
+    if (profile.ao !== undefined) {
+      stack.setEffectIntensity('ao', stack.getEffectIntensity('ao') * profile.ao);
+    }
+    if (profile.bloom !== undefined) {
+      stack.setEffectIntensity('bloom', stack.getEffectIntensity('bloom') * profile.bloom);
+    }
+    if (profile.vignette !== undefined) {
+      stack.setEffectIntensity('vignette', stack.getEffectIntensity('vignette') * profile.vignette);
+    }
   }
 
   /**
@@ -341,7 +358,11 @@ export class Game {
 
   private frameCamera(): void {
     const cam = this.scenario.camera;
-    if (cam.frameField) this.camera.frameField(this.state.field, 4);
+    if (cam.frameField) {
+      this.camera.frameField(this.state.field, 4, {
+        ...(cam.fitWholeField === true ? { fitWholeField: true } : {}),
+      });
+    }
     if (cam.pixelScale !== undefined) void this.camera.setPixelScale(cam.pixelScale, true);
     if (cam.focusTile) this.camera.focusTile(cam.focusTile, { immediate: true });
   }
@@ -352,6 +373,10 @@ export class Game {
         if (this.disposed) return;
         // Hit-stop scales everything downstream, so take the VFX system's dt.
         const scaled = this.vfx.update(dt, this.camera.camera);
+        // The rig drives preset cross-fades and its flickering practicals; with
+        // nothing calling it, torches render as static blobs and a mood change
+        // never completes.
+        this.lighting.update(scaled);
         this.sprites.update(scaled, this.camera);
         this.terrain?.update(scaled);
         // Water refraction and contact foam need the scene captured *before*
@@ -374,7 +399,9 @@ export class Game {
   // ───────────────────────────────────────────────────────────────────────────
 
   private async openingSequence(): Promise<void> {
-    if (this.scenario.banner && this.scenario.layers.ui) {
+    // A screenshot should show the steady state, not a title card that happens
+    // to still be fading. `?banner=1` forces it back on for a hero shot.
+    if (this.scenario.banner && this.scenario.layers.ui && !this.shot) {
       this.ui.banner(this.scenario.banner.title, {
         ...(this.scenario.banner.subtitle !== undefined
           ? { subtitle: this.scenario.banner.subtitle }
@@ -409,10 +436,16 @@ export class Game {
     const active = this.activeUnit();
     if (!active) return;
 
-    // A scenario that asked for the whole board framed keeps the whole board
-    // framed; only a free camera chases the active unit.
-    if (this.scenario.camera.frameField) this.frameCamera();
-    else this.camera.focusTile(active.pos, { immediate: this.shot });
+    // `frameField` chooses the zoom and centres the board. When the composition
+    // floor crops that board (the normal case) the focus has to move onto the
+    // acting unit, or the subject ends up off-frame or under a HUD panel; when
+    // the scenario asked for the whole field in shot, the board centre is the
+    // subject and moving off it just puts dead space on one side.
+    if (this.scenario.camera.focusTile) {
+      this.camera.focusTile(this.scenario.camera.focusTile, { immediate: this.shot });
+    } else if (!this.scenario.camera.fitWholeField) {
+      this.camera.focusTile(active.pos, { immediate: this.shot });
+    }
 
     if (active.team === 'player' && this.scenario.openCommandMenu) {
       this.enterCommandMode(active);
@@ -513,15 +546,73 @@ export class Game {
     return true;
   }
 
+  private battleOver = false;
+
   private onBattleOver(): void {
+    if (this.battleOver) return;
+    this.battleOver = true;
+
     const victory = this.state.phase === 'victory';
     this.setMode({ kind: 'idle' });
     this.ui.closeMenus();
     this.ui.banner(victory ? 'Victory' : 'Defeat', {
       subtitle: victory ? 'The field is yours.' : 'The company is broken.',
       tone: victory ? 'victory' : 'defeat',
-      duration: 4000,
+      duration: 3200,
     });
+    if (!this.scenario.layers.ui) return;
+
+    // The result screen counts up from the snapshot taken at deploy, so the
+    // numbers on it are the real JP and EXP the reducer awarded during play.
+    const units: ResultUnitVM[] = [];
+    for (const [id, before] of this.progressSnapshot) {
+      const unit = this.state.units.get(id);
+      if (!unit || unit.team !== 'player') continue;
+      const after = jobProgress(unit, unit.currentJob);
+      units.push({
+        unitId: unit.id,
+        name: unit.name,
+        portrait: portraitFor(unit),
+        job: getJob(unit.currentJob).name,
+        expGained: Math.max(0, unit.exp + (unit.level - before.level) * 100 - before.exp),
+        jpGained: Math.max(0, after.totalJp - before.totalJp),
+        levelBefore: before.level,
+        levelAfter: unit.level,
+        jobLevelBefore: before.jobLevel,
+        jobLevelAfter: after.level,
+        ...(isKO(unit) || unit.removed ? { incapacitated: true } : {}),
+      });
+    }
+
+    window.setTimeout(() => {
+      if (this.disposed) return;
+      this.ui.showResult({
+        outcome: victory ? 'victory' : 'defeat',
+        title: victory ? 'Victory' : 'Defeat',
+        subtitle: this.scenario.name,
+        units,
+        turns: Math.max(1, Math.round(this.state.tick / 100)),
+        ...(victory ? { gil: 600 + units.length * 90 } : {}),
+      });
+    }, 1400);
+  }
+
+  /** Level / EXP / JP at deploy, so the result screen can show real deltas. */
+  private readonly progressSnapshot = new Map<
+    UnitId,
+    { level: number; exp: number; jobLevel: number; totalJp: number }
+  >();
+
+  private snapshotProgress(): void {
+    for (const unit of this.state.units.values()) {
+      const progress = jobProgress(unit, unit.currentJob);
+      this.progressSnapshot.set(unit.id, {
+        level: unit.level,
+        exp: unit.exp,
+        jobLevel: progress.level,
+        totalJp: progress.totalJp,
+      });
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -726,17 +817,9 @@ export class Game {
   }
 
   private enterTargetMode(unit: Unit, ability: Ability): void {
-    const legal = new Set<string>();
-    const tiles: Vec3[] = [];
-    for (const tile of this.state.field.tiles) {
-      if (tile.surface === 'void') continue;
-      const point: Vec3 = { x: tile.x, y: tile.y, z: tile.height };
-      if (!isInRange(this.state.field, unit.pos, point, ability.range, { facing: unit.facing })) {
-        continue;
-      }
-      legal.add(tileKey(tile.x, tile.y));
-      tiles.push(point);
-    }
+    // `state/targeting.ts` owns the rule, because the UI, the reducer and the AI
+    // all have to agree on it — see the note at the top of that file.
+    const { tiles, keys: legal } = legalTargets(this.state, unit, ability);
     this.setMode({ kind: 'target', ability, legal });
     this.ui.hideAbilityMenu();
     this.ui.hideCommandMenu();
@@ -783,6 +866,12 @@ export class Game {
         break;
       }
 
+      case 'result-dismiss':
+      case 'close-screen': {
+        this.ui.closeScreen();
+        break;
+      }
+
       case 'inspect-unit': {
         const unit = this.state.units.get(intent.unitId);
         if (!unit) break;
@@ -806,7 +895,7 @@ export class Game {
     }
     if (id === 'attack') {
       const attack = abilityById('attack');
-      if (attack) this.enterTargetMode(unit, this.rangedAttack(unit, attack));
+      if (attack) this.enterTargetMode(unit, attack);
       return;
     }
     if (id === 'wait') {
@@ -822,17 +911,15 @@ export class Game {
     if (setId !== null) {
       const items = abilityItemsFor(this.state, unit, setId);
       if (items.length === 0) return;
-      this.ui.showAbilityMenu(items, { title: labelForSet(unit, setId) });
+      const stats = deriveStats(unit);
+      this.ui.showAbilityMenu(items, {
+        title: labelForSet(unit, setId),
+        mp: stats.mp,
+        maxMp: stats.maxMp,
+      });
     }
   }
 
-  /** Attack inherits the equipped weapon's reach — a bow hits at five tiles. */
-  private rangedAttack(unit: Unit, attack: Ability): Ability {
-    const weapon = unit.equipment.rightHand ?? unit.equipment.leftHand;
-    const reach = weapon !== undefined ? weaponReach(unit) : 1;
-    if (reach <= attack.range.range) return attack;
-    return { ...attack, range: { ...attack.range, range: reach, los: true } };
-  }
 
   private onCancel(): void {
     const unit = this.activeUnit();
@@ -929,9 +1016,9 @@ export class Game {
     }
 
     if (this.scenario.layers.highlights) {
-      this.terrain?.setHighlight('aoe', affectedTiles(this.state, unit, ability, tile));
+      this.terrain?.setHighlight('aoe', coveredTiles(this.state, unit, ability, tile));
     }
-    const victim = this.unitAt(tile) ?? this.firstUnitIn(unit, ability, tile);
+    const victim = primaryTargetAt(this.state, unit, ability, tile);
     this.ui.setTargetPreview(
       victim ? targetPreviewVM(this.state, unit, ability, victim) : null,
     );
@@ -954,10 +1041,9 @@ export class Game {
     }
 
     if (this.mode.kind === 'target' && unit) {
-      if (!this.mode.legal.has(tileKey(tile.x, tile.y))) return;
       const ability = this.mode.ability;
-      const victim = this.unitAt(tile);
-      if (ability.range.radius === 0 && !ability.targetsTiles && !victim) return;
+      if (!canAimAt(this.state, unit, ability, tile)) return;
+      const victim = primaryTargetAt(this.state, unit, ability, tile);
       this.setMode({ kind: 'idle' });
       this.ui.closeMenus();
       const ok = await this.submit({
@@ -982,9 +1068,16 @@ export class Game {
   // ───────────────────────────────────────────────────────────────────────────
 
   refreshHud(): void {
+    const active = this.activeUnit();
+    // The turn marker and selection ring belong to whoever holds the turn,
+    // including an AI unit the player never opens a menu for.
+    for (const sprite of this.sprites.all) {
+      const isActive = active !== undefined && sprite.unitId === active.id;
+      sprite.setTurnMarker(isActive);
+      sprite.setSelection(isActive ? (active.team === 'player' ? 'active' : 'hostile') : 'none');
+    }
     if (!this.scenario.layers.ui) return;
     this.ui.setTurnOrder(turnOrderVM(this.state));
-    const active = this.activeUnit();
     this.ui.setActiveUnit(active ? unitVM(this.state, active) : null);
   }
 
@@ -1136,15 +1229,6 @@ function isBeneficial(ability: Ability): boolean {
   );
 }
 
-function weaponReach(unit: Unit): number {
-  let reach = 1;
-  for (const id of [unit.equipment.rightHand, unit.equipment.leftHand]) {
-    if (id === undefined) continue;
-    const item = ALL_ITEMS.get(id);
-    if (item?.range !== undefined && item.range > reach) reach = item.range;
-  }
-  return reach;
-}
 
 function labelForSet(unit: Unit, setId: string): string {
   const job = getJob(unit.currentJob);
