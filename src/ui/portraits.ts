@@ -320,13 +320,29 @@ export function portrait(file: string | undefined, opts: PortraitOptions = {}): 
   const size = opts.size ?? 'md';
   const w = SIZES[size];
   const wrap = div(`et-portrait et-portrait--${size}${opts.className ? ` ${opts.className}` : ''}`);
-  const frameH = opts.head ? Math.round((w * 5) / 6) : Math.round((w * 3) / 2);
+
+  // A head crop takes the TOP OF THE FULL PORTRAIT, not the atlas `heads` cells.
+  //
+  // Two traps here, both hit in turn:
+  //  1. Drawing `full` (128x192) into a frame shortened to w*5/6 shows only the
+  //     top of a much taller image — hair and forehead, face below the window.
+  //     That is the "you just see the top of their heads" rail bug.
+  //  2. The atlas `heads` cells look like the fix and are not. They are upper-
+  //     face plates cut off at the chin, used by FFT's expression compositor
+  //     together with the separate mouth cells further down the sheet. Rendering
+  //     one alone gives a face with no jaw.
+  //
+  // So: same cell, cropped to a near-square that ends just below the chin, and
+  // the frame derived from that crop so the two cannot drift apart.
+  const HEAD_CROP_H = 132;
+  const full = PORTRAIT_ATLAS.full;
+  const cell = opts.head ? { ...full, h: Math.min(HEAD_CROP_H, full.h) } : full;
+  const frameH = Math.round((w * cell.h) / cell.w);
   wrap.style.width = `${w}px`;
   wrap.style.height = `${frameH}px`;
 
   const img = div('et-portrait__img');
   if (file) {
-    const cell = PORTRAIT_ATLAS.full;
     // Scale so the 128px-wide crop exactly fills the frame width.
     const scale = w / cell.w;
     img.style.backgroundImage = `url("${portraitUrl(file)}")`;
