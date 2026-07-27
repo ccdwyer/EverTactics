@@ -334,7 +334,18 @@ export function portrait(file: string | undefined, opts: PortraitOptions = {}): 
   //
   // So: same cell, cropped to a near-square that ends just below the chin, and
   // the frame derived from that crop so the two cannot drift apart.
-  const HEAD_CROP_H = 132;
+  // Where to cut the head crop, measured off the atlas rather than guessed.
+  // Alpha-coverage profile of cell (391,1,128,192) in wldface_100_08: the run
+  // narrows monotonically from y=48 (118px wide) to a minimum of 62px at
+  // y=120-128 — that minimum IS the neck — and widens again from y=136 as the
+  // shoulders come in. So the chin sits at roughly y=138.
+  //
+  // Round 2 cut at 132, i.e. ABOVE the chin, which is why every face in the rail
+  // rendered clipped through the mouth — the critics' "cropped sprite heads at
+  // inconsistent crops and inconsistent eye-lines". 148 clears the jaw and takes
+  // ten pixels of collar with it, so the crop reads as a portrait bust rather
+  // than as a face with the bottom sliced off.
+  const HEAD_CROP_H = 156;
   const full = PORTRAIT_ATLAS.full;
   const cell = opts.head ? { ...full, h: Math.min(HEAD_CROP_H, full.h) } : full;
   const frameH = Math.round((w * cell.h) / cell.w);

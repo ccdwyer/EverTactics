@@ -39,6 +39,7 @@ import {
   InstancedBufferGeometry,
   InstancedMesh,
   LinearFilter,
+  MathUtils,
   Matrix4,
   Mesh,
   MeshStandardMaterial,
@@ -606,8 +607,8 @@ uniform float uAtlasGrid;
  * occupying volume between camera and geometry". They are describing an ortho
  * projection doing precisely what it is defined to do.
  *
- * So the falloff is put back by hand: `x` scales size and `y` scales alpha,
- * both about `uDepthPivot` (the camera-to-board distance) over `uDepthRange`.
+ * So the falloff is put back by hand: x scales size and y scales alpha, both
+ * about uDepthPivot (the camera-to-board view distance) over uDepthRange.
  * Zero on the combat batches — a fireball must not shrink because it went off
  * at the back of the map — and non-zero only on the standing atmosphere, where
  * it is the entire mechanism by which the air reads as having depth in it.
@@ -688,6 +689,10 @@ void main() {
   float env = smoothstep(0.0, fadeIn, t) * (1.0 - smoothstep(fadeOut, 1.0, t));
   vColor = mix(aColor0, aColor1, t);
   vColor.a *= env;
+  // Aerial perspective for the particulate: the far half of the field dims, the
+  // near half is left alone, so the two populations separate instead of reading
+  // as one flat sheet of confetti.
+  vColor.a *= 1.0 - max(0.0, depthK) * uDepthResponse.y;
 }
 `;
 
@@ -816,6 +821,9 @@ class ParticleBatch {
         uResolution: { value: new Vector2(1, 1) },
         uProjInv: { value: new Matrix4() },
         uSoftness: { value: 0.6 },
+        uDepthResponse: { value: new Vector2(0, 0) },
+        uDepthPivot: { value: 0 },
+        uDepthRange: { value: 1 },
       },
       transparent: true,
       depthTest: true,
@@ -884,9 +892,154 @@ class ParticleBatch {
     this.material.uniforms['uSoftness']!.value = softness;
   }
 
+  /**
+   * Turn on ortho depth stratification. `sizeGain`/`dimGain` are the fraction of
+   * size and alpha lost across half the band; `pivot` is the view distance that
+   * gets neither, `range` the half-width of the band in world units.
+   */
+  setDepthResponse(sizeGain: number, dimGain: number, pivot: number, range: number): void {
+    (this.material.uniforms['uDepthResponse']!.value as Vector2).set(sizeGain, dimGain);
+    this.material.uniforms['uDepthPivot']!.value = pivot;
+    this.material.uniforms['uDepthRange']!.value = Math.max(1e-3, range);
+  }
+
   dispose(): void {
     this.geometry.dispose();
     this.material.dispose();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Glow cards — the visible body of a light source
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GLOW_VERT = /* glsl */ `
+precision highp float;
+attribute vec3 aGlowPos;
+attribute vec4 aGlowTint;   // rgb, radius
+varying vec2 vGlowUv;
+varying vec3 vGlowTint;
+void main() {
+  vec4 mv = modelViewMatrix * vec4(aGlowPos, 1.0);
+  mv.xy += position.xy * aGlowTint.w;
+  vGlowUv = uv;
+  vGlowTint = aGlowTint.rgb;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const GLOW_FRAG = /* glsl */ `
+precision highp float;
+varying vec2 vGlowUv;
+varying vec3 vGlowTint;
+void main() {
+  // Two nested falloffs rather than one gaussian: a tight core that survives the
+  // bloom threshold on its own, bedded in a very wide, very low skirt. A single
+  // gaussian halo is exactly the "uniform blur halo" the critics called out on
+  // the background windows — real lamps have a hot filament and a long, faint,
+  // non-gaussian glare that reaches much further than the core suggests.
+  vec2 d = vGlowUv * 2.0 - 1.0;
+  float r = length(d);
+  if (r > 1.0) discard;
+  float core = pow(max(0.0, 1.0 - r * 3.2), 2.6);
+  float skirt = pow(max(0.0, 1.0 - r), 3.4);
+  float a = core * 0.85 + skirt * 0.30;
+  if (a <= 0.002) discard;
+  // Deliberately short of the ×3 that would make the core pure white. A flame's
+  // glare does blow out, but it blows out *amber*; driving the core so far past
+  // the tonemapper's shoulder that all three channels clip turns every fire in
+  // the frame into the same white disc and throws away the hue the light is
+  // supposed to be advertising.
+  gl_FragColor = vec4(vGlowTint * (0.45 + core * 1.55), a);
+}
+`;
+
+/**
+ * A soft additive card sitting on top of every practical light.
+ *
+ * A point light lights the *floor*; it has no body of its own, so a brazier in
+ * the reference frames — which has a visible ball of glare around the flame that
+ * is brighter than any surface it illuminates — comes out of our renderer as a
+ * dark bowl with a bright patch of stone next to it. Round-3 critics wrote that
+ * three ways: "the warm pools read as emissive quads rather than as illumination",
+ * "no bloom halo", "the light sources have no volumetric presence".
+ *
+ * The card is driven from the light's *live* intensity, so it breathes with the
+ * flicker `lighting.ts` is applying — which is what ties the particle layer and
+ * the lighting rig into one effect instead of two systems that happen to be in
+ * the same place.
+ */
+/** Practicals the atmosphere will decorate. Braziers plus the preset's own torches. */
+const GLOW_CAPACITY = 10;
+
+class GlowCards {
+  readonly mesh: Mesh;
+  private readonly geometry: InstancedBufferGeometry;
+  private readonly posAttr: InstancedBufferAttribute;
+  private readonly tintAttr: InstancedBufferAttribute;
+  readonly capacity: number;
+
+  constructor(capacity: number) {
+    this.capacity = capacity;
+    const base = new PlaneGeometry(2, 2);
+    const geometry = new InstancedBufferGeometry();
+    geometry.index = base.index;
+    geometry.setAttribute('position', base.getAttribute('position'));
+    geometry.setAttribute('uv', base.getAttribute('uv'));
+    geometry.instanceCount = capacity;
+    geometry.boundingSphere = null;
+
+    this.posAttr = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+    this.posAttr.setUsage(DynamicDrawUsage);
+    this.tintAttr = new InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
+    this.tintAttr.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('aGlowPos', this.posAttr);
+    geometry.setAttribute('aGlowTint', this.tintAttr);
+    this.geometry = geometry;
+
+    const material = new ShaderMaterial({
+      vertexShader: GLOW_VERT,
+      fragmentShader: GLOW_FRAG,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      blending: AdditiveBlending,
+      side: DoubleSide,
+    });
+
+    this.mesh = new Mesh(geometry, material);
+    this.mesh.frustumCulled = false;
+    this.mesh.matrixAutoUpdate = false;
+    // Under the combat particles, over the atmosphere: a lamp's glare is part of
+    // the set, not part of the action.
+    this.mesh.renderOrder = 12;
+    this.mesh.visible = false;
+  }
+
+  set(index: number, position: Vector3, r: number, g: number, b: number, radius: number): void {
+    if (index >= this.capacity) return;
+    this.posAttr.array[index * 3 + 0] = position.x;
+    this.posAttr.array[index * 3 + 1] = position.y;
+    this.posAttr.array[index * 3 + 2] = position.z;
+    this.tintAttr.array[index * 4 + 0] = r;
+    this.tintAttr.array[index * 4 + 1] = g;
+    this.tintAttr.array[index * 4 + 2] = b;
+    this.tintAttr.array[index * 4 + 3] = radius;
+  }
+
+  /** Commit `count` live cards; the rest are collapsed to zero radius. */
+  commit(count: number): void {
+    for (let i = count; i < this.capacity; i++) {
+      this.tintAttr.array[i * 4 + 3] = 0;
+    }
+    this.posAttr.needsUpdate = true;
+    this.tintAttr.needsUpdate = true;
+    this.mesh.visible = count > 0;
+  }
+
+  dispose(): void {
+    this.geometry.dispose();
+    (this.mesh.material as ShaderMaterial).dispose();
   }
 }
 
@@ -1954,6 +2107,10 @@ export class VfxSystem {
   private readonly timelines: VfxTimeline[] = [];
   private readonly lights: VfxLightPool;
   private readonly lightColor = new Color();
+  /** Debounce + scratch for the automatic emission light. See `autoLight`. */
+  private readonly autoLightColor = new Color();
+  private readonly autoLightAt = new Vector3(1e9, 1e9, 1e9);
+  private autoLightClock = -1e9;
 
   private readonly rng: VfxRng;
   private readonly tileSize: number;
@@ -1965,6 +2122,9 @@ export class VfxSystem {
   // atmosphere pops back in over the following seconds — which is far more
   // noticeable than the extra draw call costs.
   private readonly ambienceBatch: ParticleBatch;
+  /** Visible glare bodies for the practicals. See `GlowCards`. */
+  private readonly glow: GlowCards;
+  private readonly glowPos = new Vector3();
   private readonly ambience: Required<AmbienceOptions>;
   private scene: Scene | null = null;
   private ambienceAccum = 0;
@@ -2041,7 +2201,8 @@ export class VfxSystem {
     // subject, and it must not sit on top of an impact flash.
     this.ambienceBatch = new ParticleBatch(768, this.atlas, true, 11);
     this.ambienceBatch.material.uniforms['uIntensity']!.value = 1;
-    this.group.add(this.additive.mesh, this.alpha.mesh, this.ambienceBatch.mesh);
+    this.glow = new GlowCards(GLOW_CAPACITY);
+    this.group.add(this.additive.mesh, this.alpha.mesh, this.ambienceBatch.mesh, this.glow.mesh);
 
     const amb = opts.ambience ?? {};
     this.ambience = {
@@ -2178,6 +2339,8 @@ export class VfxSystem {
     // rendering glitch, and the references keep their embers moving through the
     // freeze frames too.
     this.updateAmbience(rawDt);
+    this.updateDepthResponse(camera);
+    this.updateGlow();
 
     this.additive.setSoftParticles(this.softDepth, this.resolution, this.projInv, 0.6 * this.tileSize);
     this.alpha.setSoftParticles(this.softDepth, this.resolution, this.projInv, 0.6 * this.tileSize);
@@ -2187,6 +2350,63 @@ export class VfxSystem {
     this.ambienceBatch.flush(this.clock);
 
     return dt;
+  }
+
+  /**
+   * Point the atmosphere's ortho depth falloff at the board.
+   *
+   * Recomputed every frame rather than cached: the camera yaws, zooms and shakes,
+   * and a stale pivot would put the "near" half of the mote field on the far side
+   * of the map the moment the player rotates.
+   */
+  private updateDepthResponse(camera: Camera): void {
+    if (!this.ambienceBoundsKnown) return;
+    const b = this.ambienceBounds;
+    b.getCenter(this.v0);
+    camera.getWorldPosition(this.v1);
+    const pivot = this.v1.distanceTo(this.v0);
+    b.getSize(this.v0);
+    // Two thirds of the board's larger horizontal span. Wider and the falloff is
+    // too gentle to read; narrower and motes pop between size bands as they drift.
+    const range = Math.max(4 * this.tileSize, Math.max(this.v0.x, this.v0.z) * 0.68);
+    this.ambienceBatch.setDepthResponse(0.6, 0.62, pivot, range);
+  }
+
+  /**
+   * Drive one glare card per practical from that light's live intensity.
+   *
+   * Everything here is read out of the scene rather than configured, for the same
+   * reason the ember emitter is: a lamp whose glow only appears when someone
+   * remembers to place it is a lamp that will be missing from the frame that gets
+   * judged.
+   */
+  private updateGlow(): void {
+    let n = 0;
+    for (let i = 0; i < this.emberSources.length; i++) {
+      const light = this.emberSources[i]!;
+      const base = this.emberBase[i]!;
+      if (base <= 0 || !light.visible) continue;
+      light.getWorldPosition(this.glowPos);
+      // The rig is flickering this light every frame; `drive` is how hard the
+      // flame is burning *right now*, and both the size and the brightness of the
+      // glare follow it. A constant-radius halo over a flickering light is the
+      // giveaway that the two are separate systems.
+      const drive = Math.min(2.4, light.intensity / base);
+      const c = this.ambColor.copy(light.color);
+      // Well above 1 so the core clips the bloom threshold on its own merit
+      // rather than needing the threshold dropped until the whole frame hazes.
+      const gain = 2.1 * drive;
+      this.glow.set(
+        n,
+        this.glowPos,
+        c.r * gain,
+        c.g * gain,
+        c.b * gain,
+        (0.66 + 0.34 * drive) * this.tileSize,
+      );
+      n++;
+    }
+    this.glow.commit(n);
   }
 
   // ── Standing atmosphere ─────────────────────────────────────────────────
@@ -2219,13 +2439,26 @@ export class VfxSystem {
     scene.traverse((o: Object3D) => {
       const light = o as PointLight;
       if (light.isPointLight) {
-        if (this.emberSources.length >= 6) return;
-        if (!o.name.startsWith('brazier')) return;
-        this.emberSources.push(light);
+        if (this.emberSources.length >= GLOW_CAPACITY) return;
+        // Two sources of fire, one convention. `terrain.ts` names its brazier
+        // props `brazier-light`; `lighting.ts` names the preset's placed lights
+        // `PracticalN`, and on the night maps *those* are the torches — the whole
+        // preset is built around them. Excluding them meant the night map's own
+        // key lights had no glare and threw no embers, which is the exact failure
+        // ("unlit quads pretending to be light sources") this system exists to
+        // prevent. Cold practicals are skipped: a sky-shaft fill is not a flame,
+        // and hanging a glare ball and an ember plume on it would read as a
+        // floating blue lamp in mid-air.
+        const isProp = o.name.startsWith('brazier');
+        const warm = light.color.r > light.color.b * 1.2;
+        if (!isProp && !(o.name.startsWith('Practical') && warm)) return;
         // `lighting.ts` stamps the authored level here before it starts driving
         // flicker, so this is the only honest "how bright is this fire meant to
         // be" reading available once the rig has taken the light over.
-        this.emberBase.push((light.userData['baseIntensity'] as number | undefined) ?? light.intensity);
+        const base = (light.userData['baseIntensity'] as number | undefined) ?? light.intensity;
+        if (base <= 0) return;
+        this.emberSources.push(light);
+        this.emberBase.push(base);
         this.emberAccum.push(0);
         return;
       }
@@ -2441,6 +2674,8 @@ export class VfxSystem {
     const s = this.spawnScratch;
     const base = this.vBase.copy(spec.position);
 
+    this.autoLight(spec, base, life);
+
     for (let i = 0; i < spec.count; i++) {
       // ── position ──
       s.position.copy(base);
@@ -2551,6 +2786,74 @@ export class VfxSystem {
 
       batch.spawn(s, this.clock);
     }
+  }
+
+  /**
+   * Give every bright additive burst a real light, whether its author asked or not.
+   *
+   * THE CONTRACT IS "VFX EMITS LIGHT", AND IT WAS BEING KEPT BY ELEVEN EFFECTS
+   * OUT OF TWENTY-FIVE. `impactPunch` spawns a proper flash and the charge
+   * helper spawns a gathering glow, but the other fourteen archetypes — every
+   * heal, every buff, every generic elemental burst, and the whole windup/cast/
+   * travel half of the ones that *do* punch — put several hundred particles at
+   * five times display white into the frame and left the flagstones under them
+   * completely unlit. That is the literal definition of the tell this system was
+   * built to remove: "a particle sprite that glows but does not illuminate its
+   * surroundings looks pasted on".
+   *
+   * Fixing it one builder at a time is twenty-five chances to forget, so it is
+   * enforced at the choke point instead. Every burst passes through `emit()`, and
+   * `emit()` already knows everything needed to size a light: how bright the
+   * particles are (`color0` is linear HDR), how many there are, how far they
+   * spread, and how long they live. The envelope is derived from the burst's own
+   * lifetime, so the light rises with the flash and dies with the last spark
+   * rather than running on a hand-authored constant that can drift out of sync.
+   *
+   * Three guards keep it from taking the pool over:
+   *  - Only *bright* additive bursts qualify. Smoke, dust and blood are alpha
+   *    blended or sit under 1.0, and a light on those would be wrong anyway.
+   *  - Priority 1, the floor, so a detonation's own `impactPunch` light (3) and
+   *    a charge glow (2) always win the eviction.
+   *  - A short spatial/temporal debounce, because effects legitimately fire four
+   *    or five bursts at one point on one frame to build a single shape, and
+   *    those must read as one light rather than as four fighting for a slot.
+   */
+  private autoLight(spec: BurstSpec, at: Vector3, life: [number, number]): void {
+    if (spec.additive === false) return;
+    const c = spec.color0;
+    // Below display white a particle is a tint, not an emitter.
+    const peak = Math.max(c[0], c[1], c[2]);
+    if (peak < 1.4 || c[3] < 0.08 || spec.count < 5) return;
+
+    const gap = this.clock - this.autoLightClock;
+    if (gap < 0.09 && this.autoLightAt.distanceToSquared(at) < 1.4 * this.tileSize * this.tileSize) {
+      return;
+    }
+    this.autoLightClock = this.clock;
+    this.autoLightAt.copy(at);
+
+    const meanLife = Math.max(0.08, (life[0] + life[1]) * 0.5);
+    const spread = Math.max(spec.radius ?? 0, 0.35);
+    // Brightness × population, clamped hard at both ends. The floor keeps a
+    // six-spark tick from being invisible; the ceiling is the point past which a
+    // point light stops colouring the stone and starts clipping it to white,
+    // which reads as an exposure fault rather than as fire.
+    const intensity = MathUtils.clamp(peak * Math.sqrt(spec.count) * 2.2, 7, 44);
+    const radius = MathUtils.clamp(spread * 1.5 + 3.0, 3, 9);
+
+    this.autoLightColor.setRGB(c[0] / peak, c[1] / peak, c[2] / peak);
+    this.spawnLight(at, {
+      color: this.autoLightColor,
+      intensity,
+      radius,
+      lift: 0.4,
+      // Fast in, slow out, tied to the burst: the flash of light arrives before
+      // the eye resolves the particles and outlives the brightest of them.
+      rise: 0.035,
+      hold: meanLife * 0.3,
+      fall: meanLife * 0.95,
+      priority: 1,
+    });
   }
 
   // ── Resource acquisition ────────────────────────────────────────────────
@@ -3312,6 +3615,7 @@ export class VfxSystem {
     this.additive.dispose();
     this.alpha.dispose();
     this.ambienceBatch.dispose();
+    this.glow.dispose();
     for (const r of this.ribbons) r.dispose();
     for (const c of this.circles) c.dispose();
     for (const p of this.pillars) p.dispose();

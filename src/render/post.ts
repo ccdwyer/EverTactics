@@ -421,11 +421,11 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // board, not to taste: `battle-open` spans ~14 tiles, which at 32° pitch is ~17 world
       // units of view-space depth corner to corner, so ±9 keeps every countable tile inside
       // the sharp zone and puts the falloff on the skirt, the backdrop and the near rim.
-      focusRange: 9 * tileSize,
+      focusRange: 5.5 * tileSize,
       // Steeper than the old 0.55: past the sharp zone the blur has to actually arrive
       // within the couple of units of depth the scenery occupies, or the far city never
       // reaches the reference's degree of softness.
-      cocScale: 1.15,
+      cocScale: 1.6,
       // Slightly above centre: the reference frames put the sharp band on the action and
       // leave the negative space above it soft. Matches the camera's composition offset,
       // which lifts the subject the same way.
@@ -445,7 +445,12 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
     grade: { enabled: true, amount: 1.0, name: 'dusk-plains' },
     vignette: {
       enabled: true,
-      amount: REFERENCE_FLOOR.vignetteAmount,
+      // A little above the floor. Round 2 pulled this back hard because the frame was too
+      // dark overall (mean luma 38/255 against the references' 66-80) and the vignette was
+      // compounding it; the frame now measures inside the reference band, and both reference
+      // frames carry a genuinely strong corner falloff. The radius stays where it is so the
+      // extra darkening lands outside the board, not on countable tiles.
+      amount: 0.4,
       radius: REFERENCE_FLOOR.vignetteRadiusMin,
       softness: 0.62,
       // Halved. The rectangular edge band is the letterbox darkening the references carry;
@@ -602,8 +607,8 @@ export class PostStack implements PostEffectsHost {
     tiltMix: 0.34,
     focusAuto: true,
     focusDistance: 160,
-    focusRange: 9,
-    cocScale: 1.15,
+    focusRange: 5.5,
+    cocScale: 1.6,
     tiltCenter: [0.5, 0.55],
     tiltAngle: 0,
     tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
@@ -1363,13 +1368,27 @@ export class PostStack implements PostEffectsHost {
     return out;
   }
 
-  /** Put the sharp band on a world position — e.g. the acting unit. */
+  /**
+   * Put the sharp band on a world position — e.g. the acting unit.
+   *
+   * Moves the tilt-band centre AND the depth focal plane, so the two halves of the CoC agree
+   * about what the subject is. The focal distance is taken in view space rather than as a
+   * euclidean distance to `camera.position`: for the orthographic rig the eye point is an
+   * arbitrary 160 units back along the view axis and only the depth *along* that axis is
+   * meaningful. `focusAuto` normally makes this unnecessary, but an explicit call still wins
+   * when the subject sits away from the composition centre.
+   */
   focusOn(worldPoint: Vector3, camera: Camera): void {
     this.tmpVec3.copy(worldPoint).project(camera);
     this.settings.dof.tiltCenter = [this.tmpVec3.x * 0.5 + 0.5, this.tmpVec3.y * 0.5 + 0.5];
     const cam = camera as PerspectiveCamera;
     if (cam.isPerspectiveCamera) {
       this.settings.dof.focusDistance = worldPoint.distanceTo(cam.position);
+    } else {
+      camera.updateMatrixWorld();
+      this.settings.dof.focusDistance = -this.tmpVec3
+        .copy(worldPoint)
+        .applyMatrix4(camera.matrixWorldInverse).z;
     }
   }
 

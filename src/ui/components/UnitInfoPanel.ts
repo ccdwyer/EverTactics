@@ -27,6 +27,7 @@ export class UnitInfoPanel {
   private readonly nameNode: HTMLSpanElement;
   private readonly jobNode: HTMLSpanElement;
   private readonly levelNode: HTMLSpanElement;
+  private readonly teamNode: HTMLSpanElement;
   private readonly hp: Meter;
   private readonly mp: Meter;
   private readonly braveNode: HTMLSpanElement;
@@ -54,7 +55,10 @@ export class UnitInfoPanel {
     this.levelNode = el('span', 'et-unitinfo__level');
     add(sub, this.jobNode, this.levelNode);
     add(ident, this.nameNode, sub);
-    add(head, this.faceSlot, ident);
+    // Allegiance is set in the head, not derived from the reader noticing the
+    // panel's tint. Two Knights of the same level are otherwise the same card.
+    this.teamNode = el('span', 'et-unitinfo__team');
+    add(head, this.faceSlot, ident, this.teamNode);
 
     this.hp = new Meter({ tone: 'hp', label: 'HP' });
     this.mp = new Meter({ tone: 'mp', label: 'MP' });
@@ -109,6 +113,7 @@ export class UnitInfoPanel {
       this.faceSlot.replaceChildren(portrait(face, { size: 'lg' }));
     }
     this.root.dataset['team'] = unit.team;
+    this.teamNode.textContent = TEAM_WORD[unit.team] ?? '';
     this.nameNode.textContent = unit.name;
     this.jobNode.textContent = unit.job;
     this.levelNode.textContent = `Lv ${unit.level}`;
@@ -162,6 +167,14 @@ export class UnitInfoPanel {
     }
   }
 }
+
+/** Allegiance words. Kept short — this is a 8px tracked label, not a sentence. */
+const TEAM_WORD: Readonly<Record<string, string>> = {
+  player: 'Your Company',
+  enemy: 'Hostile',
+  ally: 'Allied',
+  neutral: 'Neutral',
+};
 
 function bfBlock(label: string, valueNode: HTMLSpanElement): HTMLDivElement {
   const b = div('et-bf');

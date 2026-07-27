@@ -47,8 +47,17 @@ export const HEIGHT_UNIT = 0.5;
 const CHAMFER = 0.062;
 /** How far the chamfer ring drops below the top face, in world units. */
 const CHAMFER_DROP = 0.052;
+/**
+ * Soil has no arris. A dressed stone kerb ends in a 6% bevel and a crisp highlight;
+ * a grass bank ends in a rolled-over shoulder of turf about three times as wide and
+ * as deep, because the soil under it slumps and the grass grows down the face. Using
+ * the masonry chamfer on both is what made the embankments read as stepped boxes with
+ * a bevel filed on, so natural ground gets its own, much fatter shoulder.
+ */
+const TURF_CHAMFER = 0.19;
+const TURF_CHAMFER_DROP = 0.135;
 /** Subdivisions per tile edge on top faces (also used for ramps and AO resolution). */
-const TOP_SUBDIV = 3;
+const TOP_SUBDIV = 4;
 /**
  * Drop, in world units, at which a side face becomes a sculpted cliff rather than a
  * flat extruded quad. One tile of elevation (two half-tiles) is already enough to
@@ -62,12 +71,19 @@ const CLIFF_MIN_DROP = 0.85;
  * ornamental pool sank the whole pedestal, and the repeated brick underside ended
  * up carrying about 40% of the object's mass. A diorama is a slice of a place, not
  * a plinth: the base sits just under the lowest edge you can actually see.
+ *
+ * Round 3 halved it again. The map now fronts every range with a low outer plinth
+ * one half-tile high, so the deepest exposed rim is close to the ground the eye
+ * reads as "the bottom of the model". At 0.55 that plinth came out thicker than
+ * it was tall — a 0.5-unit ledge sitting on a 0.55-unit slab of the same brick,
+ * which just moved the repeated-underside problem down one storey. A quarter of a
+ * half-tile is enough to read as a cut edge and nothing more.
  */
-const SKIRT = 0.55;
+const SKIRT = 0.26;
 /** The base never rises above the waterline, or the pool would float over its own base. */
 const WATERLINE_SKIRT = 0.3;
 /** …nor above the lowest walkable ground, so every column keeps some thickness. */
-const GROUND_SKIRT = 0.2;
+const GROUND_SKIRT = 0.14;
 /**
  * Thickness of a deck surface (`MapDef.deckSurfaces`) — a bridge is planking on
  * trestles, not a column of masonry, so its side faces stop this far below the top
@@ -98,7 +114,24 @@ const RELIEF_SURFACES: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
   'snow',
   'swamp',
 ]);
-const RELIEF_AMPLITUDE = 0.13;
+/**
+ * Round 3: 0.13 was too polite to survive the grade — at a half-tile of 0.5 world
+ * units it moved the turf by a quarter of a course, which reads as noise on the
+ * texture rather than as ground that has shape. 0.22 is a visible swell.
+ */
+const RELIEF_AMPLITUDE = 0.22;
+/**
+ * Per-surface multiplier on that swell. A ploughed dirt bank is lumpier than a
+ * mown cloister lawn, and packed snow is smoother than either; giving each its own
+ * amplitude is what stops every natural surface sharing one silhouette.
+ */
+const RELIEF_SCALE: Readonly<Partial<Record<SurfaceKind, number>>> = {
+  grass: 0.85,
+  dirt: 1.35,
+  sand: 1.05,
+  snow: 0.7,
+  swamp: 0.75,
+};
 
 /**
  * World-Y offset applied to natural ground tops at world (wx, wz).
@@ -111,11 +144,14 @@ const RELIEF_AMPLITUDE = 0.13;
  */
 function groundRelief(surface: SurfaceKind, wx: number, wz: number): number {
   if (!RELIEF_SURFACES.has(surface)) return 0;
-  // A slow swell across the whole lawn plus a finer hummock on top of it.
+  // Three octaves: a slow swell across the whole lawn, a hummock roughly one tile
+  // across, and a grain just coarse enough that TOP_SUBDIV still resolves it (any
+  // finer and the top face aliases into a shimmer under the pixel snap).
   const broad = fbm3(wx * 0.27, 0, wz * 0.27, 913, 2);
   const fine = fbm3(wx * 1.05, 0, wz * 1.05, 2287, 2);
-  const n = Math.min(1, Math.max(0, broad * 0.72 + fine * 0.28));
-  return -RELIEF_AMPLITUDE * (0.12 + 0.88 * n);
+  const grain = fbm3(wx * 1.9, 0, wz * 1.9, 5171, 2);
+  const n = Math.min(1, Math.max(0, broad * 0.54 + fine * 0.31 + grain * 0.15));
+  return -RELIEF_AMPLITUDE * (RELIEF_SCALE[surface] ?? 1) * (0.12 + 0.88 * n);
 }
 
 /** Height of the walkable surface of a tile, in world units. */
@@ -2411,7 +2447,6 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
   const wIdx: number[] = [];
 
   const S = TOP_SUBDIV;
-  const C = CHAMFER;
 
   /**
    * Solid top surface Y of a tile at local (u, v).
@@ -2507,7 +2542,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
 
   /** Outer chamfer-ring Y at a tile's perimeter param. */
   const ringY = (t: Tile, tx: number, ty: number, u: number, vv: number): number =>
-    solidTopY(t, tx, ty, u, vv) - CHAMFER_DROP * chamferAtPerim(tx, ty, u, vv);
+    solidTopY(t, tx, ty, u, vv) - chamferDropFor(t) * chamferAtPerim(tx, ty, u, vv);
 
   /** Ring Y along one specific edge, used by the side-face stitcher. */
   const ringYEdge = (
@@ -2517,7 +2552,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
     e: number,
     u: number,
     vv: number,
-  ): number => solidTopY(t, tx, ty, u, vv) - CHAMFER_DROP * chamferAt(tx, ty, e);
+  ): number => solidTopY(t, tx, ty, u, vv) - chamferDropFor(t) * chamferAt(tx, ty, e);
 
   const normalAt = (t: Tile, u: number, vv: number): [number, number, number] => {
     const slope = isWaterSurface(t.surface) ? 'flat' : t.slope;
@@ -2541,6 +2576,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
       const oz = ty * TILE_SIZE;
 
       // ── top face (inset by the chamfer) ─────────────────────────────────
+      const C = chamferInsetFor(tile);
       const inner = (p: number): number => C + (1 - 2 * C) * p;
       const grid: Vtx[][] = [];
       for (let j = 0; j <= S; j++) {

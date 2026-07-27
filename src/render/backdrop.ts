@@ -60,6 +60,7 @@
  */
 
 import {
+  AdditiveBlending,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -70,6 +71,7 @@ import {
   Group,
   Mesh,
   ShaderMaterial,
+  SphereGeometry,
   Vector2,
   Vector3,
 } from 'three';
@@ -290,6 +292,145 @@ function lantern(rng: () => number): BufferGeometry[] {
   ];
 }
 
+// ── ground clutter ──────────────────────────────────────────────────────────
+//
+// Everything below is small, low and mostly off-axis. It exists for two jobs the
+// building kit above cannot do:
+//
+//  1. The surrounding ground plate was measured as a flat swatch — sd 20/255 over
+//     a fifth of the frame, because every variation in its shader runs at a
+//     spatial frequency the DoF pass erases. Real geometry casting real shading
+//     at a one-to-three-world-unit period survives any blur, which is why the
+//     reference frames' margins are dressed with props rather than textured.
+//  2. The board terminated on a razor silhouette against that plate. Clutter
+//     placed in the annulus just outside the footprint *overlaps* that edge, so
+//     there is no continuous line for the eye to read as a cut-out.
+//
+// They are also the only pieces in the file that are not axis-aligned, which was
+// its own repeated criticism.
+
+/** Stacked crates. Boxes, but yawed off the grid and stacked untidily. */
+function crates(rng: () => number, scale: number): BufferGeometry[] {
+  const parts: BufferGeometry[] = [];
+  const n = 1 + Math.floor(rng() * 3);
+  let y = 0;
+  for (let i = 0; i < n; i += 1) {
+    const s = scale * (0.55 + rng() * 0.5) * (1 - i * 0.14);
+    const g = new BoxGeometry(s, s * (0.72 + rng() * 0.4), s * (0.85 + rng() * 0.3));
+    g.rotateY(rng() * 1.1 - 0.55);
+    g.translate((rng() - 0.5) * s * 0.5, y + s * 0.42, (rng() - 0.5) * s * 0.5);
+    parts.push(g);
+    y += s * 0.78;
+  }
+  return parts;
+}
+
+/** Barrel: staved body plus two hoops, so the silhouette has a waist. */
+function barrel(rng: () => number, scale: number): BufferGeometry[] {
+  const h = scale * (0.78 + rng() * 0.5);
+  const r = scale * (0.26 + rng() * 0.13);
+  return [
+    translated(new CylinderGeometry(r * 0.84, r * 0.84, h, 9), 0, h / 2, 0),
+    translated(new CylinderGeometry(r, r, h * 0.13, 9), 0, h * 0.3, 0),
+    translated(new CylinderGeometry(r, r, h * 0.13, 9), 0, h * 0.72, 0),
+  ];
+}
+
+/**
+ * Spilled masonry. A handful of small blocks tumbled at free rotations around a
+ * point — the cheapest possible "this place has history" silhouette, and the one
+ * that best breaks a straight wall base.
+ */
+function rubble(rng: () => number, scale: number): BufferGeometry[] {
+  const parts: BufferGeometry[] = [];
+  const n = 3 + Math.floor(rng() * 6);
+  for (let i = 0; i < n; i += 1) {
+    const s = scale * (0.16 + rng() * 0.4);
+    const g = new BoxGeometry(s * (0.7 + rng()), s * (0.4 + rng() * 0.7), s * (0.7 + rng()));
+    g.rotateY(rng() * Math.PI);
+    g.rotateX((rng() - 0.5) * 0.8);
+    g.rotateZ((rng() - 0.5) * 0.8);
+    const a = rng() * Math.PI * 2;
+    const rad = rng() * scale * 1.6;
+    g.translate(Math.cos(a) * rad, s * 0.32 + rng() * scale * 0.25, Math.sin(a) * rad);
+    parts.push(g);
+  }
+  return parts;
+}
+
+/**
+ * Scrub clump. Squashed, jittered low-poly spheres.
+ *
+ * Organic mass is what the near bands need: a box at two metres from the lens
+ * comes back from the DoF pass as a featureless dark parallelogram, whereas a
+ * lumpy silhouette still reads as a lumpy silhouette however blurred it is.
+ */
+function bush(rng: () => number, scale: number): BufferGeometry[] {
+  const parts: BufferGeometry[] = [];
+  const n = 2 + Math.floor(rng() * 3);
+  for (let i = 0; i < n; i += 1) {
+    const r = scale * (0.38 + rng() * 0.5);
+    const g = new SphereGeometry(r, 7, 5);
+    const pos = g.attributes.position as BufferAttribute;
+    for (let k = 0; k < pos.count; k += 1) {
+      const j = 0.72 + rng() * 0.6;
+      pos.setXYZ(k, pos.getX(k) * j, pos.getY(k) * (0.5 + rng() * 0.45), pos.getZ(k) * j);
+    }
+    g.computeVertexNormals();
+    const a = rng() * Math.PI * 2;
+    const rad = rng() * scale * 0.8;
+    g.translate(Math.cos(a) * rad, r * 0.46, Math.sin(a) * rad);
+    parts.push(g);
+  }
+  return parts;
+}
+
+/** Post-and-rail fence. Posts lean; a run of them reads as a boundary. */
+function fence(rng: () => number, length: number, scale: number): BufferGeometry[] {
+  const parts: BufferGeometry[] = [];
+  const h = scale * (0.9 + rng() * 0.55);
+  const posts = Math.max(2, Math.round(length / Math.max(0.4, 0.95 * scale)));
+  for (let i = 0; i <= posts; i += 1) {
+    const x = -length / 2 + (length / posts) * i;
+    const ph = h * (0.82 + rng() * 0.4);
+    const g = new BoxGeometry(0.1 * scale, ph, 0.1 * scale);
+    g.rotateZ((rng() - 0.5) * 0.22);
+    g.translate(x, ph / 2, (rng() - 0.5) * 0.12);
+    parts.push(g);
+  }
+  for (const t of [0.42, 0.8]) {
+    parts.push(translated(new BoxGeometry(length, 0.08 * scale, 0.06 * scale), 0, h * t, 0));
+  }
+  return parts;
+}
+
+/** Handcart: bed, two spoked-looking wheels, shafts on the ground. */
+function cart(rng: () => number, scale: number): BufferGeometry[] {
+  const l = scale * (1.5 + rng() * 0.8);
+  const w = scale * (0.75 + rng() * 0.3);
+  const wheel = scale * (0.34 + rng() * 0.1);
+  const bed = wheel * 1.25;
+  const parts = [
+    translated(new BoxGeometry(l, scale * 0.14, w), 0, bed, 0),
+    translated(new BoxGeometry(l * 0.94, scale * 0.34, scale * 0.08), 0, bed + scale * 0.2, w * 0.46),
+    translated(new BoxGeometry(l * 0.94, scale * 0.34, scale * 0.08), 0, bed + scale * 0.2, -w * 0.46),
+  ];
+  for (const s of [-1, 1]) {
+    const g = new CylinderGeometry(wheel, wheel, scale * 0.09, 9);
+    g.rotateX(Math.PI / 2);
+    g.translate(l * 0.22, wheel, (w * 0.55 + scale * 0.05) * s);
+    parts.push(g);
+  }
+  // Shafts, dropped to the dirt — the diagonal is the whole point.
+  for (const s of [-1, 1]) {
+    const g = new BoxGeometry(l * 0.75, scale * 0.08, scale * 0.08);
+    g.rotateZ(-0.34);
+    g.translate(-l * 0.72, bed * 0.55, w * 0.3 * s);
+    parts.push(g);
+  }
+  return parts;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shaders
 // ─────────────────────────────────────────────────────────────────────────────
@@ -395,9 +536,31 @@ void main() {
   float masonry = (0.74 + 0.46 * block) * (1.0 - 0.42 * max(mortarY, mortarX));
   tex *= mix(1.0, masonry, 1.0 - up);
 
-  // Roof: tile rows running across the pitch so adjacent courses separate.
-  float tileRow = 0.5 + 0.5 * sin(face.x * 15.0 + macro * 3.0);
-  tex *= mix(1.0, 0.72 + 0.44 * tileRow, up);
+  // Half-timbering. Exposed frame at roughly one-metre centres, plus a diagonal
+  // brace — the most recognisable feature of the reference game's village
+  // architecture, and the only wall pattern in this shader at a frequency the
+  // near-field blur cannot erase.
+  //
+  // Everything above runs at 3.6-13 cycles per world unit. The near bands sit
+  // under a ~25px circle of confusion, so measured on the frame the whole lot
+  // integrated to a constant and a five-metre house rendered as one smooth
+  // slope with two windows on it. Timber at ~0.9 cycles per unit survives, which
+  // is the difference between a building and a dark parallelogram.
+  float beamU = 1.0 - smoothstep(0.0, 0.075, abs(fract(face.x * 0.92) - 0.5) - 0.41);
+  float beamV = 1.0 - smoothstep(0.0, 0.085, abs(fract(face.y * 0.78) - 0.5) - 0.40);
+  float brace = 1.0 - smoothstep(0.0, 0.10, abs(fract(face.x * 0.62 + face.y * 0.55) - 0.5) - 0.40);
+  float timber = clamp(max(max(beamU, beamV), brace * 0.75), 0.0, 1.0);
+  tex *= mix(1.0, 0.50 + 0.42 * block, timber * (1.0 - up) * 0.9);
+
+  // Roof: shingle courses running with the pitch, with a per-course value hash
+  // so no two runs of tile match. Derived from world xz rather than the face
+  // basis, because on a near-horizontal plane the face basis degenerates.
+  vec2 roofFace = vLocal.xz;
+  float courseId = roofFace.x * 1.35 + roofFace.y * 0.42;
+  float course = fract(courseId);
+  float shingle = 0.66 + 0.55 * smoothstep(0.04, 0.28, course) * (1.0 - smoothstep(0.68, 0.96, course));
+  shingle *= 0.82 + 0.42 * etHash12(vec2(floor(courseId), floor(roofFace.y * 0.9)));
+  tex *= mix(1.0, shingle, up);
 
   // Weathering streaks running down the wall from the eaves — the single most
   // recognisable "this is old stone outdoors" cue, and it is low-frequency
@@ -417,34 +580,67 @@ void main() {
   // void problem again, just object-shaped.
   vec3 lit = albedo * (0.34 + 0.66 * ndl);
   lit += uSunColor * albedo * ndl * 0.65;
-  lit += uSkyColor * albedo * sky * 0.60;
+  lit += uSkyColor * albedo * sky * 0.62;
 
   // Window practicals: a cell grid on vertical faces, a hash per cell decides
   // whether that room is occupied. This is the single cheapest "somebody lives
   // here" signal available and both references lean on it hard.
   float vertical = 1.0 - smoothstep(0.10, 0.32, abs(n.y));
   if (vWindow > 0.5 && vertical > 0.01) {
-    vec2 cell = face / vec2(1.05, 1.25);
+    // Smaller cells than the first pass. Two enormous panes per wall is what
+    // made these read as pasted UI elements; a real elevation has many small
+    // openings and the eye counts them as architecture.
+    vec2 cell = face / vec2(0.86, 1.08);
     vec2 id = floor(cell);
     vec2 f = fract(cell);
-    float lit01 = step(0.52, etHash12(id + 11.7));
-    float flick = 0.86 + 0.14 * sin(uTime * (1.7 + etHash12(id) * 2.3) + etHash12(id) * 6.28);
-    vec2 rect = smoothstep(0.30, 0.36, f) * (1.0 - smoothstep(0.64, 0.70, f));
-    float win = rect.x * rect.y * lit01 * vertical * flick;
-    win *= step(uGroundY + 0.55, vLocal.y);
+    float h1 = etHash12(id + 11.7);
+    float h2 = etHash12(id * 1.73 + 4.31);
+    float h3 = etHash12(id * 0.61 - 8.15);
+    float lit01 = step(0.48, h1);
+    float flick = 0.88 + 0.12 * sin(uTime * (1.3 + h2 * 2.6) + h1 * 6.28);
 
-    // Spill: the masonry immediately around a lit opening catches its light.
+    // Per-room brightness. Squared so most rooms are dim and a few are bright:
+    // uniform luminance across every opening was named explicitly, and it is the
+    // difference between "lights in windows" and "a lattice of yellow squares".
+    float room = 0.22 + 1.5 * h2 * h2;
+
+    // Aperture as a superellipse rather than a rectangle — rounded corners and
+    // a taller-than-wide proportion, i.e. a window opening rather than a quad.
+    vec2 q = (f - 0.5) / vec2(0.19, 0.29);
+    float d = pow(pow(abs(q.x), 3.2) + pow(abs(q.y), 3.2), 0.3125);
+    float aperture = 1.0 - smoothstep(0.74, 1.0, d);
+
+    // Mullion and transom. Without them a lit pane is a solid blob; with them
+    // there is glazing bar geometry inside the light, which is most of what
+    // makes it read as a window seen from outside at night.
+    float bars = (1.0 - smoothstep(0.03, 0.13, abs(q.x))) * 0.72
+               + (1.0 - smoothstep(0.03, 0.15, abs(q.y + 0.12))) * 0.5;
+    // Interior falloff: the lamp is inside the room, so the pane is brightest
+    // where the light is and darker at the reveal.
+    float interior = 0.45 + 0.75 * (1.0 - clamp(d, 0.0, 1.0));
+    float glass = aperture * (1.0 - clamp(bars, 0.0, 0.88)) * interior;
+
+    float above = step(uGroundY + 0.55, vLocal.y);
+    float win = glass * lit01 * vertical * flick * room * above;
+
+    // Spill: the masonry around a lit opening catches its light.
     //
     // Not decoration — load-bearing. A window is emissive and its wall is not,
     // so on a ridge-band tower silhouetted against a night sky of almost the
     // same value, the only thing that survived was the opening itself: the
     // frame showed two cream parallelograms hanging in empty sky with no
-    // building attached to them. Spill guarantees a lit band of wall around
-    // every opening, which both fixes that and is what light actually does.
-    vec2 halo = smoothstep(0.06, 0.34, f) * (1.0 - smoothstep(0.66, 0.94, f));
-    float spill = halo.x * halo.y * lit01 * vertical * flick;
-    lit += uWindowColor * spill * uWindowGain * 0.22 * step(uGroundY + 0.55, vLocal.y);
-    lit += uWindowColor * win * uWindowGain;
+    // building attached to them. An exponential falloff (rather than the old
+    // box halo) also gives the glow a real radial gradient, so the light has a
+    // shape instead of a uniform rim.
+    float spill = exp(-d * 1.25) * lit01 * vertical * flick * room * above;
+
+    // Warm/cool per room: hearth-orange in some, tallow-pale in others. A single
+    // window colour repeated across a village is a two-hue palette by itself.
+    vec3 tone = mix(uWindowColor * vec3(1.14, 0.86, 0.52),
+                    uWindowColor * vec3(0.88, 0.94, 1.06), h3);
+
+    lit += tone * spill * uWindowGain * 0.30;
+    lit += tone * win * uWindowGain;
   }
 
   // Distance haze. Depth here is −z in the yaw-local frame, i.e. "away from the
@@ -462,6 +658,66 @@ void main() {
   vec3 toned = lit * uTone + uSkyColor * edge * 0.16 * uTone * tex;
   vec3 col = mix(toned, uHaze, haze) * uExposure;
   gl_FragColor = vec4(max(col, 0.0), 1.0);
+}
+`;
+
+/**
+ * Additive glow cards, one per practical.
+ *
+ * The lamp posts in the surround were geometry with no light attached: a small
+ * dark box on a stick, invisible in a night frame. Every critique of the
+ * background named the same thing from the other direction — "unlit quads
+ * pretending to be light sources", "no radial falloff, no glow shape". A source
+ * needs a visible halo before it reads as a source.
+ *
+ * View-aligned in the vertex shader (offset applied in view space) rather than
+ * by rotating the mesh, so a card stays square to the lens through both the yaw
+ * snap and the pitch without the group having to know either. Depth-TESTED, so a
+ * lamp behind a wall does not glow through it; depth-write off so cards never
+ * occlude each other.
+ */
+const GLOW_VERT = /* glsl */ `
+attribute vec3 aCenter;
+attribute float aRadius;
+attribute float aSeed;
+attribute float aWarm;
+varying vec2  vOffset;
+varying float vSeed;
+varying float vWarm;
+void main() {
+  vOffset = position.xy;
+  vSeed = aSeed;
+  vWarm = aWarm;
+  vec4 mv = modelViewMatrix * vec4(aCenter, 1.0);
+  mv.xy += position.xy * aRadius;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const GLOW_FRAG = /* glsl */ `
+precision highp float;
+uniform vec3  uWarmColor;
+uniform vec3  uCoolColor;
+uniform float uGain;
+uniform float uTime;
+varying vec2  vOffset;
+varying float vSeed;
+varying float vWarm;
+void main() {
+  float r = length(vOffset);
+  if (r > 1.0) discard;
+  // Tight core plus a wide skirt. A single gaussian reads as a fuzzy dot; the
+  // two-lobe falloff is what gives a practical the sense of throwing light into
+  // the air around it.
+  float core = exp(-r * r * 11.0);
+  float halo = exp(-r * 2.6) * 0.45;
+  float a = (core + halo) * (1.0 - smoothstep(0.72, 1.0, r));
+  // Per-lamp flicker, at a per-lamp rate. Uniform pulsing across every light in
+  // frame is worse than none.
+  float f = 0.82 + 0.18 * sin(uTime * (1.6 + vSeed * 3.1) + vSeed * 31.0)
+                 * (0.5 + 0.5 * sin(uTime * (0.7 + vSeed * 1.3)));
+  vec3 col = mix(uCoolColor, uWarmColor, vWarm);
+  gl_FragColor = vec4(col * a * f * uGain, 1.0);
 }
 `;
 
@@ -536,6 +792,14 @@ void main() {
   // here are deliberately loud, because the visible strip of this plate is only
   // a few world units deep and low-contrast variation over that distance is
   // indistinguishable from a flat swatch.
+  // Region: a ~30-world-unit period, i.e. two or three swings across the whole
+  // visible plate. This is the ONLY octave that survives the near-field DoF at
+  // the bottom of the frame — measured there, the plate came back with a
+  // standard deviation of 20/255, a swatch, because everything else in this
+  // shader runs above the frequency the blur preserves. It is deliberately the
+  // loudest term in the composite for that reason.
+  float region = etFbm(vLocal.xz * 0.034 + 61.3, 3);
+  float region2 = etFbm(vLocal.xz * 0.075 - 12.9, 3);
   float blotch = etFbm(vLocal.xz * 0.13 + 21.7, 3);
   float clump = etFbm(vLocal.xz * 0.55, 4);
   float fine = etFbm(vLocal.xz * 2.9, 3);
@@ -550,7 +814,8 @@ void main() {
   // half the plate and pinned that half to a single colour — the flat-surface
   // fail condition reintroduced by the very term meant to prevent it. Biasing
   // around 0.5 keeps the whole range in play.
-  float blend = clamp((blotch - 0.5) * 0.9 + (clump - 0.5) * 1.05 + 0.5, 0.0, 1.0);
+  float blend = clamp(
+    (region - 0.5) * 1.6 + (blotch - 0.5) * 0.8 + (clump - 0.5) * 0.9 + 0.5, 0.0, 1.0);
   vec3 albedo = mix(uNearColor, uFarColor, blend);
   albedo = mix(albedo, uFarColor * 1.35, worn * 0.55);
   // Multiplier swing is where the texture lives: 0.26 to ~2.1, i.e. eight times
@@ -558,6 +823,11 @@ void main() {
   // world scales. A gentler curve here is what made the plate read as one
   // colour even though every octave was present.
   albedo *= 0.26 + 0.95 * fine + 0.34 * micro + 0.52 * blotch + 0.30 * clump;
+  // Macro value patches, applied AFTER the octave stack so nothing averages it
+  // away. Range 0.42…1.75 at a period the blur cannot touch: this is what turns
+  // the out-of-focus margin from one grey field into the soft light-and-dark
+  // mottle the reference frames' defocused ground actually is.
+  albedo *= 0.42 + 0.90 * region + 0.44 * region2;
 
   vec3 lit = albedo * (0.30 + 0.70 * ndl);
   lit += uSunColor * albedo * ndl * 0.55;
@@ -624,8 +894,42 @@ interface BandSpec {
    */
   tone: number;
   windows: number;
-  kinds: readonly ('house' | 'tower' | 'wall' | 'tree' | 'rock' | 'lantern')[];
+  kinds: readonly PropKind[];
+  /**
+   * If set, placements are generated by walking the board's footprint PERIMETER
+   * and stepping outward by `clearance … ringMax`, instead of by rejection
+   * sampling the band rectangle.
+   *
+   * Rejection sampling was tried first and measurably does not work here: the
+   * annulus is a few percent of the sampled area, so the accepted points cluster
+   * whereever the generator happened to hit early and whole stretches of the
+   * board edge get nothing. On the frame that showed up as the bottom-right wall
+   * still cutting a razor line into the ground plate with two props visible in
+   * the entire quadrant. Perimeter parameterisation gives uniform coverage of
+   * exactly the line that needs breaking up.
+   */
+  ringMax?: number;
+  /** Clearance required from the footprint. Small for clutter, large for buildings. */
+  clearance?: number;
+  /** Max random lean off vertical, radians. Breaks the axis-aligned read. */
+  tilt?: number;
+  /** How far pieces sink into the ground plate; hides their flat undersides. */
+  sink?: number;
 }
+
+type PropKind =
+  | 'house'
+  | 'tower'
+  | 'wall'
+  | 'tree'
+  | 'rock'
+  | 'lantern'
+  | 'crates'
+  | 'barrel'
+  | 'rubble'
+  | 'bush'
+  | 'fence'
+  | 'cart';
 
 export interface BackdropOptions {
   /** Multiplier on how much haze the far bands take. */
@@ -648,6 +952,12 @@ export class Backdrop extends Group {
 
   private readonly structMaterials: ShaderMaterial[] = [];
   private groundMaterial: ShaderMaterial | null = null;
+
+  /** Practical positions harvested while building the bands. Yaw-local. */
+  private glowSites: { x: number; y: number; z: number; r: number; seed: number; warm: number }[] =
+    [];
+  private glowMesh: Mesh | null = null;
+  private glowMaterial: ShaderMaterial | null = null;
 
   private palette: EnvironmentPalette;
   private readonly opts: Required<BackdropOptions>;
@@ -704,9 +1014,62 @@ export class Backdrop extends Group {
         lateralMax: halfW * 2.0,
         scale: 0.78,
         haze: [R * 0.7, R + run * 2.2, 0.36],
-        tone: 0.62,
+        // Measured, not chosen. At 0.62 the near flank house rendered at luma
+        // 26/255 with its masonry invisible — a black mass with two lit windows
+        // floating on it, which is the void again wearing a building's shape.
+        // The equivalent surround band in the Triangle references sits at 60-110.
+        tone: 0.95,
         windows: 1,
-        kinds: ['house', 'wall', 'wall', 'tree', 'tree', 'lantern', 'rock', 'rock'],
+        kinds: ['house', 'wall', 'tree', 'tree', 'lantern', 'rock', 'bush', 'bush', 'crates', 'cart', 'fence', 'barrel', 'rubble'],
+      },
+      {
+        // The ring hugging the board. This is the band that kills the hard
+        // silhouette: `ringMax` confines it to the four world-units immediately
+        // outside the footprint, and at a 30° pitch a knee-high prop there
+        // projects straight across the board's lower edge, so the boundary
+        // between diorama and surround is broken by objects instead of being a
+        // continuous antialiased line.
+        //
+        // Deliberately all clutter — no buildings. A house against the board
+        // edge reads as a second diorama; a spill of rubble reads as the same
+        // one continuing.
+        name: 'skirt',
+        count: 260,
+        depthMin: -R * 1.6,
+        depthMax: R * 1.6,
+        lateralMax: halfW * 1.6,
+        scale: 0.78,
+        haze: [R * 1.2, R + run * 2.4, 0.30],
+        tone: 0.86,
+        windows: 0,
+        ringMax: 4.2,
+        clearance: 0.35,
+        tilt: 0.16,
+        sink: 0.18,
+        kinds: ['rubble', 'rubble', 'bush', 'bush', 'crates', 'barrel', 'rock', 'fence', 'cart', 'lantern'],
+      },
+      {
+        // Dressing spread over the whole visible ground plate.
+        //
+        // The plate's own shader cannot fix itself: measured on the frame it
+        // came back at sd 20/255 across the bottom-right fifth of the image,
+        // because every octave it carries runs above the frequency the near-field
+        // DoF preserves. Scattered geometry is variation the blur cannot remove —
+        // it turns into soft value blobs, which is exactly what the reference
+        // frames' out-of-focus margins are made of.
+        name: 'scatter',
+        count: 300,
+        depthMin: layout.nearDepth * 1.05,
+        depthMax: R + run * 1.1,
+        lateralMax: halfW * 1.85,
+        scale: 0.85,
+        haze: [R * 0.9, R + run * 1.9, 0.5],
+        tone: 0.72,
+        windows: 0,
+        clearance: 4.0,
+        tilt: 0.14,
+        sink: 0.14,
+        kinds: ['bush', 'rubble', 'rock', 'bush', 'crates', 'fence', 'barrel', 'tree', 'cart', 'rubble'],
       },
       {
         // Immediately behind the board: low outbuildings, walls, scrub.
@@ -753,20 +1116,98 @@ export class Backdrop extends Group {
         lateralMax: halfW * 1.95,
         scale: 0.85,
         haze: [-999, -998, 0.0],
-        tone: 0.26,
+        // Dark, but not a hole. The references' foreground occluders are
+        // silhouettes that still carry readable value structure.
+        tone: 0.46,
         windows: 0,
         kinds: ['tree', 'tree', 'rock', 'lantern'],
       },
     ];
 
+    this.glowSites = [];
     let bandIndex = 0;
     for (const band of bands) {
       const mesh = this.buildBand(band, layout, groundY, bandIndex);
       if (mesh) this.yawRig.add(mesh);
       bandIndex += 1;
     }
+    this.buildGlow();
 
     this.applyPalette();
+  }
+
+  /** One merged draw call of view-aligned additive cards, one per practical. */
+  private buildGlow(): void {
+    const sites = this.glowSites;
+    if (sites.length === 0) return;
+
+    const n = sites.length;
+    const corner = new Float32Array(n * 4 * 3);
+    const centre = new Float32Array(n * 4 * 3);
+    const radius = new Float32Array(n * 4);
+    const seed = new Float32Array(n * 4);
+    const warm = new Float32Array(n * 4);
+    const index: number[] = [];
+    const quad = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+
+    for (let i = 0; i < n; i += 1) {
+      const s = sites[i]!;
+      for (let k = 0; k < 4; k += 1) {
+        const v = i * 4 + k;
+        corner[v * 3 + 0] = quad[k]![0]!;
+        corner[v * 3 + 1] = quad[k]![1]!;
+        corner[v * 3 + 2] = 0;
+        centre[v * 3 + 0] = s.x;
+        centre[v * 3 + 1] = s.y;
+        centre[v * 3 + 2] = s.z;
+        radius[v] = s.r;
+        seed[v] = s.seed;
+        warm[v] = s.warm;
+      }
+      const b = i * 4;
+      index.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    }
+
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new BufferAttribute(corner, 3));
+    geo.setAttribute('aCenter', new BufferAttribute(centre, 3));
+    geo.setAttribute('aRadius', new BufferAttribute(radius, 1));
+    geo.setAttribute('aSeed', new BufferAttribute(seed, 1));
+    geo.setAttribute('aWarm', new BufferAttribute(warm, 1));
+    geo.setIndex(index);
+
+    const material = new ShaderMaterial({
+      name: 'env-glow',
+      uniforms: {
+        uWarmColor: { value: new Color() },
+        uCoolColor: { value: new Color() },
+        uGain: { value: this.opts.exposure },
+        uTime: { value: 0 },
+      },
+      vertexShader: GLOW_VERT,
+      fragmentShader: GLOW_FRAG,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+      fog: false,
+      toneMapped: false,
+    });
+
+    const mesh = new Mesh(geo, material);
+    mesh.name = 'env-glow';
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.renderOrder = 250;
+    this.glowMesh = mesh;
+    this.glowMaterial = material;
+    this.yawRig.add(mesh);
   }
 
   private buildBand(
@@ -783,27 +1224,74 @@ export class Backdrop extends Group {
     // offset is (x, 0, −depth).
     const cy = Math.cos(layout.yaw);
     const sy = Math.sin(layout.yaw);
-    const margin = 1.5;
-    const insideBoard = (x: number, depth: number): boolean => {
+    const clearance = band.clearance ?? 1.5;
+    /**
+     * Distance from the board's real footprint rectangle, 0 while inside it.
+     * A rectangle, not a disc: at 45° yaw a circumscribed disc forbids placement
+     * across the whole visible left and right strips, which is exactly where the
+     * void lives.
+     */
+    const footprintDistance = (x: number, depth: number): number => {
       const wx = cy * x + sy * -depth;
       const wz = -sy * x + cy * -depth;
-      return (
-        Math.abs(wx) < layout.boardHalfX + margin && Math.abs(wz) < layout.boardHalfZ + margin
-      );
+      const dx = Math.abs(wx) - layout.boardHalfX;
+      const dz = Math.abs(wz) - layout.boardHalfZ;
+      return Math.hypot(Math.max(0, dx), Math.max(0, dz));
+    };
+
+    // Perimeter walk, for ring bands. Returns a yaw-local (x, depth) sitting a
+    // short way outside the footprint edge, distributed evenly along it.
+    const hx = layout.boardHalfX;
+    const hz = layout.boardHalfZ;
+    const perimeter = 2 * (hx + hz) * 2;
+    const ringPoint = (): { x: number; depth: number } => {
+      let t = rng() * perimeter;
+      let wx: number;
+      let wz: number;
+      let nx: number;
+      let nz: number;
+      const sideX = 2 * hx;
+      const sideZ = 2 * hz;
+      if (t < sideX) {
+        wx = -hx + t; wz = hz; nx = 0; nz = 1;
+      } else if ((t -= sideX) < sideZ) {
+        wx = hx; wz = hz - t; nx = 1; nz = 0;
+      } else if ((t -= sideZ) < sideX) {
+        wx = hx - t; wz = -hz; nx = 0; nz = -1;
+      } else {
+        t -= sideX;
+        wx = -hx; wz = -hz + t; nx = -1; nz = 0;
+      }
+      const out = clearance + rng() * Math.max(0.1, (band.ringMax ?? 3) - clearance);
+      // Jitter along the edge as well, so the run does not read as a hedge.
+      const along = (rng() - 0.5) * 1.8;
+      wx += nx * out - nz * along;
+      wz += nz * out + nx * along;
+      return { x: cy * wx - sy * wz, depth: -(sy * wx + cy * wz) };
     };
 
     let attempts = 0;
     let placed = 0;
-    while (placed < band.count && attempts < band.count * 24) {
+    while (placed < band.count && attempts < band.count * 40) {
       attempts += 1;
-      const depth = band.depthMin + rng() * (band.depthMax - band.depthMin);
-      const lateralMin = band.lateralMin ?? 0;
-      const x =
-        (rng() < 0.5 ? -1 : 1) * (lateralMin + rng() * Math.max(0, band.lateralMax - lateralMin));
+      let depth: number;
+      let x: number;
+      if (band.ringMax !== undefined) {
+        const p = ringPoint();
+        x = p.x;
+        depth = p.depth;
+        // Still has to be inside the window the frame can actually show.
+        if (Math.abs(x) > band.lateralMax) continue;
+        if (depth < band.depthMin || depth > band.depthMax) continue;
+      } else {
+        depth = band.depthMin + rng() * (band.depthMax - band.depthMin);
+        const lateralMin = band.lateralMin ?? 0;
+        x =
+          (rng() < 0.5 ? -1 : 1) * (lateralMin + rng() * Math.max(0, band.lateralMax - lateralMin));
+      }
 
-      // Keep the play space clear: nothing inside the board footprint, and a
-      // little extra margin so a roof never crowds a playable tile.
-      if (insideBoard(x, depth)) continue;
+      // Keep the play space clear.
+      if (footprintDistance(x, depth) < clearance) continue;
 
       const kind = band.kinds[Math.floor(rng() * band.kinds.length)]!;
       let parts: BufferGeometry[];
@@ -823,6 +1311,24 @@ export class Backdrop extends Group {
         case 'rock':
           parts = rock(rng, 0.7 + rng() * 1.5);
           break;
+        case 'crates':
+          parts = crates(rng, 0.7 + rng() * 0.8);
+          break;
+        case 'barrel':
+          parts = barrel(rng, 0.7 + rng() * 0.7);
+          break;
+        case 'rubble':
+          parts = rubble(rng, 0.6 + rng() * 1.2);
+          break;
+        case 'bush':
+          parts = bush(rng, 0.6 + rng() * 1.1);
+          break;
+        case 'fence':
+          parts = fence(rng, 1.8 + rng() * 4.5, 0.8 + rng() * 0.5);
+          break;
+        case 'cart':
+          parts = cart(rng, 0.8 + rng() * 0.6);
+          break;
         default:
           parts = lantern(rng);
           break;
@@ -833,11 +1339,16 @@ export class Backdrop extends Group {
       const tint = rng();
       // Trees, rocks and lamp posts have no windows; buildings do.
       const win = band.windows > 0 && (kind === 'house' || kind === 'tower' || kind === 'wall') ? 1 : 0;
+      const tiltX = band.tilt ? (rng() - 0.5) * 2 * band.tilt : 0;
+      const tiltZ = band.tilt ? (rng() - 0.5) * 2 * band.tilt : 0;
+      const sink = band.sink ?? 0;
 
       for (const part of parts) {
         part.scale(s, s * (0.9 + rng() * 0.3), s);
         part.rotateY(rot);
-        part.translate(x, groundY - 0.28, -depth);
+        if (tiltX !== 0) part.rotateX(tiltX);
+        if (tiltZ !== 0) part.rotateZ(tiltZ);
+        part.translate(x, groundY - 0.28 - sink, -depth);
         const n = part.attributes.position!.count;
         part.setAttribute('aTint', new BufferAttribute(new Float32Array(n).fill(tint), 1));
         part.setAttribute('aWindow', new BufferAttribute(new Float32Array(n).fill(win), 1));
@@ -848,6 +1359,33 @@ export class Backdrop extends Group {
         part.computeVertexNormals();
         pieces.push(part);
       }
+
+      // Harvest the practicals. A lamp post is a dark box on a stick until
+      // something visibly emits from it; the glow card is what turns the
+      // surround's lamps into the "you can trace every highlight back to a lamp"
+      // read the reference frames have.
+      if (kind === 'lantern') {
+        let topY = -Infinity;
+        for (const part of parts) {
+          part.computeBoundingBox();
+          const bb = part.boundingBox;
+          if (bb) topY = Math.max(topY, bb.max.y);
+        }
+        if (Number.isFinite(topY)) {
+          this.glowSites.push({
+            x,
+            y: topY - 0.22 * s,
+            z: -depth,
+            // Near-camera lamps get a bigger card, which is both physically
+            // right under a defocus and what keeps the near margins from being
+            // dark: a 1.2-unit halo at three metres is a few pixels.
+            r: (0.5 + rng() * 0.55) * (depth < 0 ? 1.3 : 1),
+            seed: rng(),
+            warm: 0.55 + rng() * 0.45,
+          });
+        }
+      }
+
       placed += 1;
     }
 
@@ -981,6 +1519,7 @@ export class Backdrop extends Group {
       (m.uniforms.uSunLocal!.value as Vector3).copy(this.sunLocal);
       m.uniforms.uTime!.value = elapsed;
     }
+    if (this.glowMaterial) this.glowMaterial.uniforms.uTime!.value = elapsed;
     if (this.groundMaterial) {
       (this.groundMaterial.uniforms.uSunLocal!.value as Vector3).copy(this.sunLocal);
       // Board shadow lands opposite the sun, length scaled by its elevation.
@@ -1052,6 +1591,21 @@ export class Backdrop extends Group {
       (m.uniforms.uSkyColor!.value as Color).copy(sky);
       (m.uniforms.uWindowColor!.value as Color).copy(window);
     }
+    if (this.glowMaterial) {
+      // Hearth-orange core, tallow-pale skirt. These are the only pixels the
+      // environment is allowed to push over the bloom threshold.
+      //
+      // These levels are the third attempt and the only ones that are not a
+      // disaster. `p.sun` is a LIGHT colour — its channels run to 1.0 — so an
+      // additive card at 0.55 of it is half of full scale per lamp, and with a
+      // hundred lamps in the surround overlapping under the bokeh the first
+      // version rendered the entire lower half of the frame as flat orange.
+      // A practical seen from thirty metres contributes a few percent.
+      (this.glowMaterial.uniforms.uWarmColor!.value as Color)
+        .copy(p.sun).multiplyScalar(0.075);
+      (this.glowMaterial.uniforms.uCoolColor!.value as Color)
+        .copy(p.sun).lerp(p.horizon, 0.5).multiplyScalar(0.045);
+    }
     if (this.groundMaterial) {
       const u = this.groundMaterial.uniforms;
       // The plate stays DARK. It was rendering at luma 46 with a 6–69 range —
@@ -1062,8 +1616,24 @@ export class Backdrop extends Group {
       // and the crushed-blacks grade. What a swatch actually lacks is variance,
       // not brightness, so the level moves a little and the CONTRAST between
       // the two tones (and the multiplier below) moves a lot.
-      (u.uNearColor!.value as Color).copy(norm(hazeTint.clone().lerp(deepTint, 0.62))).multiplyScalar(0.030);
-      (u.uFarColor!.value as Color).copy(norm(hazeTint.clone().lerp(sunTint, 0.40))).multiplyScalar(0.076);
+      //
+      // Retuned again after the near bands stopped covering the lower-right
+      // quadrant with a house: with the plate actually visible it rendered at
+      // luma 47 in a neutral grey-mauve, i.e. a concrete table for the diorama
+      // to sit on, and it was competing with the board's own shadow side. The
+      // surround ground must stay clearly under the play space.
+      //
+      // MOSS is a deliberate third hue. Every critique of the grade said the
+      // same thing — "a two-hue navy/amber lockup with nothing between" — and
+      // the ground outside the walls is the largest surface in the frame that
+      // can carry a tertiary colour without fighting either the lantern warmth
+      // or the night blue.
+      (u.uNearColor!.value as Color)
+        .copy(norm(hazeTint.clone().lerp(deepTint, 0.66)))
+        .multiplyScalar(0.020);
+      (u.uFarColor!.value as Color)
+        .copy(norm(hazeTint.clone().lerp(sunTint, 0.26).lerp(MOSS, 0.42)))
+        .multiplyScalar(0.048);
       (u.uHaze!.value as Color).copy(p.haze);
       (u.uSunColor!.value as Color).copy(sunLight);
       (u.uSkyColor!.value as Color).copy(sky);
@@ -1075,6 +1645,7 @@ export class Backdrop extends Group {
     this.opts.exposure = v;
     for (const m of this.structMaterials) m.uniforms.uExposure!.value = v;
     if (this.groundMaterial) this.groundMaterial.uniforms.uExposure!.value = v;
+    if (this.glowMaterial) this.glowMaterial.uniforms.uGain!.value = v;
   }
 
   get layoutSpec(): BackdropLayout | null {
@@ -1089,6 +1660,14 @@ export class Backdrop extends Group {
     this.bandMeshes.length = 0;
     for (const m of this.structMaterials) m.dispose();
     this.structMaterials.length = 0;
+    if (this.glowMesh) {
+      this.yawRig.remove(this.glowMesh);
+      this.glowMesh.geometry.dispose();
+      this.glowMesh = null;
+    }
+    this.glowMaterial?.dispose();
+    this.glowMaterial = null;
+    this.glowSites = [];
     if (this.groundMesh) {
       this.yawRig.remove(this.groundMesh);
       this.groundMesh.geometry.dispose();
@@ -1104,3 +1683,6 @@ export class Backdrop extends Group {
 }
 
 const UP = new Vector3(0, 1, 0);
+
+/** The surround's tertiary hue: damp moss on the ground outside the walls. */
+const MOSS = new Color().setHex(0x5d7a4a, 'srgb');

@@ -31,6 +31,7 @@ import {
   DEFAULT_PERSONALITY,
   PERSONALITIES,
   battleCaution,
+  battlePressure,
   effectiveWeights,
   inSurvivalMode,
   inferPersonality,
@@ -144,7 +145,12 @@ export function planTurn(
 
   const personality = pickPersonality(actor, opts);
   const survival = inSurvivalMode(personality, actor);
-  const weights = effectiveWeights(personality, actor, battleCaution(state.tick));
+  const weights = effectiveWeights(
+    personality,
+    actor,
+    battleCaution(state.tick),
+    battlePressure(state.tick),
+  );
 
   const guardTarget = resolveGuardTarget(state, actor, personality, opts);
 
@@ -219,7 +225,7 @@ function applyCompulsions(ctx: AiContext, candidates: readonly Candidate[]): Can
       const approaches = filtered.filter((c) => c.ability === undefined);
       if (approaches.length > 0) {
         filtered = [...approaches].sort(
-          (a, b) => manhattan(a.pos, taunter.pos) - manhattan(b.pos, taunter.pos),
+          (a, b) => ctx.nav.distance(a.pos, taunter) - ctx.nav.distance(b.pos, taunter),
         );
       }
     }
@@ -230,7 +236,7 @@ function applyCompulsions(ctx: AiContext, candidates: readonly Candidate[]): Can
     let nearest: Unit | undefined;
     let bestDistance = Infinity;
     for (const hostile of ctx.hostiles) {
-      const d = manhattan(actor.pos, hostile.pos);
+      const d = ctx.nav.distance(actor.pos, hostile);
       if (d < bestDistance) {
         bestDistance = d;
         nearest = hostile;
@@ -252,7 +258,7 @@ function applyCompulsions(ctx: AiContext, candidates: readonly Candidate[]): Can
         const approaches = filtered.filter((c) => c.ability === undefined);
         if (approaches.length > 0) {
           filtered = [...approaches].sort(
-            (a, b) => manhattan(a.pos, target.pos) - manhattan(b.pos, target.pos),
+            (a, b) => ctx.nav.distance(a.pos, target) - ctx.nav.distance(b.pos, target),
           );
         }
       }
@@ -311,7 +317,7 @@ function shouldDefend(ctx: AiContext): boolean {
   const archetype = ctx.personality.id;
   if (archetype !== 'defensive' && archetype !== 'coward' && archetype !== 'support') return false;
   for (const source of ctx.threat.sources) {
-    if (source.damage > 0 && manhattan(ctx.actor.pos, source.unit.pos) <= source.reach + 1) return true;
+    if (source.damage > 0 && ctx.nav.distance(ctx.actor.pos, source.unit) <= source.reach + 1) return true;
   }
   return false;
 }

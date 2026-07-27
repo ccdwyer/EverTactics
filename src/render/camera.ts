@@ -153,8 +153,16 @@ export const MAX_FRAME_MARGIN_FRACTION = 0.15;
 /**
  * Outward bias on the cover fit in `frameField`. 1.0 rounds to nearest; above 1 prefers the
  * zoom step that lets the board run off the frame rather than the one that contains it.
+ *
+ * Back to neutral in round 3. It was a blunt 6% guess standing in for the real requirement,
+ * which is now computed: `frameField` inflates the cover span by the composition offset
+ * directly, so the outward push is derived from how far off-centre the shot is actually
+ * staged rather than from a constant. Leaving both in place stacked to ~16% and tipped a
+ * 14-tile board a whole zoom step, which costs far more (a character at 18% of frame height
+ * against the references' 12-17%, and two thirds of the map cropped away) than the sliver of
+ * background it was buying insurance against.
  */
-export const COVER_BLEED = 1.06;
+export const COVER_BLEED = 1.0;
 
 /** Centre of the walkable top surface of a grid cell, in world space. */
 export function gridToWorld(
@@ -202,7 +210,7 @@ export const YAW_ANGLES: readonly number[] = [
  * This is added at `rebuild()` time and reported by {@link IsoCamera.yawRadians}, so
  * billboards and facing selection follow it and nothing needs to know it exists.
  */
-export const DEFAULT_YAW_TRIM_DEGREES = 7;
+export const DEFAULT_YAW_TRIM_DEGREES = 10;
 
 /**
  * Where the focus point lands on screen by default, as a signed fraction of frame width and
@@ -217,7 +225,7 @@ export const DEFAULT_YAW_TRIM_DEGREES = 7;
  * board must not sit under it, left because the turn-order rail is anchored top-centre/right
  * and an off-centre subject sets up a diagonal against it.
  */
-export const DEFAULT_COMPOSE_OFFSET: readonly [number, number] = [0.05, 0.0];
+export const DEFAULT_COMPOSE_OFFSET: readonly [number, number] = [-0.055, -0.035];
 
 export type YawIndex = 0 | 1 | 2 | 3;
 
@@ -631,8 +639,18 @@ export class IsoCamera {
       // COVER_BLEED biases the rounding outward so a board that lands just under a step
       // still takes it. The character-size ceiling caps the result (FFT's own ~17% of frame
       // height is the outer edge of shipped practice), so this cannot run away.
-      const coverW = this.bufferWidth / (TEXELS_PER_UNIT * Math.max(spanH, 1e-3));
-      const coverH = this.bufferHeight / (TEXELS_PER_UNIT * Math.max(spanV, 1e-3));
+      //
+      // The cover fit has to know about the composition offset. Sliding the subject a
+      // fraction `o` of the frame off centre means the board now has to reach `0.5 + |o|` of
+      // the way to the far edge instead of `0.5`, i.e. it must span `1 + 2|o|` frames — and
+      // if it does not, the side it was slid AWAY from turns into exactly the flat empty
+      // background the round-1 critique measured at half the frame. Round 3 hit this the
+      // moment the offset went from [0.05, 0] to an off-axis compose: the board pulled up and
+      // left and the lower-right quadrant became void.
+      const bleedX = 1 + 2 * Math.abs(this.composeOffset.x);
+      const bleedY = 1 + 2 * Math.abs(this.composeOffset.y);
+      const coverW = (this.bufferWidth * bleedX) / (TEXELS_PER_UNIT * Math.max(spanH, 1e-3));
+      const coverH = (this.bufferHeight * bleedY) / (TEXELS_PER_UNIT * Math.max(spanV, 1e-3));
       const cover = Math.round(Math.max(coverW, coverH) * COVER_BLEED);
       best = Math.min(Math.max(best, Math.min(cover, this.compositionCeilingPixelScale)), ceiling);
     }

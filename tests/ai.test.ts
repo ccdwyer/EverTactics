@@ -232,46 +232,75 @@ describe('decideTurn — lethal kills', () => {
 });
 
 describe('decideTurn — terrain', () => {
+  /**
+   * A ring corridor with a T-junction at the bottom. The unit (Move 1) may step
+   * left to (1,3) at height 0 or right to (3,3) at height 2; the two arms of the
+   * ring are the same length, so both tiles sit exactly 4 steps of walking from
+   * the only hostile and neither can attack it this turn. The choice is purely
+   * positional.
+   *
+   * The hostile has to be genuinely *reachable* for this to test anything. The
+   * positional terms are deliberately scaled by how close the engagement is (see
+   * `contactRadius`), so height advantage over a permanently walled-off enemy is
+   * correctly worth nothing at all.
+   */
+  const RING = [
+    '##0##',
+    '#000#',
+    '#0#0#',
+    '#002#',
+    '#####',
+  ];
+
   it('prefers high ground when the two options are otherwise identical', () => {
-    // A T-junction: the unit may step left (height 0) or right (height 2).
-    // Both end tiles sit exactly 3 tiles from the only hostile, which is walled
-    // off, so no attack is possible and the choice is purely positional.
-    const field = makeField([
-      '###',
-      '002',
-      '###',
-      '#0#',
-    ]);
-    const ai = makeUnit('ai', 'enemy', { x: 1, y: 1, z: 0 }, { move: 1 });
-    const foe = makeUnit('foe', 'player', { x: 1, y: 3, z: 0 }, { move: 3 });
+    const field = makeField(RING);
+    const ai = makeUnit('ai', 'enemy', { x: 2, y: 3, z: 0 }, { move: 1 });
+    const foe = makeUnit('foe', 'player', { x: 2, y: 0, z: 0 }, { move: 3 });
     const state = makeState(field, [ai, foe]);
 
     const plan = planTurn(state, 'ai', { personality: 'tactician' });
     expect(plan).toBeDefined();
     const chosen = plan?.candidate;
-    expect(chosen?.pos.x).toBe(2);
+    expect(chosen?.pos.x).toBe(3);
     expect(chosen?.pos.z).toBe(2);
   });
 
   it('scores the elevated tile above the flat one at equal distance', () => {
-    const field = makeField([
-      '###',
-      '002',
-      '###',
-      '#0#',
-    ]);
-    const ai = makeUnit('ai', 'enemy', { x: 1, y: 1, z: 0 }, { move: 1 });
-    const foe = makeUnit('foe', 'player', { x: 1, y: 3, z: 0 }, { move: 3 });
+    const field = makeField(RING);
+    const ai = makeUnit('ai', 'enemy', { x: 2, y: 3, z: 0 }, { move: 1 });
+    const foe = makeUnit('foe', 'player', { x: 2, y: 0, z: 0 }, { move: 3 });
     const state = makeState(field, [ai, foe]);
 
     const plan = planTurn(state, 'ai', { personality: 'defensive' });
     const all = [plan?.candidate, ...(plan?.alternatives ?? [])];
-    const high = all.find((c) => c !== undefined && c.pos.x === 2 && c.pos.y === 1);
-    const low = all.find((c) => c !== undefined && c.pos.x === 0 && c.pos.y === 1);
+    const high = all.find((c) => c !== undefined && c.pos.x === 3 && c.pos.y === 3);
+    const low = all.find((c) => c !== undefined && c.pos.x === 1 && c.pos.y === 3);
     expect(high).toBeDefined();
     expect(low).toBeDefined();
     expect(high!.score).toBeGreaterThan(low!.score);
     expect(high!.terms.height).toBeGreaterThan(low!.terms.height);
+  });
+
+  it('does not mistake an enemy behind a wall for an enemy it has engaged', () => {
+    // The regression that made battles run to the turn cap. `ai` and `foe` are
+    // two tiles apart on paper, but the tile between them is a wall and the only
+    // way round is a five-step detour. Reading that as "already at engagement
+    // range" satisfies the approach term completely, and since nothing else has a
+    // gradient out in the open the unit stands there for the rest of the battle.
+    const field = makeField([
+      '0#0',
+      '000',
+      '000',
+    ]);
+    const ai = makeUnit('ai', 'enemy', { x: 0, y: 0, z: 0 }, { move: 1 });
+    const foe = makeUnit('foe', 'player', { x: 2, y: 0, z: 0 }, { move: 1 });
+    const state = makeState(field, [ai, foe]);
+
+    const plan = planTurn(state, 'ai', { personality: 'aggressive' });
+    expect(plan).toBeDefined();
+    // It must set off around the wall rather than hold a tile it cannot fight from.
+    expect(plan?.candidate.pos).not.toEqual({ x: 0, y: 0, z: 0 });
+    expect(manhattan(plan!.candidate.pos, { x: 0, y: 0 })).toBe(1);
   });
 });
 

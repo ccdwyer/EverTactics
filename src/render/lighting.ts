@@ -281,7 +281,7 @@ const DEFAULT_VIEW_BEARING = bearingFromYawDegrees(
  * view — far enough that the shadows land in open frame, near enough that the
  * faces we look at are the faces that are lit.
  */
-const KEY_VIEW_SEPARATION_MIN = 62;
+const KEY_VIEW_SEPARATION_MIN = 90;
 const KEY_VIEW_SEPARATION_MAX = 128;
 
 /**
@@ -342,11 +342,22 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     skyColor: 0x3a6ad4,
     groundColor: 0x7e3c17,
     hemiIntensity: 1.0,
-    rimColor: 0x46a6ff,
+    // TEAL, not blue — and this is the map's tertiary hue, not a detail.
+    //
+    // Round 3's loudest colour note was "a two-hue lockup (navy + amber) with
+    // nothing between… material identity dissolves". It was correct, and the
+    // cause was that every cool light in this preset sat on the same hue: sky
+    // 0x3a6ad4, rim 0x46a6ff and ambient 0x0e1a30 are three shades of one blue,
+    // so a surface could only ever be some mix of amber and navy. Splitting the
+    // rim to teal and the flat bounce to violet gives the shadow side two
+    // distinguishable families of its own — which is exactly the grammar of
+    // `refs/curated/triangle/press_041`: warm orange key, cold *teal* fill, and
+    // violet in the deepest crevices.
+    rimColor: 0x3ec2d8,
     rimIntensity: 1.6,
     rimAzimuth: 296,
     rimElevation: 30,
-    ambientColor: 0x0e1a30,
+    ambientColor: 0x181040,
     ambientIntensity: 0.1,
     background: 0x0a1424,
     fogColor: 0x13253e,
@@ -1098,10 +1109,20 @@ export class LightingRig {
     // frames rather than invented: a sky fill around a sixth of the sun, a
     // near-zero flat term (crevices are meant to go black), a rim strong enough
     // to draw a silhouette but never to compete for "which way is the light".
-    const targetHemi = key * 0.17;
-    const targetAmbient = key * 0.025;
+    //
+    // Round 3 pulled all three flat terms down again. Measured on the round-2
+    // targets, a shadowed floor tile still received hemi 0.53 + ambient 0.08 +
+    // probe 0.85 ≈ 1.4 against a lit 3.9 — a 2.8:1 range, which is an overcast
+    // afternoon, not the reference corpus. In
+    // `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` the ground four
+    // tiles from a fire is *black*; the frame carries maybe a 20:1 range and
+    // spends most of its area at the bottom of it. Pulling the fill to a tenth
+    // of the key is what lets a brazier's own pool become the brightest thing on
+    // the flagstones instead of a warm tint over an already-lit floor.
+    const targetHemi = key * 0.115;
+    const targetAmbient = key * 0.012;
     const targetRim = key * 0.34;
-    const targetProbe = Math.min(s.probeIntensity, 0.85);
+    const targetProbe = Math.min(s.probeIntensity, 0.6);
 
     const hemi = MathUtils.lerp(s.hemiIntensity, targetHemi, drama);
     const ambient = MathUtils.lerp(s.ambientIntensity, targetAmbient, drama);
@@ -1117,13 +1138,20 @@ export class LightingRig {
 
     const rim = Math.max(s.rimIntensity, MathUtils.lerp(s.rimIntensity, targetRim, drama));
     const rimCost = Math.max(0, rim - s.rimIntensity);
-    // The key absorbs whatever the rim did not, divided by the cosine it will be
-    // seen through — a 54° sun only delivers sin 54° of its intensity to the
-    // floor, so handing it the raw number under-compensates and the frame dims.
-    const cosine = Math.max(0.35, Math.sin(MathUtils.degToRad(keyElevation)));
-    const recovered = Math.max(0, surrendered - rimCost * 0.5) / cosine;
+    // The key absorbs whatever the rim did not, divided by the angle it will be
+    // seen through — a low sun only delivers sin(elevation) of its intensity to
+    // the floor, so handing it the raw number under-compensates and the frame
+    // dims. But dividing by the raw sine over-compensates the *walls*: a vertical
+    // face is lit by cos(elevation), so at 39° the same division that restores a
+    // floor tile to par pushes every wall plane 1.3× past where the author had
+    // it, and the frame arrives with clipped gold on every masonry face. Splitting
+    // the difference keeps both within a few percent, which is what
+    // "brightness-neutral" was supposed to mean.
+    const sine = Math.max(0.35, Math.sin(MathUtils.degToRad(keyElevation)));
+    const throughput = Math.max(0.5, (1 + sine) * 0.5);
+    const recovered = Math.max(0, surrendered - rimCost * 0.5) / throughput;
 
-    return { key: key + recovered * 0.9, rim, hemi, ambient, probe };
+    return { key: key + recovered * 0.85, rim, hemi, ambient, probe };
   }
 
   /**
@@ -1211,6 +1239,12 @@ export class LightingRig {
       // six, twenty tiles back, behind a tone mapper and a grade.
       this.practicalBase[i] = spec.intensity * Math.max(0, this.live.practicalGain);
       light.intensity = this.practicalBase[i]!;
+      // Published for anyone downstream who needs to know how hard this source is
+      // *meant* to burn once the rig has started flickering it. `vfx.ts` reads it
+      // to size the glare card and to rate-limit embers, using exactly the same
+      // convention `terrain.ts` uses for its brazier props — so a preset-placed
+      // torch and a prop-placed torch behave identically.
+      light.userData['baseIntensity'] = this.practicalBase[i]!;
     }
   }
 

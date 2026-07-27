@@ -661,8 +661,8 @@ const CONTACT_SHADOW_LIFT = 0.012;
 /** Where the feet sit along the decal's long axis, in UV. */
 const SHADOW_FOOT_V = 0.24;
 /** Decal size in world units, before the per-frame directional stretch. */
-const SHADOW_WIDTH = TILE_SIZE * 1.05;
-const SHADOW_LENGTH = TILE_SIZE * 1.55;
+const SHADOW_WIDTH = TILE_SIZE * 1.25;
+const SHADOW_LENGTH = TILE_SIZE * 1.5;
 
 let groundShadowTexture: THREE.CanvasTexture | null = null;
 function getGroundShadowTexture(): THREE.CanvasTexture {
@@ -689,23 +689,56 @@ function getGroundShadowTexture(): THREE.CanvasTexture {
       // clearly past the boot silhouette — roughly half a tile — before any of
       // it is visible, which is also what the FFT frames show: a soft patch
       // spilling around the feet, not a dot beneath them.
-      const cu = du / 0.245;
+      // ── Round 3, re-measured rather than re-guessed ────────────────────────
+      // The decal was rendered in flat green and the frame shot: the footprint
+      // *was* on the ground, but nearly all of it lay up-screen of the unit —
+      // `battle-open` keys at azimuth 138°, which throws the tail behind the
+      // billboard, into the pixels the billboard already covers. The only part
+      // of a ground shadow a 32°-pitch camera can actually see is the part that
+      // reaches *around* the boots, so the pool has to carry the grounding and
+      // the tail can only ever be a directional hint.
+      //
+      // Hence three lobes rather than two:
+      //   • `contact` — small and nearly opaque, the hairline of ground the
+      //     shadow map cannot resolve. Mostly hidden under the feet, but it is
+      //     what makes the crescent that *is* visible read as dark rather than
+      //     as a smudge.
+      //   • `pool`    — broad and soft, ~0.6 tile, the part that clears the
+      //     silhouette on every side and reads at this camera pitch.
+      //   • `tail`    — short, directional, agreeing with the key azimuth so the
+      //     unit's shadow points where the terrain's own shadows point.
+      const cu = du / 0.225;
       const cv = (v - SHADOW_FOOT_V) / 0.175;
-      const core = Math.exp(-(cu * cu + cv * cv) * 0.85);
+      const contact = Math.exp(-(cu * cu + cv * cv) * 0.9);
+
+      const pu = du / 0.40;
+      const pv = (v - SHADOW_FOOT_V) / 0.30;
+      const pool = Math.exp(-(pu * pu + pv * pv) * 0.85) * 0.58;
 
       // Directional tail: fades and widens with distance, so the far end
-      // dissolves into the ground instead of ending on an edge.
+      // dissolves into the ground instead of ending on an edge. Deliberately
+      // weak. Shot with the decal tinted flat green, the tail was by far the
+      // largest visible part of the footprint — a low-density wedge lying across
+      // a tile and a half of lantern-lit stone — and at that density a multiply
+      // does not read as a shadow, it reads as haze over the terrain. The pool
+      // is what grounds the unit; the tail only has to say where the light is.
       const t = Math.min(1, Math.max(0, (v - SHADOW_FOOT_V) / (1 - SHADOW_FOOT_V)));
-      const width = 0.19 + 0.13 * t;
+      const width = 0.17 + 0.13 * t;
       const lobe = Math.exp(-((du / width) * (du / width)));
-      const tail = lobe * Math.pow(1 - t, 2.0) * 0.85;
+      const tail = lobe * Math.pow(1 - t, 2.6) * 0.34;
 
-      const occlusion = Math.min(1, Math.max(core, tail));
-      const value = Math.round(255 * (1 - occlusion * 0.74));
+      const occlusion = Math.min(1, Math.max(contact, Math.max(pool, tail)));
+      const value = Math.round(255 * (1 - occlusion * 0.84));
       const o = (py * size + px) * 4;
+      // Cool, but only just. This is a *multiply*, and the ratio it applies is
+      // amplified by the sRGB decode before it reaches the framebuffer: the
+      // previous B = value*1.06 + 4 landed as a ~24% blue push in linear space,
+      // which on warm lantern-lit stone desaturated more than it darkened and
+      // made the shadow read as fog. Occluded ground does pick up sky rather
+      // than going neutral, but by a hair.
       image.data[o] = value;
-      image.data[o + 1] = Math.round(value * 0.985);
-      image.data[o + 2] = Math.round(Math.min(255, value * 1.06 + 4)); // cool it
+      image.data[o + 1] = Math.round(value * 0.992);
+      image.data[o + 2] = Math.round(Math.min(255, value * 1.022 + 2));
       image.data[o + 3] = 255;
     }
   }
@@ -746,7 +779,7 @@ function createShadowDecalMaterial(map: THREE.Texture): THREE.ShaderMaterial {
       varying vec2 vUvDecal;
       void main() {
         vec3 shade = texture2D(uMap, vUvDecal).rgb;
-        gl_FragColor = vec4(mix(vec3(1.0), vec3(1.0, 0.0, 0.0), (1.0 - shade.r) * 3.0), 1.0);
+        gl_FragColor = vec4(mix(vec3(1.0), shade, clamp(uStrength, 0.0, 1.0)), 1.0);
       }
     `,
     blending: THREE.MultiplyBlending,

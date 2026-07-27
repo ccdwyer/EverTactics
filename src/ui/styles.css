@@ -105,10 +105,15 @@
   --hud-top: 18px;
 
   /* ── surfaces ──────────────────────────────────────────────────────────── */
+  /* Layered: an inner top light-line (the bevel), a deep inner cast so the panel
+     body reads as a recess behind the gold rule rather than a printed plate, and
+     two drop shadows at different radii so the panel lifts off the board. With
+     the panel now translucent this shadow is doing the separation work opacity
+     used to do. */
   --shadow-panel:
-    0 1px 0 rgba(255, 246, 223, 0.08) inset,
-    0 18px 44px -14px rgba(0, 0, 0, 0.85),
-    0 2px 8px rgba(0, 0, 0, 0.6);
+    0 1px 0 rgba(255, 246, 223, 0.1) inset,
+    0 22px 52px -16px rgba(0, 0, 0, 0.95),
+    0 4px 14px -4px rgba(0, 0, 0, 0.75);
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
   --fibre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.5' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23f)' opacity='0.35'/%3E%3C/svg%3E");
 
@@ -152,12 +157,49 @@
    Panel — the ornate frame
    =========================================================================== */
 
+/* TRANSLUCENCY.
+   ---------------------------------------------------------------------------
+   Measured off refs/curated/triangle/press_004_gematsu_1920x1080.jpg: the
+   persuasion window is roughly 70% opaque — the candlelit hall reads clearly
+   through the panel body, and the panel is separated from it by a drop shadow
+   and a bright hairline, not by opacity. refs/curated/fft/...mediakit-06.png
+   goes further still: the acting-unit block has no panel fill at all.
+
+   Round 2 ran 96-98% opaque, which is why the critics read the HUD as "a picture
+   frame that squeezes the game into the middle" — four solid navy rectangles
+   genuinely do subtract that area from the composition. At 0.82 the board is
+   still legible underneath, so the panels cost the frame far less than their
+   footprint suggests, and the saturate() keeps the terrain behind them from
+   competing with the type. */
 .et-panel {
   position: relative;
   padding: 0;
   color: var(--ink-text);
+  /* Two layers. The vignette on top of the body gradient is deliberately a
+     BACKGROUND and not an inset box-shadow: an inset shadow is clipped to the
+     padding box, so with a 13px border-image frame the border strip received no
+     edge darkening at all and rendered as a pale slate lip running along the
+     bottom of every panel, just inside the gold rule (visible in
+     shots/r3-uionly-before.png under every one of the three panels). A
+     background layer paints across the whole border box, so the falloff is
+     continuous from the content out through the frame. */
   background:
-    linear-gradient(178deg, rgba(43, 58, 96, 0.96) 0%, rgba(19, 27, 49, 0.97) 42%, rgba(9, 13, 26, 0.98) 100%);
+    radial-gradient(128% 122% at 50% 42%, rgba(0, 0, 0, 0) 46%, rgba(2, 4, 9, 0.55) 82%, rgba(2, 4, 9, 0.82) 100%),
+    linear-gradient(178deg, rgba(43, 58, 96, 0.8) 0%, rgba(19, 27, 49, 0.84) 42%, rgba(7, 11, 22, 0.87) 100%);
+  /* THE PALE LIP BUG.
+     `background-origin` defaults to `padding-box`, so a gradient with
+     `background-size: auto` is sized to the padding box and then TILED to fill
+     the border box. With a 13px border-image frame that meant the 13px strip
+     inside the gold rule was painted with a repeat of the gradient — i.e. with
+     its 0% stop, rgba(43,58,96,.8). Sampled in shots/r3-preview-a.png at the
+     bottom of the command window: (34,46,77), which is exactly 43,58,96 x 0.8.
+     That is the pale slate band that ran along the bottom (and up the sides) of
+     every panel in rounds 2 and 3. Anchoring the origin to the border box makes
+     one gradient span the whole panel, frame included. */
+  background-origin: border-box;
+  background-repeat: no-repeat;
+  backdrop-filter: blur(7px) saturate(0.62) brightness(0.72);
+  -webkit-backdrop-filter: blur(7px) saturate(0.62) brightness(0.72);
   border: 13px solid transparent;
   border-image-source: url('./frames/panel-frame.svg');
   border-image-slice: 34;
@@ -181,6 +223,11 @@
 .et-panel--parchment {
   background:
     linear-gradient(176deg, #f2e7cb 0%, #e3d4ae 55%, #d2c096 100%);
+  /* The `background` shorthand resets background-origin to padding-box, which
+     re-introduces the pale-lip bug documented on .et-panel for every tone that
+     overrides the fill. Re-anchor after every shorthand. */
+  background-origin: border-box;
+  background-repeat: no-repeat;
   color: #2c2415;
   border-image-source: url('./frames/panel-frame-parchment.svg');
 }
@@ -193,7 +240,15 @@
 .et-panel--parchment .et-panel__title { color: #4a3a1c; }
 
 .et-panel--dark {
-  background: linear-gradient(180deg, rgba(10, 14, 26, 0.97), rgba(4, 6, 12, 0.98));
+  background: linear-gradient(180deg, rgba(8, 12, 23, 0.84), rgba(3, 5, 10, 0.9));
+  background-origin: border-box;
+  background-repeat: no-repeat;
+}
+/* The parchment tone is a physical document, not a glass window — it stays
+   opaque and takes no backdrop treatment. */
+.et-panel--parchment {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .et-panel--danger { box-shadow: var(--shadow-panel), 0 0 30px -6px rgba(200, 73, 47, 0.55); }
 
@@ -338,14 +393,24 @@
   align-items: center;
   justify-content: center;
 }
+/* Triangle Strategy's rule is a hairline that terminates in a lozenge-and-bead
+   ornament at BOTH ends (•◆oo—————oo◆•), not a plain fade. Reproduced here as
+   two radial beads riding the gradient, which survives at any panel width. */
 .et-divider::before {
   content: '';
   position: absolute;
   left: 0;
   right: 0;
   top: 50%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(201, 162, 39, 0.42) 22%, rgba(201, 162, 39, 0.42) 78%, transparent);
+  height: 3px;
+  margin-top: -1px;
+  background:
+    radial-gradient(circle at 3px 50%, var(--gold) 0 1.4px, transparent 1.8px),
+    radial-gradient(circle at 9px 50%, var(--gold-dim) 0 1.1px, transparent 1.5px),
+    radial-gradient(circle at calc(100% - 3px) 50%, var(--gold) 0 1.4px, transparent 1.8px),
+    radial-gradient(circle at calc(100% - 9px) 50%, var(--gold-dim) 0 1.1px, transparent 1.5px),
+    linear-gradient(180deg, transparent 1px, rgba(201, 162, 39, 0.42) 1px 2px, transparent 2px);
+  background-repeat: no-repeat;
 }
 .et-divider::after {
   content: '';
@@ -422,11 +487,26 @@
   transform: scaleY(0.3);
   transition: opacity var(--dur-fast) ease, transform 220ms var(--ease-out-expo);
 }
+/* The selected row is a FILLED bar, not a tint.
+   Measured off refs/curated/triangle/press_004_gematsu_1920x1080.jpg: the chosen
+   dialogue option is a solid horizontal gradient plate running the full width of
+   the row, dark at the left and warm at the right, inside a hairline keyline.
+   Round 2's 0.22-alpha wash over 62% of the row was a hover state, not a
+   selection — the critics' "no highlight fill on the selected MOVE row". */
 .et-menu__row.is-active {
   color: var(--ink-bright);
-  background: linear-gradient(90deg, rgba(201, 162, 39, 0.22) 0%, rgba(201, 162, 39, 0.05) 62%, transparent 100%);
+  background: linear-gradient(
+    90deg,
+    rgba(56, 46, 18, 0.86) 0%,
+    rgba(122, 96, 30, 0.72) 46%,
+    rgba(201, 162, 39, 0.5) 88%,
+    rgba(201, 162, 39, 0.16) 100%
+  );
   transform: translateX(3px);
-  box-shadow: inset 0 1px 0 rgba(255, 246, 223, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(240, 221, 160, 0.34),
+    inset 0 1px 0 rgba(255, 246, 223, 0.2),
+    inset 0 -8px 12px -8px rgba(0, 0, 0, 0.8);
 }
 .et-menu__row.is-active::before { opacity: 1; transform: scaleY(1); }
 .et-menu__row.is-disabled { color: rgba(169, 157, 128, 0.5); cursor: not-allowed; }
@@ -766,7 +846,19 @@
   gap: 5px;
   padding: 2px 5px 2px 2px;
   cursor: pointer;
-  background: linear-gradient(90deg, rgba(19, 27, 49, 0.82), rgba(6, 9, 18, 0.45));
+  /* Team-coloured PLATE, not just a coloured edge.
+     In refs/curated/fft/press-042310-...-mediakit-06.png every combat-timeline
+     entry sits on a filled plate in its allegiance colour — cool blue for the
+     party, red for hostiles — which is how the rail is readable at a glance from
+     across the room. Round 2 carried a 2px left border only, so twelve chips
+     read as one undifferentiated dark column. The tint is mixed down into the
+     panel navy so the rail still belongs to the same chrome family. */
+  background: linear-gradient(
+    92deg,
+    color-mix(in srgb, var(--team-color) 34%, rgba(10, 15, 29, 0.94)),
+    color-mix(in srgb, var(--team-color) 12%, rgba(6, 9, 18, 0.62)) 78%,
+    rgba(6, 9, 18, 0.4)
+  );
   border: 1px solid rgba(201, 162, 39, 0.2);
   border-left: 2px solid var(--team-color);
   box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.95);
@@ -933,14 +1025,23 @@
   inset: 0;
   z-index: 3;
   background:
-    linear-gradient(155deg, rgba(255, 255, 255, 0.13), transparent 42%),
+    linear-gradient(155deg, rgba(255, 255, 255, 0.11), transparent 42%),
     var(--grain);
-  background-size: auto, 74px 74px;
+  background-size: auto, 128px 128px;
   background-blend-mode: normal, overlay;
-  opacity: 0.92;
+  /* Round 2 ran this at 0.92 over a 74px grain tile. On the 104px acting-unit
+     face that resolved as visible speckle noise ON the drawing rather than as
+     film grain OVER it — read off shots/r3-ui-before, the portrait was the
+     noisiest region of the frame. Halved, on a coarser tile, it still bridges
+     the painted-face / pixel-sprite gap without eating the linework. */
+  opacity: 0.44;
   pointer-events: none;
 }
-.et-portrait__img { filter: saturate(0.94) contrast(1.05); }
+/* Pull the faces into the scene grade rather than leaving them in their own
+   colour space: slightly cooled, slightly desaturated, blacks lifted toward the
+   map's navy so a portrait is never the brightest thing on screen. */
+.et-portrait__img { filter: saturate(0.86) contrast(1.06) brightness(0.94); }
+.et-portrait--lg .et-portrait__img { filter: saturate(0.88) contrast(1.04) brightness(0.96); }
 
 /* ===========================================================================
    Meters
@@ -1037,17 +1138,20 @@
   inset: 0 auto 0 0;
   width: 0;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--meter-color) 100%, black 30%) 0%, var(--meter-color) 62%, color-mix(in srgb, var(--meter-color) 100%, white 40%) 100%),
-    linear-gradient(180deg, color-mix(in srgb, var(--meter-color) 100%, white 34%) 0%, var(--meter-color) 46%, color-mix(in srgb, var(--meter-color) 100%, black 40%) 100%);
+    linear-gradient(90deg, color-mix(in srgb, var(--meter-color) 100%, black 42%) 0%, var(--meter-color) 68%, color-mix(in srgb, var(--meter-color) 100%, white 18%) 100%),
+    linear-gradient(180deg, color-mix(in srgb, var(--meter-color) 100%, white 22%) 0%, var(--meter-color) 48%, color-mix(in srgb, var(--meter-color) 100%, black 46%) 100%);
   background-blend-mode: overlay, normal;
+  /* No outer glow. A 12px bloom the colour of the fill is what made these bars
+     read as emissive UI floating over a graded night scene; the shipped bars are
+     lit objects in a channel, so the shading is all inset. */
   box-shadow:
-    0 0 12px -1px var(--meter-color),
-    inset 0 1px 0 rgba(255, 255, 255, 0.42),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.45);
   transition: width 260ms var(--ease-out-expo);
   z-index: 2;
 }
-/* Bright leading edge — sells the bar as filled rather than painted. */
+/* Leading edge — sells the bar as filled rather than painted. Kept, but tuned
+   down from white-70 + halo to a warm lip that does not out-glow the lanterns. */
 .et-meter__fill::after {
   content: '';
   position: absolute;
@@ -1055,8 +1159,7 @@
   bottom: 0;
   right: 0;
   width: 2px;
-  background: color-mix(in srgb, var(--meter-color) 100%, white 70%);
-  box-shadow: 0 0 7px 1px color-mix(in srgb, var(--meter-color) 100%, white 30%);
+  background: color-mix(in srgb, var(--meter-color) 100%, #ffeec4 45%);
 }
 .et-meter.is-empty .et-meter__fill::after { display: none; }
 .et-meter__ghost {
@@ -1119,9 +1222,61 @@
   border: 1px solid rgba(201, 162, 39, 0.45);
   background: rgba(0, 0, 0, 0.3);
 }
+/* TEAM IDENTITY.
+   ---------------------------------------------------------------------------
+   In the round-3 frame the acting player Knight (bottom-left) and the inspected
+   enemy Knight (top-right) rendered as two visually identical cards. Some of
+   that is a content bug in the scenario — both units really are Knight Lv 14, so
+   the numerals match — but the chrome was doing nothing to distinguish friend
+   from foe either, and a HUD that cannot tell you at a glance whether the unit
+   you are inspecting is going to hit you is failing at its job regardless of the
+   data behind it.
+
+   So the card now carries the allegiance in three places: a colour bar along the
+   head rule, a tinted level chip, and a heavier coloured inner glow. */
+.et-unitinfo { --team-tint: var(--team-neutral); }
+.et-unitinfo[data-team='player'] { --team-tint: var(--team-player); }
+.et-unitinfo[data-team='enemy'] { --team-tint: var(--team-enemy); }
+.et-unitinfo[data-team='ally'] { --team-tint: var(--team-ally); }
+
+.et-unitinfo__head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--team-tint), color-mix(in srgb, var(--team-tint) 30%, transparent) 62%, transparent);
+  box-shadow: 0 0 10px -2px var(--team-tint);
+}
+.et-unitinfo__head { position: relative; padding-bottom: 6px; }
+
 .et-unitinfo[data-team='enemy'] .et-unitinfo__name { color: #ffd8cf; }
-.et-unitinfo[data-team='enemy'] { box-shadow: var(--shadow-panel), inset 0 0 40px -18px rgba(217, 88, 74, 0.6); }
-.et-unitinfo[data-team='player'] { box-shadow: var(--shadow-panel), inset 0 0 40px -20px rgba(110, 168, 224, 0.45); }
+.et-unitinfo[data-team='enemy'] .et-unitinfo__level {
+  border-color: rgba(217, 88, 74, 0.6);
+  color: #ffd0c6;
+}
+.et-unitinfo[data-team='enemy'] { box-shadow: var(--shadow-panel), inset 0 0 46px -14px rgba(217, 88, 74, 0.55); }
+.et-unitinfo[data-team='player'] { box-shadow: var(--shadow-panel), inset 0 0 46px -16px rgba(110, 168, 224, 0.42); }
+/* A small allegiance word set in the display face, hung in the panel's top-right
+   corner. Deliberately NOT a flex child of the head row: as one it competed for
+   width with the name, and "Corvin" rendered as "CORV..." with the level chip
+   wrapped onto two lines. Taken out of flow it costs the ident block nothing. */
+.et-unitinfo__team {
+  position: absolute;
+  top: 0;
+  right: 1px;
+  z-index: 2;
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--team-tint) 100%, white 46%);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+  white-space: nowrap;
+  pointer-events: none;
+}
 
 .et-unitinfo__meters { display: flex; flex-direction: column; gap: 5px; }
 .et-unitinfo__bf {
@@ -1359,10 +1514,12 @@
   box-shadow: inset 0 0 0 1px rgba(201, 162, 39, 0.3), inset 0 2px 4px rgba(0, 0, 0, 0.85);
   overflow: hidden;
 }
+/* Same jade as .et-meter--hp — the surviving-HP band and the unit panel's HP bar
+   are the same quantity and must not be two different greens. */
 .et-target__hp-safe {
   position: absolute;
   inset: 0 auto 0 0;
-  background: linear-gradient(180deg, #9ada9e, #4d9b58);
+  background: linear-gradient(180deg, #86ad81, #4a6746);
   transition: width 320ms var(--ease-out-expo);
 }
 .et-target__hp-risk {
@@ -1583,37 +1740,57 @@
 .et-banner--victory .et-banner__title { color: #fff2cd; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.8), 0 0 46px rgba(255, 220, 140, 0.6); }
 .et-banner--defeat .et-banner__title { color: #c9bfae; }
 
+/* The prompt rail.
+   ---------------------------------------------------------------------------
+   Both references put button prompts bottom-right as ROUND glyphs followed by a
+   verb — FFT's "⊗ Move Here  ⊙ Cancel", Triangle's "Ⓑ Cancel". Round 2 shipped
+   rectangular keycaps centred on the bottom edge over a flat scrim, which the
+   critics called "unstyled system text ... no controller glyphs, no panel". The
+   rail is now right-aligned like both references (so it stops cutting the
+   composition in half), the caps are circular, and the plate is a soft
+   feathered gradient rather than a hard band. */
 .et-hints {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   display: flex;
-  justify-content: center;
-  gap: 14px;
-  padding: 5px 14px 6px;
-  background: linear-gradient(180deg, transparent, rgba(5, 7, 13, 0.6) 60%);
+  justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 26px 11px;
+  background: linear-gradient(180deg, transparent, rgba(5, 7, 13, 0.42) 55%, rgba(4, 6, 12, 0.66) 100%);
   transition: opacity var(--dur) var(--ease-soft), transform var(--dur) var(--ease-soft);
 }
 .et-hints.is-hidden { opacity: 0; transform: translateY(10px); }
-.et-hint { display: flex; align-items: center; gap: 6px; }
-.et-hint__keys { display: flex; gap: 3px; }
+.et-hint { display: flex; align-items: center; gap: 7px; }
+.et-hint__keys { display: flex; gap: 4px; }
 .et-key {
-  min-width: 19px;
-  padding: 1px 5px;
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
+  letter-spacing: 0.06em;
   text-align: center;
-  color: var(--gold-bright);
-  background: linear-gradient(180deg, rgba(36, 48, 79, 0.9), rgba(10, 15, 29, 0.9));
-  border: 1px solid rgba(201, 162, 39, 0.42);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+  color: #fdf3d9;
+  background:
+    radial-gradient(120% 120% at 34% 22%, rgba(96, 118, 168, 0.95), rgba(14, 20, 36, 0.95) 74%);
+  box-shadow:
+    inset 0 0 0 1px rgba(240, 221, 160, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 2px 5px -1px rgba(0, 0, 0, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 .et-hint__label {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--ink-muted);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  color: var(--vellum-dim);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
 /* ===========================================================================

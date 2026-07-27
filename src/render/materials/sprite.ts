@@ -383,13 +383,48 @@ export interface SpriteUniforms {
    */
   uAlbedoScale: { value: number };
   /**
+   * Shoulder on the *albedo*, not on the light. See {@link SPRITE_ALBEDO_SHOULDER}.
+   *
+   * A flat `uAlbedoScale` is the wrong tool on its own: dividing every palette
+   * entry by the same number darkens a black leather boot as hard as it darkens
+   * a white robe, and the boot was already sitting under the terrain. Measured
+   * on the round-3 frame, the white-robed mage read luma 154 against grass at
+   * 40 — 3.8x — while the knight two tiles away read 59, i.e. correct. The
+   * defect lives entirely at the top of the palette, so the correction has to
+   * live there too: a Reinhard-shaped roll-off pinned so mid reflectances pass
+   * through unchanged and only the near-white entries come down.
+   */
+  uAlbedoShoulder: { value: number };
+  /** Reflectance the shoulder leaves untouched. Everything below it lifts slightly. */
+  uAlbedoPivot: { value: number };
+  /**
    * Highlight shoulder on the accumulated light. Above `uShadeKnee` the shade
    * term compresses instead of climbing, so a billboard that catches the key
-   * dead-on cannot out-expose a terrain surface at the same orientation. This
-   * is the sprite's half of the exposure match; `uAlbedoScale` is the other.
+   * dead-on cannot out-expose a terrain surface at the same orientation.
+   *
+   * **Round-3 measurement.** At knee 0.85 / compress 1.6 this was not a shoulder,
+   * it was a clamp. Rendering `spriteShade` straight to the framebuffer, every
+   * unit in `battle-open` came back at 230–242/255 — the mage standing in the
+   * shaded garden, the knight in the lantern pool and the archer on the sunlit
+   * ledge were within 5% of each other, even though their *direct* terms
+   * differed by 3.5x. That is precisely the critics' "sprites carry flat baked
+   * shading; a unit in shadow and a unit in a warm pool have identical internal
+   * contrast". The knee now sits above the range the terrain works in, so the
+   * spread survives and only a genuine over-exposure gets compressed.
    */
   uShadeKnee: { value: number };
   uShadeCompress: { value: number };
+  /**
+   * Weight on the *indirect* term (hemisphere + ambient probe).
+   *
+   * The rig runs hemi 1.25 plus ambient 0.42 so the terrain's crevices do not
+   * crush; a billboard, presenting a full hemisphere to that fill, collects
+   * essentially all of it, and the resulting floor was high enough on its own to
+   * saturate the shade term with the key completely occluded. Discounting the
+   * indirect term is what lets a shadowed unit actually go dark, and it is the
+   * counterpart to `uDirectGain` doing the same job for the key.
+   */
+  uIndirectGain: { value: number };
   /**
    * Chroma pull toward the scene. Shipped HD-2D never leaves a sprite at 100%
    * palette saturation over a graded map — the FFT night frames desaturate and
@@ -491,8 +526,11 @@ export interface SpriteMaterialOptions {
   lightGain?: number;
   directGain?: number;
   albedoScale?: number;
+  albedoShoulder?: number;
+  albedoPivot?: number;
   shadeKnee?: number;
   shadeCompress?: number;
+  indirectGain?: number;
   sceneTint?: THREE.ColorRepresentation;
   gradeSaturation?: number;
   ambientFloor?: THREE.ColorRepresentation;
@@ -520,8 +558,11 @@ uniform float uLightInfluence;
 uniform float uLightGain;
 uniform float uDirectGain;
 uniform float uAlbedoScale;
+uniform float uAlbedoShoulder;
+uniform float uAlbedoPivot;
 uniform float uShadeKnee;
 uniform float uShadeCompress;
+uniform float uIndirectGain;
 uniform vec3  uSceneTint;
 uniform float uGradeSaturation;
 uniform vec3  uAmbientFloor;
@@ -673,7 +714,8 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
   // dynamic VFX point light in range. Applying it at full influence is what puts
   // the unit inside the diorama instead of on top of it; uAmbientFloor is the
   // only thing keeping a fully shadowed unit from crushing to black.
-  vec3 spriteLight = reflectedLight.directDiffuse * uDirectGain + reflectedLight.indirectDiffuse;
+  vec3 spriteDirect = reflectedLight.directDiffuse * uDirectGain;
+  vec3 spriteLight = spriteDirect + reflectedLight.indirectDiffuse * uIndirectGain;
   vec3 spriteShade = uAmbientFloor + spriteLight * uLightGain;
 
   // Highlight shoulder. A billboard turns to face the camera, so it presents a
@@ -704,7 +746,18 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
   // the frame's colour identity instead of importing the sheet's.
   {
     float gradeLuma = dot(spriteAlbedo, vec3(0.2126, 0.7152, 0.0722));
-    spriteAlbedo = mix(vec3(gradeLuma), spriteAlbedo, uGradeSaturation) * uSceneTint * uAlbedoScale;
+    spriteAlbedo = mix(vec3(gradeLuma), spriteAlbedo, uGradeSaturation) * uSceneTint;
+
+    // Reflectance roll-off. Pinned at uAlbedoPivot so a mid-value tunic passes
+    // through untouched and only the near-white entries — the white mage's robe,
+    // a cream cape, the highlight ramp on steel — come down into the range the
+    // stone under the unit's feet actually occupies. Reference frames measured:
+    // in refs/curated/fft/press-...-mediakit-03 the brightest texel inside a unit
+    // is 208 against a floor whose brightest is 134, i.e. ~1.5x. Ours was 230
+    // against grass whose brightest was ~90.
+    float shoulderGain = 1.0 + uAlbedoShoulder * uAlbedoPivot;
+    spriteAlbedo = spriteAlbedo / (1.0 + uAlbedoShoulder * spriteAlbedo) * shoulderGain;
+    spriteAlbedo *= uAlbedoScale;
   }
 
   vec3 spriteColor = spriteAlbedo * mix(vec3(1.0), spriteShade, uLightInfluence);
@@ -766,12 +819,22 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
       // standing in the wall's shadow that still carries a bright warm edge is
       // the per-object fake rim the critics named — the rim has to be a
       // consequence of the same light everything else obeys.
-      float keyVisible = clamp(
-        dot(reflectedLight.directDiffuse, vec3(0.2126, 0.7152, 0.0722)) * 2.4,
-        0.0, 1.0
-      );
+      float directLuma = dot(spriteDirect, vec3(0.2126, 0.7152, 0.0722));
+      float keyVisible = clamp(directLuma * 2.4, 0.0, 1.0);
 
-      spriteColor += uRimColor *
+      // Tint the rim by the light that is actually falling on this unit rather
+      // than by the map preset's authored hue. A billboard standing beside a
+      // lantern collects that lantern in the direct sum, so dividing out its
+      // luma leaves the incident *chromaticity* — orange next to a brazier, cold
+      // blue out under the moon — and a unit two tiles apart from another no
+      // longer carries the same edge colour. This is the cheap half of "sprites
+      // must take the dynamic VFX point lights": the lights already reach the
+      // Lambert sum, but until now every rim in the frame was the same swatch.
+      vec3 incident = directLuma > 1e-4
+        ? mix(vec3(1.0), spriteDirect / directLuma, 0.7)
+        : vec3(1.0);
+
+      spriteColor += uRimColor * incident *
         (uRimStrength * edge * rimFoot * (0.25 + 0.75 * keyVisible) * spriteRimTerm(keyView, outward));
       spriteColor += uBackRimColor * (uBackRimStrength * edge * rimFoot * spriteRimTerm(fillView, outward));
     }
@@ -788,7 +851,7 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
     spriteColor += uDissolveColor * (band * uDissolveGlow);
   }
 
-  gl_FragColor = vec4(spriteShade, 1.0);
+  gl_FragColor = vec4(spriteColor, 1.0);
 `;
 
 /**
@@ -880,12 +943,15 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uLightInfluence: { value: options.lightInfluence ?? 1 },
     uLightGain: { value: options.lightGain ?? 1 },
     uDirectGain: { value: options.directGain ?? 0.5 },
-    uAlbedoScale: { value: options.albedoScale ?? 0.82 },
-    uShadeKnee: { value: options.shadeKnee ?? 0.85 },
-    uShadeCompress: { value: options.shadeCompress ?? 1.6 },
+    uAlbedoScale: { value: options.albedoScale ?? 0.94 },
+    uAlbedoShoulder: { value: options.albedoShoulder ?? 2.1 },
+    uAlbedoPivot: { value: options.albedoPivot ?? 0.22 },
+    uShadeKnee: { value: options.shadeKnee ?? 1.45 },
+    uShadeCompress: { value: options.shadeCompress ?? 0.55 },
+    uIndirectGain: { value: options.indirectGain ?? 0.72 },
     uSceneTint: { value: new THREE.Color(options.sceneTint ?? 0xffffff) },
     uGradeSaturation: { value: options.gradeSaturation ?? 0.9 },
-    uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x24304a) },
+    uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x2e3c5c) },
     uShadeBend: { value: options.shadeBend ?? 0.7 },
     uKeyLightDir: { value: (options.keyLightDirection ?? new THREE.Vector3(-0.5, -1, -0.35)).clone().normalize() },
     uFillLightDir: {

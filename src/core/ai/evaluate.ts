@@ -284,6 +284,138 @@ export function computeReachable(
   return out;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigation distance
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How far apart two tiles really are *for a unit that has to walk it*.
+ *
+ * Manhattan distance is a lie on a map with elevation. Two units either side of
+ * a wall, or on plateaus separated by a cliff taller than their Jump, are two
+ * tiles apart on paper and half a map apart in practice. Every term that asks
+ * "how close am I to the enemy?" — the approach term, threat, facing, the
+ * destination pruner — was reading that lie, so a squad standing across a gorge
+ * from its target believed it was already engaged: the approach term was fully
+ * satisfied, nothing else had a gradient, and no unit on either side ever had a
+ * reason to take a step. That is the stand-off, and it is not a preference the
+ * AI settled into — it is the AI correctly optimising a distance function that
+ * did not describe the battlefield.
+ *
+ * A `NavGraph` answers the same question with a Dijkstra over the walkable
+ * graph, honouring surface cost, Jump and headroom, so "close" means "close to
+ * being able to hit you".
+ */
+export interface NavGraph {
+  /**
+   * Movement points a unit with this graph's Jump spends walking from `pos` to
+   * the tile `target` stands on. Occupancy is ignored: bodies move.
+   *
+   * When no path exists the result stays finite and keeps a gradient —
+   * `manhattan + board span` — so a unit cut off from every enemy still shuffles
+   * toward the nearest one instead of going blind and idling.
+   */
+  distance(pos: { x: number; y: number }, target: Unit): number;
+}
+
+/** Safety valve: a Dijkstra over the walkable graph can never legitimately exceed this. */
+function maxNavCost(field: Battlefield): number {
+  return field.width * field.height * 4 + 4;
+}
+
+/**
+ * A `NavGraph` for a unit with the given Jump. Distance fields are computed
+ * lazily, once per target unit, and cached for the life of the graph (one AI
+ * turn), so the cost is one Dijkstra per hostile per turn.
+ */
+export function createNavGraph(field: Battlefield, jump: number): NavGraph {
+  const cache = new Map<UnitId, Map<number, number>>();
+  const fallbackBase = field.width + field.height;
+  const ceiling = maxNavCost(field);
+
+  const standable = (tile: Tile | undefined): tile is Tile =>
+    tile !== undefined && tile.passable && tile.surface !== 'void' && tile.depth >= 1;
+
+  const fieldFor = (target: Unit): Map<number, number> => {
+    const cached = cache.get(target.id);
+    if (cached !== undefined) return cached;
+
+    const dist = new Map<number, number>();
+    const heights = new Map<number, number>();
+    const surfaces = new Map<number, SurfaceKind>();
+
+    const startKey = tileKey(target.pos.x, target.pos.y);
+    const anchor = field.tileAt(target.pos.x, target.pos.y);
+    dist.set(startKey, 0);
+    heights.set(startKey, target.pos.z);
+    surfaces.set(startKey, anchor?.surface ?? 'grass');
+
+    // Integer costs in a tiny range; a bucket queue is faster than a heap and
+    // keeps expansion order fully deterministic.
+    const buckets: number[][] = [];
+    const push = (cost: number, key: number): void => {
+      let bucket = buckets[cost];
+      if (bucket === undefined) {
+        bucket = [];
+        buckets[cost] = bucket;
+      }
+      bucket.push(key);
+    };
+    push(0, startKey);
+
+    for (let cost = 0; cost < buckets.length && cost <= ceiling; cost++) {
+      const bucket = buckets[cost];
+      if (bucket === undefined) continue;
+      for (let i = 0; i < bucket.length; i++) {
+        const key = bucket[i];
+        if (key === undefined) continue;
+        if (dist.get(key) !== cost) continue;
+        const zn = heights.get(key);
+        const sn = surfaces.get(key);
+        if (zn === undefined || sn === undefined) continue;
+
+        // The search runs outward from the target, so the edge we are pricing is
+        // the *forward* step neighbour → node: it lands on this node's surface.
+        const step = SURFACE_COST[sn] ?? 1;
+        if (!Number.isFinite(step)) continue;
+        const next = cost + step;
+        if (next > ceiling) continue;
+
+        const x = key & 0x3ff;
+        const y = key >> 10;
+        for (const [dx, dy] of NAV_STEPS) {
+          const nx = x + dx;
+          const ny = y + dy;
+          const tile = field.tileAt(nx, ny);
+          if (!standable(tile)) continue;
+          if (Math.abs(tile.height - zn) > jump) continue;
+
+          const nKey = tileKey(nx, ny);
+          const existing = dist.get(nKey);
+          if (existing !== undefined && existing <= next) continue;
+          dist.set(nKey, next);
+          heights.set(nKey, tile.height);
+          surfaces.set(nKey, tile.surface);
+          push(next, nKey);
+        }
+      }
+    }
+
+    cache.set(target.id, dist);
+    return dist;
+  };
+
+  return {
+    distance(pos, target) {
+      const found = fieldFor(target).get(tileKey(pos.x, pos.y));
+      if (found !== undefined) return found;
+      return manhattan(pos, target.pos) + fallbackBase;
+    },
+  };
+}
+
+const NAV_STEPS: readonly (readonly [number, number])[] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
 /** Terrain line of sight. Units do not block; raised terrain does. */
 export function hasLineOfSight(field: Battlefield, from: Vec3, to: Vec3): boolean {
   const dx = to.x - from.x;
@@ -845,7 +977,13 @@ export interface ThreatField {
   weightedSources: readonly ThreatSource[];
 }
 
-export function buildThreatField(state: BattleState, actor: Unit, world: AiWorld): ThreatField {
+export function buildThreatField(
+  state: BattleState,
+  actor: Unit,
+  world: AiWorld,
+  nav?: NavGraph,
+): ThreatField {
+  const graph = nav ?? createNavGraph(state.field, world.job(actor.currentJob)?.jump ?? actor.stats.jump);
   const sources: ThreatSource[] = [];
   for (const other of state.units.values()) {
     if (!isActive(other) || !isHostileTo(actor, other)) continue;
@@ -882,7 +1020,9 @@ export function buildThreatField(state: BattleState, actor: Unit, world: AiWorld
   const at = (pos: Vec3): number => {
     let total = 0;
     for (const src of sources) {
-      const d = manhattan(src.unit.pos, pos);
+      // Walking distance, not Manhattan: an enemy on the far side of a cliff it
+      // cannot climb is not a threat to this tile no matter how near it looks.
+      const d = graph.distance(pos, src.unit);
       const envelope = src.reach + 2;
       if (d > envelope) continue;
       // Danger grows smoothly as the gap closes rather than switching on at the
@@ -940,6 +1080,11 @@ export interface AiContext {
   /** Ally this unit is assigned to protect. */
   guardTarget?: Unit;
   budget: AiBudget;
+  /**
+   * Walking distance over the terrain, for this actor's Jump. Every "how close
+   * am I?" question goes through here rather than through `manhattan`.
+   */
+  nav: NavGraph;
   /** True when the personality's survival mindset is engaged. */
   survival: boolean;
   /**
@@ -1008,7 +1153,11 @@ export function buildContext(
 
   const guardUnit = opts.guardTarget !== undefined ? state.units.get(opts.guardTarget) : undefined;
 
-  const threat = buildThreatField(state, actor, opts.world);
+  const nav = createNavGraph(
+    state.field,
+    opts.world.job(actor.currentJob)?.jump ?? actor.stats.jump,
+  );
+  const threat = buildThreatField(state, actor, opts.world, nav);
   const standoff = effectiveStandoff(state, actor, opts.world, opts.personality);
 
   const ctx: AiContext = {
@@ -1023,6 +1172,7 @@ export function buildContext(
     threat,
     occupied: occupancyMap(state),
     budget: opts.budget ?? DEFAULT_BUDGET,
+    nav,
     survival: opts.survival,
     standoff,
     contactRadius: contactRadius(actor, threat, standoff),
@@ -1118,14 +1268,14 @@ export interface Candidate {
  */
 export function bestDefensiveFacing(ctx: AiContext, pos: Vec3): Facing {
   const relevant = ctx.threat.sources.filter(
-    (s) => manhattan(pos, s.unit.pos) <= s.reach + 1,
+    (s) => ctx.nav.distance(pos, s.unit) <= s.reach + 1,
   );
   if (relevant.length === 0) {
     // Nobody can reach us — look at whatever we are most likely to engage next.
     let nearest: Unit | undefined;
     let best = Infinity;
     for (const hostile of ctx.hostiles) {
-      const d = manhattan(pos, hostile.pos);
+      const d = ctx.nav.distance(pos, hostile);
       if (d < best) {
         best = d;
         nearest = hostile;
@@ -1173,7 +1323,7 @@ function pruneDestinations(ctx: AiContext, options: readonly MoveOption[]): Move
     let value = 0;
     let nearest = Infinity;
     for (const hostile of ctx.hostiles) {
-      const d = manhattan(option.pos, hostile.pos);
+      const d = ctx.nav.distance(option.pos, hostile);
       if (d < nearest) nearest = d;
       value += (option.pos.z - hostile.pos.z) * 0.15;
     }
@@ -1686,10 +1836,12 @@ export function scorePosition(ctx: AiContext, candidate: Candidate): void {
   const maxHp = Math.max(1, actor.stats.maxHp);
   const field = state.field;
 
-  // Distance to the nearest hostile, and the engagement-distance fit.
+  // Distance to the nearest hostile, and the engagement-distance fit. This is
+  // walking distance (see `NavGraph`): if the enemy is two tiles away across a
+  // gorge, we are not engaged and the approach term must still be pulling.
   let nearest = Infinity;
   for (const hostile of ctx.hostiles) {
-    const d = manhattan(pos, hostile.pos);
+    const d = ctx.nav.distance(pos, hostile);
     if (d < nearest) nearest = d;
   }
   const standoff = ctx.standoff;
@@ -1724,7 +1876,7 @@ export function scorePosition(ctx: AiContext, candidate: Candidate): void {
 
   // Height advantage over the hostiles that matter (the three nearest).
   const nearestHostiles = [...ctx.hostiles]
-    .sort((a, b) => manhattan(pos, a.pos) - manhattan(pos, b.pos))
+    .sort((a, b) => ctx.nav.distance(pos, a) - ctx.nav.distance(pos, b))
     .slice(0, 3);
   if (nearestHostiles.length > 0) {
     let sum = 0;
@@ -1749,7 +1901,7 @@ export function scorePosition(ctx: AiContext, candidate: Candidate): void {
   let hasSouth = false;
   for (const source of threat.sources) {
     const hostile = source.unit;
-    const d = manhattan(pos, hostile.pos);
+    const d = ctx.nav.distance(pos, hostile);
     if (d > source.reach + 1) continue;
     const weight = Math.max(1, source.damage);
     const side = relativeFacing(hostile.pos, pos, candidate.facing);

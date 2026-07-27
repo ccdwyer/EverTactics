@@ -431,6 +431,53 @@ export function battleCaution(tick: number): number {
   return 1 - (1 - MIN_CAUTION) * clamp01(over / PATIENCE_RAMP);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Engagement pressure — the stalemate breaker
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Ticks a stand-off is tolerated before the clock starts forcing an engagement. */
+const PRESSURE_TICKS = 120;
+/** Ticks over which pressure climbs from 1 to `MAX_PRESSURE`. */
+const PRESSURE_RAMP = 240;
+/** Ceiling on the multiplier. Large on purpose: see the note below. */
+const MAX_PRESSURE = 8;
+
+/**
+ * How hard the battle clock is pushing this unit into contact, as a multiplier
+ * on the approach terms. 1 for the whole of a normal engagement.
+ *
+ * `battleCaution` alone cannot break every stand-off. It scales the *risk*
+ * terms down, but two units that are simply far apart and unwilling to take the
+ * first step are not held there by risk — the last step into contact is the one
+ * that first puts a unit inside an enemy's reach, so it always costs something,
+ * and standing still always costs nothing. Two cowards six tiles apart is a
+ * stable fixed point of that landscape at any non-zero caution, and both of the
+ * long-running battles left after the navigation fix were exactly that.
+ *
+ * So the approach term gets a multiplier that grows with the clock instead.
+ * The shape:
+ *
+ *   tick <= 120          pressure 1     — untouched; a healthy battle is decided
+ *                                         here and plays with full tactical judgement
+ *   tick 120..360        1 -> 8 linear  — a stand-off decays into an engagement
+ *   tick > 360           pressure 8     — the approach term dominates position,
+ *                                         so somebody always closes
+ *
+ * It multiplies `closeDistance` (pull in), divides `keepDistance` (stop backing
+ * off) and multiplies `idle` (make doing nothing progressively embarrassing).
+ * It deliberately does NOT touch damage, healing, friendly fire, taunt or the
+ * target-selection terms: a late-battle unit still fights intelligently, it just
+ * stops being willing to wait forever for a better opening.
+ *
+ * Tuning: raise `PRESSURE_TICKS` to let cagey play run longer, raise
+ * `MAX_PRESSURE` to make the eventual commitment more absolute.
+ */
+export function battlePressure(tick: number): number {
+  const over = tick - PRESSURE_TICKS;
+  if (over <= 0) return 1;
+  return 1 + (MAX_PRESSURE - 1) * clamp01(over / PRESSURE_RAMP);
+}
+
 /** Resolve a personality from an id, a full object, or undefined. */
 export function resolvePersonality(
   p: PersonalityId | Personality | undefined,
@@ -452,6 +499,7 @@ export function effectiveWeights(
   personality: Personality,
   unit: Unit,
   caution = 1,
+  pressure = 1,
 ): Record<ScoreTerm, number> {
   const out = { ...personality.weights } as Record<ScoreTerm, number>;
   const maxHp = Math.max(1, unit.stats.maxHp);
@@ -467,6 +515,15 @@ export function effectiveWeights(
       const delta = personality.survivalWeights[key];
       if (delta !== undefined) out[key] = out[key] + delta * intensity;
     }
+  }
+
+  // Engagement pressure last, so it also overrides the survival vector's pull
+  // away from the fight — a battle whose survivors are all in survival mode is
+  // precisely the one that otherwise never ends. See `battlePressure`.
+  if (pressure !== 1) {
+    out.closeDistance *= pressure;
+    out.keepDistance /= pressure;
+    out.idle *= pressure;
   }
   return out;
 }

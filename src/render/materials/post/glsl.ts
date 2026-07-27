@@ -167,8 +167,8 @@ uniform float uFocusAuto;       // 1 = read the focal plane off the depth buffer
 /**
  * View-space distance of the focal plane.
  *
- * The rig is orthographic and sits `RIG_DISTANCE` from whatever it is looking at, so an
- * authored absolute `uFocusDist` is a number nobody outside camera.ts can know — round 3
+ * The rig is orthographic and sits RIG_DISTANCE from whatever it is looking at, so an
+ * authored absolute uFocusDist is a number nobody outside camera.ts can know — round 3
  * shipped with the default 18 against a scene at ~160, which is exactly why the depth term
  * was switched off entirely and the frame ended up with the "screen-space vertical gradient,
  * not depth-correct" tell the critics named three separate times.

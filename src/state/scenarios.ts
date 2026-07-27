@@ -472,14 +472,14 @@ const BATTLE_OPEN: Scenario = {
   // picture. Centring the fountain plinth instead keeps the sunken garden, both colonnades
   // and three elevation bands in shot, and the camera's composition offset then takes it
   // off dead centre.
-  camera: { yawIndex: 0, frameField: true, pitchDegrees: 32, focusTile: { x: 6, y: 6, z: 2 } },
+  camera: { yawIndex: 0, frameField: true, pitchDegrees: 30, focusTile: { x: 6, y: 6, z: 2 } },
   // Post is authored in `post.ts` against the measured reference rubric; the scenario no
   // longer dials it down. `dof: 0.35` was fighting a floor that clamped it straight back up,
   // so the number was a lie, and `vignette: 0.8` was compounding an already-dark frame.
   // Both now sit at 1.0 and the shape lives in `REFERENCE_FLOOR`.
   // Exposure measured, not guessed: `tools/shoot.mjs` reports mean frame luma, the reference
   // frames sit at 66-80/255, and at 1.05 this scene came back at 39.
-  post: { exposure: 1.5, dof: 1.0, vignette: 1.0 },
+  post: { exposure: 1.75, dof: 1.0, vignette: 1.0 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,

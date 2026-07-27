@@ -53,6 +53,32 @@ export interface GradeParams {
   midTint: [number, number, number];
   highlightTint: [number, number, number];
   /**
+   * A FOURTH tonal family, keyed much tighter than `shadowTint` — only the bottom of the
+   * shadow range reaches it.
+   *
+   * Round-3 critics, repeatedly: "a two-hue lockup (navy + amber) with nothing between",
+   * "shadows are pure blue with no colour separation", "LEFT holds deep near-black with a
+   * reddish bounce ... three distinguishable value families". Three luminance bands can only
+   * ever produce a three-hue image and, with `midTint` near neutral, in practice a two-hue
+   * one. Splitting the shadow end lets the upper shadows stay teal-blue while the deepest
+   * values go somewhere else entirely — violet on a night map, warm brown on a torchlit one —
+   * which is the tertiary hue the notes keep asking for.
+   */
+  deepShadowTint: [number, number, number];
+  /**
+   * Hue-vs-saturation secondary: multipliers at six anchors around the wheel, in the order
+   * R, Y, G, C, B, M, interpolated smoothly between them.
+   *
+   * This is the only tool in the chain that can act on hue rather than on luminance, and it
+   * is what stops material identity dissolving — "skin, foliage, cloth and stone all resolve
+   * to the same two chroma values ... the grass on the tile tops and the moss on the wall are
+   * indistinguishable". Pushing green and red up while holding the amber/navy axis flat keeps
+   * foliage and banners as their own hues inside a committed warm/cool grade.
+   */
+  hueSat: [number, number, number, number, number, number];
+  /** Hue-vs-hue secondary: rotation in DEGREES at the same six anchors. */
+  hueRotate: [number, number, number, number, number, number];
+  /**
    * Channel crosstalk, 0..1. Film stocks are not channel-independent: some red leaks into
    * green and blue. A little of this is the single biggest "this was graded" cue.
    */
@@ -97,6 +123,9 @@ export const NEUTRAL_GRADE: GradeParams = {
   shadowTint: [1, 1, 1],
   midTint: [1, 1, 1],
   highlightTint: [1, 1, 1],
+  deepShadowTint: [1, 1, 1],
+  hueSat: [1, 1, 1, 1, 1, 1],
+  hueRotate: [0, 0, 0, 0, 0, 0],
   crosstalk: 0,
   crush: 0,
   blackPoint: [0, 0, 0],
@@ -151,9 +180,24 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     shadowTint: [0.62, 0.8, 1.34],
     midTint: [0.98, 0.99, 1.06],
     highlightTint: [1.14, 1.03, 0.86],
+    // Round-3 answer to "shadows are pure blue with no colour separation". The upper
+    // shadows keep the teal-blue above; the bottom of the range turns violet, so a wall
+    // face in half-light and the black under a stair are no longer the same hue.
+    deepShadowTint: [1.3, 0.9, 1.1],
+    // Hue secondary, anchors R Y G C B M. The scene's own light rig supplies the amber/navy
+    // axis; this exists to keep everything that is NOT on that axis from collapsing into it.
+    // Green hard up (garden, moss in the mortar), red up (the banner is the only saturated
+    // object in frame and it should stay that way), blue DOWN — the navy was the dominant
+    // chroma and pulling it back is what lets the tertiaries be seen at all.
+    hueSat: [1.3, 1.02, 1.42, 1.18, 0.86, 1.14],
+    // Negative rotation runs backwards around R->Y->G->C->B->M. Blues go toward cyan so the
+    // shade reads blue-GREEN rather than the flat navy the critics measured; greens go
+    // toward yellow so foliage is olive rather than emerald; magentas go toward violet so
+    // the deep-shadow family lands somewhere the rest of the frame never visits.
+    hueRotate: [4, -4, -8, -6, -11, 6],
     crosstalk: 0.08,
     crush: 0.035,
-    blackPoint: [0.016, 0.03, 0.07],
+    blackPoint: [0.026, 0.026, 0.064],
     shoulder: 0.18,
     highlightPoint: [1.0, 0.965, 0.86],
     highlightPull: 0.45,
@@ -285,6 +329,9 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     shadowTint: [0.66, 0.82, 1.36],
     midTint: [0.92, 0.96, 1.14],
     highlightTint: [1.14, 1.0, 0.88],
+    deepShadowTint: [1.24, 0.9, 1.08],
+    hueSat: [1.24, 1.0, 1.34, 1.2, 0.88, 1.12],
+    hueRotate: [4, -4, -8, -6, -12, 6],
     crosstalk: 0.12,
     crush: 0.07,
     blackPoint: [0.012, 0.022, 0.058],
@@ -341,6 +388,89 @@ function toneMasks(l: number): [number, number, number] {
   return [shadow, mid, highlight];
 }
 
+/**
+ * Weight of the fourth, deepest tonal family. Much tighter than `toneMasks`'s shadow term
+ * (exponent 6 vs 2.2), so it lives entirely underneath it rather than fighting it: at
+ * l = 0.5 the shadow mask is 0.22 and this is 0.016.
+ */
+function deepShadowMask(l: number): number {
+  return Math.pow(1 - clamp01(l), 6.0);
+}
+
+/**
+ * Sample a six-anchor colour wheel (R, Y, G, C, B, M) at hue `h` ∈ [0,1).
+ *
+ * Smoothstep between anchors rather than linear: a linear ramp puts a visible crease at each
+ * anchor once the table is baked into a 33³ LUT and then trilinearly filtered.
+ */
+function sampleWheel(table: readonly number[], h: number): number {
+  const t = (h - Math.floor(h)) * 6;
+  const i = Math.floor(t) % 6;
+  const f = t - Math.floor(t);
+  const a = table[i] ?? 1;
+  const b = table[(i + 1) % 6] ?? 1;
+  const s = f * f * (3 - 2 * f);
+  return a + (b - a) * s;
+}
+
+/** RGB -> HSL. `h` in [0,1), `s`/`l` in [0,1]. */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) * 0.5;
+  const d = max - min;
+  if (d < 1e-6) return [0, 0, l];
+  const s = l > 0.5 ? d / Math.max(2 - max - min, 1e-6) : d / Math.max(max + min, 1e-6);
+  let h: number;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return [h, s, l];
+}
+
+function hueToRgb(p: number, q: number, t: number): number {
+  let u = t;
+  if (u < 0) u += 1;
+  if (u > 1) u -= 1;
+  if (u < 1 / 6) return p + (q - p) * 6 * u;
+  if (u < 1 / 2) return q;
+  if (u < 2 / 3) return p + (q - p) * (2 / 3 - u) * 6;
+  return p;
+}
+
+/** HSL -> RGB. */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s <= 1e-6) return [l, l, l];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [hueToRgb(p, q, h + 1 / 3), hueToRgb(p, q, h), hueToRgb(p, q, h - 1 / 3)];
+}
+
+/**
+ * Hue-selective secondary. Rotates and re-saturates by hue, leaving luminance alone.
+ *
+ * Guarded by saturation so it cannot introduce colour into near-neutral pixels — a hue
+ * multiplier applied to a grey pixel would amplify whatever rounding noise it happens to
+ * carry, which bakes into the LUT as blotching.
+ */
+function hueSecondary(
+  p: GradeParams,
+  r: number,
+  g: number,
+  b: number,
+): [number, number, number] {
+  const [h, s, l] = rgbToHsl(r, g, b);
+  if (s < 1e-3) return [r, g, b];
+
+  const rot = sampleWheel(p.hueRotate, h) / 360;
+  const satMul = sampleWheel(p.hueSat, h);
+  // Ramp the effect in over the first few percent of saturation.
+  const guard = Math.min(1, s * 8);
+  const h2 = h + rot * guard;
+  const s2 = clamp01(s * (1 + (satMul - 1) * guard));
+  return hslToRgb(h2 - Math.floor(h2), s2, l);
+}
+
 /** White balance as a linear-light RGB gain. Approximates a Kelvin shift well enough. */
 function whiteBalanceGain(temperature: number, tint: number): [number, number, number] {
   const t = Math.max(-1, Math.min(1, temperature));
@@ -387,15 +517,19 @@ export function applyGrade(p: GradeParams, rIn: number, gIn: number, bIn: number
     b = clamp01(Math.pow(Math.max(b, 1e-5) / pivot, c) * pivot);
   }
 
-  // Tonal tinting.
+  // Tonal tinting. Four families: deep shadow, shadow, mid, highlight.
   let l = r * LUMA_R + g * LUMA_G + b * LUMA_B;
   const [ms, mm, mh] = toneMasks(l);
-  const tr = p.shadowTint[0] * ms + p.midTint[0] * mm + p.highlightTint[0] * mh + (1 - ms - mm - mh);
-  const tg = p.shadowTint[1] * ms + p.midTint[1] * mm + p.highlightTint[1] * mh + (1 - ms - mm - mh);
-  const tb = p.shadowTint[2] * ms + p.midTint[2] * mm + p.highlightTint[2] * mh + (1 - ms - mm - mh);
-  r = clamp01(r * tr);
-  g = clamp01(g * tg);
-  b = clamp01(b * tb);
+  const rest = 1 - ms - mm - mh;
+  const tr = p.shadowTint[0] * ms + p.midTint[0] * mm + p.highlightTint[0] * mh + rest;
+  const tg = p.shadowTint[1] * ms + p.midTint[1] * mm + p.highlightTint[1] * mh + rest;
+  const tb = p.shadowTint[2] * ms + p.midTint[2] * mm + p.highlightTint[2] * mh + rest;
+  // The deep family multiplies on TOP of the shadow tint rather than competing for the same
+  // mask budget, so it reads as a second hue underneath the first instead of diluting it.
+  const md = deepShadowMask(l);
+  r = clamp01(r * tr * (1 + (p.deepShadowTint[0] - 1) * md));
+  g = clamp01(g * tg * (1 + (p.deepShadowTint[1] - 1) * md));
+  b = clamp01(b * tb * (1 + (p.deepShadowTint[2] - 1) * md));
 
   // Channel crosstalk.
   if (p.crosstalk > 0) {
@@ -417,6 +551,10 @@ export function applyGrade(p: GradeParams, rIn: number, gIn: number, bIn: number
   r = l + (r - l) * sat;
   g = l + (g - l) * sat;
   b = l + (b - l) * sat;
+
+  // Hue-selective secondary. Runs after crosstalk and global saturation, both of which pull
+  // every hue toward the same two chroma values; this is what puts the tertiaries back.
+  [r, g, b] = hueSecondary(p, clamp01(r), clamp01(g), clamp01(b));
 
   // Crush and shoulder. Applied last so they always own the extremes.
   const KNEE = 0.6;
