@@ -581,7 +581,20 @@ Still unresolved, and deliberately not faked:
   layout (422 / 449 / 171 / 171 frames) but have **not** been visually verified
   against the weapon atlases.
 * **Pose→facing mapping** is still not established (see §1.4); the decoded clips
-  are used for all five views and `resolveView` still does the mirroring.
+  are used for all five views and `resolveView` still does the mirroring. The
+  cost is measurable: an assembled clip renders facings N and E identically and S
+  as their mirror, where the pose cells give five distinct standing poses. That is
+  why the runtime keeps `idle` on pose cells for any sheet that has them and only
+  assembles it for sheets that have none — `SEQ_INDEX_KEEPING_POSE_IDLE` in
+  `src/render/sprites.ts`.
+* **`resolveSpriteType` over-assigns `type1`.** It falls through to `type1` for
+  anything it does not recognise, which captures the 17 single-file 512×512
+  sheets (§1.2) and `altima` — its `altima_first_form` branch never fires, since
+  the manifest key is `altima`. Assembling any of them out of `type1` gives
+  shards. The runtime refuses the 512×512 class structurally (they are not the
+  256×488 canvas the coordinates address), which leaves `altima` and
+  `altima_second_form` as the two that still assemble wrongly. Neither is used by
+  a scenario; the fix belongs in `resolveSpriteType`.
 
 ### 5.5 `animations.json`
 
@@ -603,6 +616,17 @@ Still unresolved, and deliberately not faked:
 `decodedAnimationSet(library, fallback)` overlays authentic clips onto the
 pose-cell set, one `AnimName` at a time, so a sheet with partial data degrades
 gracefully instead of falling off a cliff.
+
+`SpriteLayer` fetches this file and `manifest.json` on the first sheet load and
+`src/render/frameComposer.ts` assembles each frame's parts into a per-sprite
+index buffer, which becomes the material's `uIndexMap` in place of the sheet.
+The material is unchanged: it is still sampling one rect of one R8 index
+texture, so the palette swap and every ramp survive. A sheet animates only if
+its `spriteType` resolves **and** its stitched canvas is the 512×976 the SHP
+coordinates address **and** every part rect lands inside the art actually
+loaded — the runtime fetches a sheet's *primary* file only (§1.1). Any of those
+failing keeps the whole sheet on pose cells; the decision is per sheet, never
+per frame, so a figure can never lose a limb mid-clip.
 
 ### 5.6 Still not done
 

@@ -225,7 +225,7 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
    detailed, lit and sharp, so the eye has nowhere to land.
 2. **Inventory** — consumables were infinite; an agent was mid-way adding a party stock model.
    Verify with `npx vitest run tests/inventory.test.ts`.
-3. **SHP/SEQ animation — DECODED and visually verified; not yet wired into the runtime.**
+3. **SHP/SEQ animation — DECODED, WIRED and playing. Walk and run only; see the caveats.**
    `tools/decode-shp-seq.mjs` and `tools/preview-anim.mjs` produce
    `public/assets/animations.json`; `src/render/animation.ts` consumes it.
    Run `node tools/preview-anim.mjs --anim 6,8,12` and look at
@@ -240,11 +240,30 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
    `manifest.sheets[key].spriteType`, which `build-assets.mjs` has always resolved correctly by
    sheet class. See docs/ASSETS.md §5.
 
-   Remaining work is **plumbing, not reverse engineering**: nothing fetches `animations.json` at
-   runtime yet, so units still use whole-body pose cells. `src/render/sprites.ts` has to load it
-   and call `decodedAnimationSet`. Animation *naming* is still the honest gap — only `walk`,
-   `run` and `idle` are asserted (`SEQ_ANIM_INDEX`); attack/cast/hurt/KO stay on the procedural
-   pose curve rather than guess a SEQ slot.
+   `SpriteLayer` now fetches `animations.json` and `manifest.json` on the first sheet load,
+   resolves the sprite type from `manifest.sheets[key].spriteType`, and hands `SpriteSheet` a
+   `ShpLibrary`. Parts are composited on the CPU into a per-sprite **index buffer** which replaces
+   the sheet as the material's `uIndexMap` (`src/render/frameComposer.ts`) — the shader still sees
+   one rectangle of one R8 texture, so the palette swap, the foot-contact ramp, the custom depth
+   material and the view-space pixel snap all keep working untouched.
+
+   **What plays:** `walk` and `run`, distance-driven off `PathWalker`, on 136 of the 318 sheets —
+   every sheet any shipped scenario uses. `idle` is deliberately left on the pose cells wherever
+   the sheet has them, and only assembled on sheets that have none (the chocobo). An assembled clip
+   draws the same frames for every view — which SEQ slot holds which facing is the unresolved gap
+   of §5.6 — so an assembled idle collapses five distinct standing poses to one plus its mirror.
+   Measured on a live knight: facings N and E rendered identically. Facing decides flanks here, so
+   standing keeps the pose cells; a *moving* unit's heading is obvious from its motion, which is
+   why walk does not need the same protection. `SEQ_INDEX_KEEPING_POSE_IDLE` in `sprites.ts`.
+
+   **What falls back, and why it must:** attack/cast/hurt/KO keep the procedural pose curve —
+   naming those SEQ slots would be a guess. The 22 broken rips, and the 17 single-file 512×512
+   sheets (the `*_2` monster variants plus `alma_dead`/`ajora`), get no assembled animation at all:
+   `resolveSpriteType` in `build-assets.mjs` falls through to `type1` for the 512×512 class, and a
+   coeurl assembled out of the human SHP is shards. The runtime gate is structural, not a pixel
+   score — the SHP addresses a 256×488 canvas and those sheets are not it. **Still broken and not
+   gated: `altima` and `altima_second_form`**, which are full-canvas but mis-typed; neither is
+   referenced by any scenario. Fixing them belongs in `resolveSpriteType`, not at runtime.
 4. **22 sprite sheets in the rip are broken stubs** (see docs/ASSETS.md §1.2). Dark Knight and
    Onion Knight are re-pointed at Knight/Squire sheets; `chocobo` has zero whole-body frames.
 

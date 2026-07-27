@@ -152,15 +152,28 @@ import { HEIGHT_UNIT, TILE_SIZE, texelsToWorld } from '@render/camera';
 import {
   DEFAULT_VIEW_CELL,
   PathWalker,
+  SEQ_ANIM_INDEX,
+  ShpLibrary,
   SpriteAnimator,
+  decodedAnimationSet,
   defaultAnimationSet,
   facingFromDelta,
   resolveView,
+  type AnimFrame,
   type AnimSet,
+  type DecodedAnimations,
   type PathWalkOptions,
   type PlayOptions,
+  type ShpPart,
   type ViewKey,
 } from '@render/animation';
+
+import {
+  FrameComposer,
+  measureComposite,
+  partsFitSheet,
+  type ComposedFrame,
+} from '@render/frameComposer';
 
 import {
   TEAM_TARGET_HUE,
@@ -437,6 +450,20 @@ export interface SpriteSheetOverrides {
   layout?: Partial<SheetLayout>;
   animations?: AnimSet;
   viewCells?: Readonly<Record<ViewKey, number>>;
+  /**
+   * Decoded SHP/SEQ data for this sheet's sprite type, from
+   * 'public/assets/animations.json'. When present the mapped clips (walk / run /
+   * idle — see 'SEQ_ANIM_INDEX') are replaced with authentic assembled frames and
+   * everything else keeps its procedural pose curve. Absent, or missing the
+   * mapped slots, the sheet stays entirely on the pose cells.
+   */
+  shp?: ShpLibrary | null;
+  /**
+   * Which SEQ slot animates each clip. Defaults to 'SEQ_ANIM_INDEX'.
+   *
+   * 'SpriteLayer' narrows this per sheet — see {@link SEQ_INDEX_KEEPING_POSE_IDLE}.
+   */
+  shpMapping?: Readonly<Record<AnimName, number | null>>;
 }
 
 /** A loaded sheet: index texture, palette LUT, layout and clip table. */
@@ -449,6 +476,13 @@ export class SpriteSheet {
   readonly layout: SheetLayout;
   readonly animations: AnimSet;
   readonly geometry: THREE.PlaneGeometry;
+  /**
+   * Assembles SHP frames into index buffers, or null when this sheet has no
+   * decoded animation. See 'src/render/frameComposer.ts'.
+   */
+  readonly composer: FrameComposer | null;
+  /** Quad for the composited buffer — a different size from the pose cell. */
+  readonly compositeGeometry: THREE.PlaneGeometry | null;
 
   private readonly palettes: readonly Uint8Array[];
   private readonly teamSlot = new Map<Team, number>();
@@ -470,7 +504,23 @@ export class SpriteSheet {
     this.paletteTexture = createPaletteTexture(palettes, image.alpha);
     this.paletteCount = palettes.length;
 
-    this.animations = overrides.animations ?? defaultAnimationSet(overrides.viewCells ?? DEFAULT_VIEW_CELL);
+    // Decoded SHP animation is taken all-or-nothing per sheet. A clip whose parts
+    // do not all lie inside the art this sheet actually loaded would draw a
+    // figure with a limb missing, and a unit that flickers between a whole pose
+    // and a three-quarters one reads as a rendering fault — worse on screen than
+    // the static pose it replaced. So the sheet either animates or it does not.
+    const fallback = defaultAnimationSet(overrides.viewCells ?? DEFAULT_VIEW_CELL);
+    let decoded: AnimSet | null = null;
+    let library: ShpLibrary | null = null;
+    if (overrides.shp) {
+      const candidate = decodedAnimationSet(overrides.shp, fallback, overrides.shpMapping);
+      const parts = collectAssembledParts(candidate);
+      if (parts.length > 0 && partsFitSheet(parts, image, overrides.shp.hdScale)) {
+        decoded = candidate;
+        library = overrides.shp;
+      }
+    }
+    this.animations = overrides.animations ?? decoded ?? fallback;
 
     // Quad geometry: one frame at the shared texel density, translated so the
     // mesh origin sits on the art's ground line. Squash and stretch then pivot at
@@ -479,6 +529,24 @@ export class SpriteSheet {
     const height = texelsToWorld(this.layout.frameHeight);
     this.geometry = new THREE.PlaneGeometry(width, height);
     this.geometry.translate(0, height / 2 - texelsToWorld(this.layout.groundOffset), 0);
+
+    // The composite buffer is sized from the frames that will actually be drawn,
+    // so it can never clip one. A sheet whose clip table has no assembled frames
+    // — no decoded type, or the mapped SEQ slots were incomplete — gets no
+    // composer at all and stays wholly on the pose cells.
+    const assembled = collectAssembledParts(this.animations);
+    const composite =
+      assembled.length > 0 && library ? measureComposite(assembled, library.hdScale) : null;
+    if (composite && library) {
+      this.composer = new FrameComposer(image, composite, library.hdScale);
+      const cw = texelsToWorld(composite.width);
+      const ch = texelsToWorld(composite.height);
+      this.compositeGeometry = new THREE.PlaneGeometry(cw, ch);
+      this.compositeGeometry.translate(0, ch / 2 - texelsToWorld(composite.originY), 0);
+    } else {
+      this.composer = null;
+      this.compositeGeometry = null;
+    }
   }
 
   /** UV rectangle of a flat cell index, in the bottom-up texture space. */
@@ -563,7 +631,27 @@ export class SpriteSheet {
     this.indexTexture.dispose();
     this.paletteTexture.dispose();
     this.geometry.dispose();
+    this.compositeGeometry?.dispose();
   }
+}
+
+/**
+ * Every distinct part list an animation set will ever draw.
+ *
+ * Identity-deduplicated: 'ShpLibrary' hands out one frozen array per frame id and
+ * a seven-frame gait revisits three of them, so this is both the sizing input and
+ * the set the composer's cache will be keyed on.
+ */
+function collectAssembledParts(set: AnimSet): (readonly ShpPart[])[] {
+  const seen = new Set<readonly ShpPart[]>();
+  for (const clip of Object.values(set)) {
+    for (const frames of Object.values(clip.views)) {
+      for (const frame of frames) {
+        if (frame.parts && frame.parts.length > 0) seen.add(frame.parts);
+      }
+    }
+  }
+  return [...seen];
 }
 
 /**
@@ -2186,8 +2274,26 @@ export class UnitSprite {
 
   private readonly options: Required<UnitSpriteOptions>;
   private readonly frameRect = new THREE.Vector4();
-  /** Flat cell index currently displayed — indexes 'layout.footCenterX'. */
-  private frameCell = 0;
+  /**
+   * Per-sprite index buffer the SHP parts are composited into, allocated the
+   * first time an assembled frame is drawn. Null on a sheet with no decoded
+   * animation, which is the majority of them.
+   */
+  private compositeTexture: THREE.DataTexture | null = null;
+  /** What 'compositeTexture' currently holds, so it is only re-uploaded on change. */
+  private composedFrame: ComposedFrame | null = null;
+  /** True while the mesh is drawing an assembled frame rather than a pose cell. */
+  private assembled = false;
+  /**
+   * Foot centre and head height of the frame on screen right now, in texels.
+   *
+   * Held here rather than read from 'layout.footCenterX[frameCell]' at the point
+   * of use because an assembled frame has no cell: its extents are measured from
+   * the composite, per frame, which is strictly better information than the
+   * per-cell table the pose path uses.
+   */
+  private frameFootCenterX = 0;
+  private frameHeadTexels = 0;
 
   private walker: PathWalker | null = null;
   private walkResolve: (() => void) | null = null;
@@ -2208,6 +2314,7 @@ export class UnitSprite {
   private labels: FloatingLabel[] = [];
   private labelSeed = 0;
 
+  private readonly scratchOffset = { x: 0, y: 0 };
   private readonly scratchWorld = new THREE.Vector3();
   private readonly scratchView = new THREE.Vector3();
   /** Camera forward direction, for the contact decal's view-axis depth bias. */
@@ -2700,17 +2807,23 @@ export class UnitSprite {
     const selection = resolveView(this.facing, view.yawRadians);
     const frame = this.animator.frame(selection.view);
     const mirror = selection.mirror !== (frame.flip ?? false);
-    this.applyFrame(frame.cell, mirror);
+    // An authentic SHP frame draws as assembled parts; anything the composer
+    // cannot deliver drops straight back to this clip's pose cell.
+    const drawnAssembled =
+      frame.parts !== undefined && frame.parts.length > 0
+        ? this.applyAssembledFrame(frame.parts, mirror)
+        : false;
+    if (!drawnAssembled) this.applyFrame(frame.cell, mirror);
 
     // 3 — pose. Offsets are whole texels so the art stays pixel-locked.
     //     The pose's own offsets and the cell's foot-centre correction are both
     //     art-space, so both flip with the mirror; rounding happens once, after
     //     they are summed, so the art never lands half a texel out.
     const pose = this.animator.pose();
-    const footCenter = this.sheet.layout.footCenterX[this.frameCell] ?? 0;
+    const frameOffset = this.frameOffsetTexels(frame, drawnAssembled);
     const offsetX =
-      Math.round(pose.offsetX + (frame.offsetX ?? 0) - footCenter) * (mirror ? -1 : 1);
-    const offsetY = Math.round(pose.offsetY + (frame.offsetY ?? 0));
+      Math.round(pose.offsetX + frameOffset.x - this.frameFootCenterX) * (mirror ? -1 : 1);
+    const offsetY = Math.round(pose.offsetY + frameOffset.y);
 
     // 4 — flash / crystal timers.
     if (this.flashTime > 0) {
@@ -2897,10 +3010,7 @@ export class UnitSprite {
     //     the *measured* top of this pose's art, not to the top of the cell: the
     //     cell is 80 texels tall and a standing figure is about 40, so using the
     //     cell would park the chevron half a tile above an empty-looking square.
-    const headTexels =
-      (this.sheet.layout.headTopY[this.frameCell] || this.sheet.layout.frameHeight) -
-      this.sheet.layout.groundOffset;
-    const headY = this.mesh.position.y + texelsToWorld(headTexels) * pose.scaleY;
+    const headY = this.mesh.position.y + texelsToWorld(this.frameHeadTexels) * pose.scaleY;
 
     if (this.markerVisible) {
       this.markerPhase += dt;
@@ -2924,6 +3034,38 @@ export class UnitSprite {
 
     // 8 — floating text.
     if (this.labels.length > 0) this.updateLabels(dt, view, headY);
+  }
+
+  /**
+   * The frame's own pixel nudge, in sheet texels and screen-space sign.
+   *
+   * A pose-cell frame already stores texels with +y up, so it passes through. A
+   * SEQ frame stores the *unit displacement* the animation accumulates, in
+   * original SPR pixels with +y **down** (docs/ASSETS.md §5.5), so it scales by
+   * the sheet's 2x and flips.
+   *
+   * Distance-driven clips ignore it entirely: 'PathWalker' owns the unit's
+   * position while it traverses, and adding the animation's own translation on
+   * top would double-count the step. (Both mapped gaits carry all-zero offsets,
+   * so this is guarding the principle rather than a live bug — but a future clip
+   * that does translate must not silently slide the unit off its path.)
+   */
+  private frameOffsetTexels(frame: AnimFrame, assembled: boolean): { x: number; y: number } {
+    const out = this.scratchOffset;
+    if (!assembled) {
+      out.x = frame.offsetX ?? 0;
+      out.y = frame.offsetY ?? 0;
+      return out;
+    }
+    if (this.animator.current.distanceDriven) {
+      out.x = 0;
+      out.y = 0;
+      return out;
+    }
+    const scale = this.sheet.composer?.hdScale ?? 1;
+    out.x = (frame.offsetX ?? 0) * scale;
+    out.y = -(frame.offsetY ?? 0) * scale;
+    return out;
   }
 
   private updateLabels(dt: number, view: SpriteViewContext, headY: number): void {
@@ -2962,8 +3104,83 @@ export class UnitSprite {
     }
   }
 
+  /**
+   * Draw an authentic SHP frame: composite its parts into this sprite's index
+   * buffer and point the material at that instead of at the sheet.
+   *
+   * Returns false when the frame cannot be drawn — no composer on this sheet, or
+   * an assembly that came out empty. **The caller must then fall back to the pose
+   * cell.** A missing or partial figure on screen is worse than a static pose,
+   * which is the reason this feature sat decoded but unshipped; the honest
+   * degradation is the whole point of the return value.
+   */
+  private applyAssembledFrame(parts: readonly ShpPart[], mirror: boolean): boolean {
+    const composer = this.sheet.composer;
+    const geometry = this.sheet.compositeGeometry;
+    if (!composer || !geometry) return false;
+
+    const composed = composer.compose(parts);
+    if (composed.opaque === 0) return false;
+
+    const { width, height } = composer.layout;
+    if (!this.compositeTexture) {
+      this.compositeTexture = createIndexTexture({
+        width,
+        height,
+        indices: new Uint8Array(width * height),
+        palette: this.sheet.image.palette,
+        alpha: this.sheet.image.alpha,
+      });
+    }
+    // Re-upload only when the drawn frame actually changed. 'update' runs every
+    // rendered frame and the gait holds each pose for ~130 ms, so without this
+    // guard the walk cycle would push the whole buffer to the GPU 60 times a
+    // second per unit to show the same seven pictures.
+    if (this.composedFrame !== composed) {
+      this.composedFrame = composed;
+      (this.compositeTexture.image.data as Uint8Array).set(composed.indices);
+      this.compositeTexture.needsUpdate = true;
+    }
+
+    const uniforms = this.bundle.uniforms;
+    if (!this.assembled) {
+      this.assembled = true;
+      this.mesh.geometry = geometry;
+      uniforms.uIndexMap.value = this.compositeTexture;
+      uniforms.uFrameTexels.value.set(width, height);
+      uniforms.uTexelStep.value.set(1 / width, 1 / height);
+    }
+    // The composite *is* the frame, so the rect is the whole texture. Mirroring
+    // still runs through the same uniform as the pose path.
+    this.bundle.setFrame(0, 0, 1, 1, mirror);
+
+    uniforms.uFootBaseTexels.value = composed.footBottomY;
+    uniforms.uBodyTexels.value = Math.max(8, composed.headTopY - composed.footBottomY);
+    // The buffer is not centred on the origin — it is sized to the union of every
+    // frame's parts — so the quad, which is centred on the buffer, has to slide by
+    // the difference to put the *origin* on the tile centre. Constant per sheet,
+    // which is exactly right: the origin is the anchor the animation swings the
+    // limbs around, so it must not be re-derived per frame. See 'measureExtents'.
+    this.frameFootCenterX = composer.layout.originX - width / 2;
+    this.frameHeadTexels = composed.headTopY - composer.layout.originY;
+    return true;
+  }
+
   private applyFrame(cell: number, mirror = false): void {
-    this.frameCell = cell;
+    if (this.assembled) {
+      // Back to the sheet: index map, quad and texel scale all revert together.
+      this.assembled = false;
+      this.mesh.geometry = this.sheet.geometry;
+      this.bundle.uniforms.uIndexMap.value = this.sheet.indexTexture;
+      this.bundle.uniforms.uFrameTexels.value.set(
+        this.sheet.layout.frameWidth,
+        this.sheet.layout.frameHeight,
+      );
+      this.bundle.uniforms.uTexelStep.value.set(
+        1 / this.sheet.image.width,
+        1 / this.sheet.image.height,
+      );
+    }
     this.sheet.frameRect(cell, this.frameRect);
     this.bundle.setFrame(
       this.frameRect.x,
@@ -2989,10 +3206,13 @@ export class UnitSprite {
     const body = headTop > footBase ? headTop - footBase : layout.frameHeight - footBase;
     this.bundle.uniforms.uFootBaseTexels.value = footBase;
     this.bundle.uniforms.uBodyTexels.value = Math.max(8, body);
+    this.frameFootCenterX = layout.footCenterX[cell] ?? 0;
+    this.frameHeadTexels = (headTop || layout.frameHeight) - layout.groundOffset;
   }
 
   dispose(): void {
     this.bundle.dispose();
+    this.compositeTexture?.dispose();
     this.contactShadow?.material.dispose();
     this.contactShadow?.geometry.dispose();
     this.ring.material.dispose();
@@ -3024,6 +3244,169 @@ export interface SpriteLayerOptions {
   /** Per-sheet layout / clip overrides, keyed by logical sprite key. */
   overrides?: Record<string, SpriteSheetOverrides>;
   sprite?: UnitSpriteOptions;
+  /**
+   * Set false to keep every sheet on the whole-body pose cells — the pre-decode
+   * behaviour. Useful as a bisect when a visual regression might be the SHP path.
+   */
+  decodedAnimation?: boolean;
+  /**
+   * Supply the decoded data directly instead of fetching it. Tests and headless
+   * tools use this; the game leaves it undefined and 'assets/animations.json' plus
+   * 'assets/manifest.json' are fetched once, lazily, on the first sheet load.
+   */
+  animations?: DecodedAnimations;
+  /** Sheet key → sprite type, i.e. 'manifest.sheets[key].spriteType'. */
+  spriteTypes?: Readonly<Record<string, string | null>>;
+}
+
+/** The slice of 'assets/manifest.json' the sprite layer needs. */
+export interface SpriteTypeManifest {
+  sheets?: Record<
+    string,
+    | {
+        spriteType?: string | null;
+        id?: number;
+        files?: string[];
+        height?: number;
+        /** Flat, 8 numbers per detected whole-body pose. */
+        poses?: number[];
+      }
+    | undefined
+  >;
+}
+
+/** What the manifest says about one sheet's animation prospects. */
+export interface SheetAnimationInfo {
+  type: string | null;
+  /** Height of the **stitched** sheet in texels, i.e. both halves (§1.1). */
+  canvasHeight: number;
+  /** Whole-body pose frames the sheet carries — the fallback path's entire supply. */
+  poseCount: number;
+}
+
+/**
+ * The SEQ mapping for a sheet that has whole-body pose art of its own.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHY IDLE IS NARROWED AND WALK IS NOT
+ * ─────────────────────────────────────────────────────────────────────────────
+ * An assembled clip draws the **same frames for every view**: which SEQ slot
+ * holds which facing is the one thing 'SEQ_ANIM_INDEX' cannot resolve
+ * (docs/ASSETS.md §5.6), so 'resolveView' is left with nothing but its mirror.
+ * Measured on a live knight, an assembled idle renders N and E identically and S
+ * as their mirror — five distinct standing poses collapse to two pictures. The
+ * pose path does not have that problem: 'DEFAULT_VIEW_CELL' addresses five
+ * separate cells, measured from the art, one per view.
+ *
+ * Facing is tactical information in this game — it decides flanks and back
+ * attacks — so trading five readable standing poses for an authentic two-texel
+ * breathing bob is a bad trade, and the brief's own rule applies: an animation
+ * that makes the board harder to read is worse than the static pose it replaced.
+ *
+ * Walking is the opposite case. The fallback walk has no drawn frames at all —
+ * one static cell per view with a procedural bob — and a moving unit's heading is
+ * unambiguous from the direction it is moving in. There the authentic gait is a
+ * clear gain and the collapsed views cost nothing.
+ *
+ * A sheet with **no** pose frames (the chocobo, §1.4) has no such trade to make:
+ * its fallback idle would be a clump of feathers. Those sheets keep the full
+ * mapping — see 'SpriteLayer.shpFor'.
+ */
+export const SEQ_INDEX_KEEPING_POSE_IDLE: Readonly<Record<AnimName, number | null>> = {
+  ...SEQ_ANIM_INDEX,
+  idle: null,
+};
+
+/**
+ * Rows of the original SPR canvas the SHP part coordinates address.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * This is the gate that keeps 17 mis-typed sheets off the assembled path.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * A full unit sheet stitches to 512x976, exactly 2x the 256x488 SPR canvas
+ * (docs/ASSETS.md §1.1), and every SHP source rect is a coordinate on *that*
+ * canvas — including the 'atk' split, which adds 256 SPR rows to reach the
+ * sheet's second half. Seventeen sheets in the rip are a single 512x512 file
+ * instead: the 15 '*_2' monster variants plus 'alma_dead' and 'ajora' (§1.2).
+ * They are a different, smaller canvas, so the part rectangles do not describe
+ * them — 'resolveSpriteType' in 'tools/build-assets.mjs' falls through to
+ * 'type1' for all of them, and assembling a coeurl variant out of the human SHP
+ * produces shards, not a cat.
+ *
+ * Note what this is *not*: it does not choose between SHP tables, and it looks at
+ * no pixels. It asks whether the sheet is the canvas the coordinates are written
+ * against, which is a fact about the file, and answers "do not animate" when it
+ * is not. Scoring tables against artwork is the mistake that shelved this feature
+ * once already (docs/ASSETS.md §5) and is not reintroduced here.
+ */
+const SPR_CANVAS_ROWS = 488;
+
+/**
+ * Index the manifest under every name a sheet is known by.
+ *
+ * 'Unit.sprite.sheet' is not required to be the manifest's logical key:
+ * 'resolveSheetAssets' equally accepts a raw filename stem, and the shipped
+ * scenarios use exactly that — 'SpriteSheet.key' on a live knight reads
+ * '1000_Knight_Male_hd', not 'knight_male'. Keying the lookup on the manifest key
+ * alone silently resolves every sheet to "no decoded animation", which looks
+ * identical to the feature being switched off.
+ */
+export function indexSpriteTypes(
+  manifest: SpriteTypeManifest | null,
+): Record<string, SheetAnimationInfo> {
+  const types: Record<string, SheetAnimationInfo> = {};
+  for (const [key, entry] of Object.entries(manifest?.sheets ?? {})) {
+    const info: SheetAnimationInfo = {
+      type: entry?.spriteType ?? null,
+      canvasHeight: entry?.height ?? 0,
+      poseCount: Math.floor((entry?.poses?.length ?? 0) / 8),
+    };
+    types[key.toLowerCase()] = info;
+    if (entry?.id !== undefined) types[String(entry.id)] = info;
+    for (const file of entry?.files ?? []) {
+      const stem = file.replace(/^.*\//, '').replace(/\.png$/i, '');
+      types[stem.toLowerCase()] = info;
+    }
+  }
+  return types;
+}
+
+/** Look a sheet key up under the aliases 'indexSpriteTypes' recorded. */
+function lookupSpriteType(
+  types: Readonly<Record<string, SheetAnimationInfo>>,
+  key: string,
+): SheetAnimationInfo | null {
+  return types[key] ?? types[key.replace(/\.png$/i, '').toLowerCase()] ?? null;
+}
+
+/**
+ * The SHP/SEQ sprite type to animate a sheet with, or null to keep pose cells.
+ *
+ * The type itself comes from the manifest and from nowhere else — see
+ * 'SpriteLayer.shpLibrary'. This adds the one gate the manifest cannot express:
+ * {@link SPR_CANVAS_ROWS}.
+ */
+export function decodedSpriteType(
+  types: Readonly<Record<string, SheetAnimationInfo>>,
+  key: string,
+  hdScale: number,
+): string | null {
+  const info = lookupSpriteType(types, key);
+  if (!info?.type) return null;
+  return info.canvasHeight >= SPR_CANVAS_ROWS * hdScale ? info.type : null;
+}
+
+/**
+ * Everything needed to animate a sheet from decoded SHP/SEQ data, or nulls.
+ *
+ * Fetched once and shared. Both files are optional at runtime: if either is
+ * missing or malformed every sheet falls back to pose cells, which is the state
+ * the game shipped in before this was wired, so a failed fetch degrades to
+ * "no animation" rather than to "no units".
+ */
+interface AnimationSource {
+  data: DecodedAnimations | null;
+  types: Readonly<Record<string, SheetAnimationInfo>>;
 }
 
 /**
@@ -3038,6 +3421,9 @@ export class SpriteLayer {
 
   private readonly sheets = new Map<string, Promise<SpriteSheet>>();
   private readonly sprites = new Map<UnitId, UnitSprite>();
+  /** One 'ShpLibrary' per sprite type, shared by every sheet that uses it. */
+  private readonly libraries = new Map<string, ShpLibrary | null>();
+  private animationSource: Promise<AnimationSource> | null = null;
   private readonly options: SpriteLayerOptions;
   private readonly keyLight = new THREE.Vector3(-0.5, -1, -0.35).normalize();
   private rimColor: THREE.ColorRepresentation = 0xffe6b8;
@@ -3058,7 +3444,7 @@ export class SpriteLayer {
       : resolveSheetAssets(key, this.options.baseUrl ?? defaultBaseUrl());
 
     const promise = (async () => {
-      const image = await loadIndexedImage(resolved.url);
+      const [image, shp] = await Promise.all([loadIndexedImage(resolved.url), this.shpFor(key)]);
       const palettes: Uint8Array[] = [];
       if (resolved.paletteUrls.length > 0) {
         const loaded = await Promise.all(
@@ -3073,11 +3459,88 @@ export class SpriteLayer {
       // Always keep the baked palette as slot 0 so a sheet with no '.act' family
       // still renders in its shipped colours.
       if (palettes.length === 0) palettes.push(image.palette);
-      return new SpriteSheet(key, image, palettes, this.options.overrides?.[key]);
+      const overrides = this.options.overrides?.[key];
+      return new SpriteSheet(key, image, palettes, { ...shp, ...overrides });
     })();
 
     this.sheets.set(key, promise);
     return promise;
+  }
+
+  /**
+   * The decoded SHP/SEQ library for a sheet, or null when it has none.
+   *
+   * The sprite type comes from 'manifest.sheets[key].spriteType' and from nowhere
+   * else. It is resolved by sheet *class* in 'tools/build-assets.mjs'; the
+   * tempting alternative — scoring each SHP's part rectangles against the sheet's
+   * pixels — was tried, ranks 'other' (17 frames of one small part each) above
+   * the correct 'type1' for a human knight, and is what produced the standing
+   * "limbs do not assemble" report. See docs/ASSETS.md §5.
+   */
+  private async shpFor(
+    key: string,
+  ): Promise<Pick<SpriteSheetOverrides, 'shp' | 'shpMapping'> | null> {
+    if (this.options.decodedAnimation === false) return null;
+    const source = await this.animations();
+    if (!source.data) return null;
+    const type = decodedSpriteType(source.types, key, source.data.hdScale ?? 2);
+    if (!type) return null;
+
+    let library = this.libraries.get(type);
+    if (library === undefined) {
+      const pair = source.data.spriteTypes?.[type];
+      library = pair ? ShpLibrary.fromJson(source.data, pair.shp, pair.seq) : null;
+      this.libraries.set(type, library);
+    }
+    if (!library) return null;
+
+    // A sheet with whole-body poses keeps them for standing, because they carry
+    // five facings the assembled clips cannot. One without — the chocobo — has no
+    // fallback to keep. See SEQ_INDEX_KEEPING_POSE_IDLE.
+    const poses = lookupSpriteType(source.types, key)?.poseCount ?? 0;
+    return { shp: library, shpMapping: poses > 0 ? SEQ_INDEX_KEEPING_POSE_IDLE : SEQ_ANIM_INDEX };
+  }
+
+  /** Fetch (once) the decoded animations and the sheet → sprite-type map. */
+  private animations(): Promise<AnimationSource> {
+    if (this.animationSource) return this.animationSource;
+
+    const inline = this.options.animations;
+    const inlineTypes = this.options.spriteTypes;
+    if (inline || inlineTypes) {
+      const types: Record<string, SheetAnimationInfo> = {};
+      // An explicit override is a deliberate act, so it is not second-guessed by
+      // the canvas gate — the caller is asserting this sheet takes that type.
+      for (const [key, type] of Object.entries(inlineTypes ?? {})) {
+        types[key.toLowerCase()] = {
+          type,
+          canvasHeight: Number.POSITIVE_INFINITY,
+          poseCount: 0,
+        };
+      }
+      this.animationSource = Promise.resolve({ data: inline ?? null, types });
+      return this.animationSource;
+    }
+
+    const base = this.options.baseUrl ?? defaultBaseUrl();
+    const fetchJson = async <T>(url: string): Promise<T | null> => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        return (await res.json()) as T;
+      } catch {
+        return null;
+      }
+    };
+
+    this.animationSource = (async () => {
+      const [data, manifest] = await Promise.all([
+        fetchJson<DecodedAnimations>(`${base}assets/animations.json`),
+        fetchJson<SpriteTypeManifest>(`${base}assets/manifest.json`),
+      ]);
+      return { data, types: indexSpriteTypes(manifest) };
+    })();
+    return this.animationSource;
   }
 
   /** Create the sprite for a unit and add it to the scene. */
