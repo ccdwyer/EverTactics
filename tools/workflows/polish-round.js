@@ -257,7 +257,35 @@ and the board no longer has a hard silhouette against emptiness.`,
   {
     label: 'fix-terrain',
     own: 'src/render/terrain.ts, src/render/materials/terrain.ts, src/render/materials/water.ts, src/core/grid.ts, and any new files under src/render/materials/textures/',
-    focus: `TERRAIN MODULARITY IS THE #2 CITED DEFECT. Judges, unprompted:
+    focus: `A SPRITE-FREE BLIND TEST JUDGED YOUR MATERIALS WITH UNITS REMOVED. Exact words:
+
+  "One roughness value across the whole scene. Stone, timber, the red banner, and the metal
+   fittings all return identical specular response. Nothing is wet, nothing is polished, nothing
+   is chalky."
+
+  "The masonry joints are painted into the albedo, not modelled or normal-mapped. They don't catch
+   a highlight on the lit side or darken on the shadow side - they stay the same relative value as
+   the light direction changes across the frame, which is the giveaway."
+
+  "No grime accumulation anywhere. No silt in the joints, no runoff streaking below ledges, no moss
+   at the base of walls, no chipping on the exposed corners. Every edge is a perfect 90 degree
+   arris. Real stone loses its corners first."
+
+  "Tiling period is visible. The same 4-block brick pattern marches along the long walls with a
+   detectable repeat and no decal breakup, no swapped variant tiles, no rotation."
+
+  "Three blob meshes instanced with no rotation, scale, or hue variance, all at the same green. No
+   ground contact shadow - they sit on the surface rather than in it. They read as stickers."
+
+  "Scale is unreadable. Arch openings, step risers, and crenellation spacing are mutually
+   inconsistent, so the scene has no absolute size."
+
+Per-material roughness and real normal-mapped joints are the two highest-value items - both change
+how every surface responds to light, which is what the judge is actually reading. Vegetation
+variance and corner chipping are cheap wins. Fix scale consistency by picking a human height and
+making step risers, door openings and crenellation spacing agree with it.
+
+Secondary: Judges, unprompted:
 
   "the same brick cube and the same plank-top block stacked at identical scale across the entire
    map, with the same UV rotation repeating tile to tile"
@@ -300,7 +328,35 @@ legal (reachable, no unreachable spawn tiles). Run \`npx vitest run\` after any 
   {
     label: 'fix-lighting-vfx',
     own: 'src/render/lighting.ts, src/render/vfx.ts',
-    focus: `LIGHTING DRAMA and VFX-AS-LIGHT.
+    focus: `A SPRITE-FREE BLIND TEST JUST TOOK YOUR RENDERING APART. Units were removed entirely so
+only the environment was judged; the judge separated all four pairs at 95-99 confidence. These are
+its exact words about lighting. Fix these, in this order, and do not spread effort elsewhere:
+
+  "The ambient term is a flat blue constant. Every shadowed face returns the same value regardless
+   of orientation or how enclosed it is. There is no cavity darkening, so wall-to-floor junctions,
+   the insides of the crenellation gaps, and the recesses under every ledge are exactly as bright
+   as an exposed vertical face."
+
+  "Zero bounce. The brazier at left is the brightest emitter in frame and contributes essentially
+   nothing to the stone around it - the wall two metres behind it is the same steel-blue as the
+   wall thirty metres away. No inverse-square falloff, no warm spill onto the underside of the arch
+   directly above it. It's a sprite with a bloom, not a light."
+
+  "Shadow terminators are uniformly soft at every distance. The long cast shadow crossing the
+   central plaza has the same edge gradient at its tip as at its root. Real penumbra widens with
+   occluder distance and hardens to near-zero at the contact point; here it's one blur radius
+   everywhere, which reads instantly as a shadowmap with a fixed PCF kernel."
+
+  "Single light, single shadow direction, no secondary fill."
+
+IMPORTANT: a previous round reported shipping a working source-driven bounce GI term. The judge sees
+no bounce at all. Either it is not reaching the frame, it is too weak to read, or it regressed.
+VERIFY IT EMPIRICALLY before writing new code - render with it forced to an absurd intensity and
+confirm you can see it change the frame. Do not trust the previous report; that class of "reported
+but not visible in pixels" error has happened repeatedly on this project.
+
+Contact-hardening shadows (PCSS or a cheap variable-penumbra approximation) and real cavity
+occlusion are the two highest-value items. Everything else in your old brief is secondary:
 
 In refs/curated/fft/ the night battle is lit almost entirely BY THE SPELL EFFECTS — warm point
 lights that illuminate terrain and sprites together, everything outside their radius falling to
@@ -344,7 +400,23 @@ FFT sits nearer 30 and gets far more read on vertical faces. Also break the perf
 map diamond is currently centred and square to frame, which reads as a turntable. Compose it:
 action on a diagonal, negative space used deliberately.
 
-**(0) DOF IS KEYED TO SCREEN-Y, NOT DEPTH — this is a bug, fix it first.** A judge caught it:
+**(0a) FROM THE SPRITE-FREE TEST, exact words:**
+
+  "Aerial perspective is absent. The far towers have the same black point and same saturation as
+   the mid-ground; only blur separates them. Real distance lifts the blacks, desaturates, and pulls
+   hue toward the sky colour. Blur is being asked to do a job it can't do."
+
+  "The DOF is a two-layer blur: full-strength past a hard threshold rather than a ramp. The near
+   band at the top edge has no gradient into focus."
+
+  "The palette is a duotone - sodium-orange and steel-blue at nearly identical saturation, with no
+   tertiary hue and no desaturated mid-value between them. It reads as a grade applied over the
+   image rather than as materials responding to two light sources."
+
+Depth-based desaturation and black-point lift is the single highest-value fix here, and it is
+cheap - a per-fragment depth term in the composite. Then make the CoC a continuous ramp.
+
+**(0b) DOF IS KEYED TO SCREEN-Y, NOT DEPTH — this is a bug, fix it first.** A judge caught it:
 "the bottom-left tower and bottom-center foliage are heavily blurred while equidistant geometry
 higher in the frame is sharp". A tilt-shift band applied in screen space blurs by position rather
 than by distance, so near and far geometry at the same screen height get the same blur. Drive the
