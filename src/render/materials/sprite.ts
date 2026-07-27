@@ -1093,6 +1093,43 @@ let programCacheSalt = 0;
  * dissolve) all lives in uniforms, and 'customProgramCacheKey' keeps every
  * instance sharing a single compiled program.
  */
+/**
+ * Live registry for {@link setSpriteAmbient}, mirroring 'setTerrainBounce' in
+ * 'materials/terrain.ts'. Same problem, same shape of answer.
+ *
+ * ART-DIRECTION PASS — this uniform was a COMPILE-TIME CONSTANT and nothing in
+ * the engine ever wrote it. 'uAmbientFloor' defaulted to 0x1b2438, a cool navy;
+ * 'UnitSprite.setSceneTone' exists to override it and has no callers anywhere in
+ * 'src/'; 'uSceneTint' likewise defaults to white and is never set. So on a
+ * torch-lit night courtyard the light a shadowed unit received was navy, chosen
+ * once for "a cool-shadow dawn map", while every other subsystem in the frame had
+ * been graded warm.
+ *
+ * That is the exact failure the terrain bounce had before round 8, one file over,
+ * and it produced the same symptom: the white mages in the near field rendered as
+ * the coolest, greyest, least-graded objects in the picture while standing two
+ * metres from an open flame. No amount of lighting or grade work reached them,
+ * because nothing in the lighting rig was connected to them.
+ *
+ * The rig now publishes its own committed ambient irradiance here every
+ * 'commit()', so a unit's shadow side follows the map the way the stone does —
+ * including all the way to zero when every light is off.
+ *
+ * The default is the old constant, so any unwired caller (tools, unit tests, a
+ * scene with no 'LightingRig') renders exactly as it did before.
+ */
+const ambientFloorUniforms: Array<{ value: THREE.Color }> = [];
+const ambientFloor = new THREE.Color(0x1b2438);
+
+/**
+ * Publish the rig's committed ambient irradiance to every live sprite material.
+ * The argument is copied, so the caller may keep mutating it.
+ */
+export function setSpriteAmbient(colour: THREE.Color): void {
+  ambientFloor.copy(colour);
+  for (const u of ambientFloorUniforms) u.value.copy(colour);
+}
+
 export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMaterialBundle {
   const uniforms: SpriteUniforms = {
     uIndexMap: { value: options.indexMap },
@@ -1138,7 +1175,12 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uSkyOcclusion: { value: options.skyOcclusion ?? 0.24 },
     uSceneTint: { value: new THREE.Color(options.sceneTint ?? 0xffffff) },
     uGradeSaturation: { value: options.gradeSaturation ?? 0.96 },
-    uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x1b2438) },
+    uAmbientFloor: {
+      value:
+        options.ambientFloor === undefined
+          ? ambientFloor.clone()
+          : new THREE.Color(options.ambientFloor),
+    },
     uShadeBend: { value: options.shadeBend ?? 0.7 },
     uKeyLightDir: { value: (options.keyLightDirection ?? new THREE.Vector3(-0.5, -1, -0.35)).clone().normalize() },
     uFillLightDir: {
@@ -1215,6 +1257,9 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
 
     uShadowPush: { value: 0.1 },
   };
+
+  // Follow the rig from here on, unless this caller pinned the floor itself.
+  if (options.ambientFloor === undefined) ambientFloorUniforms.push(uniforms.uAmbientFloor);
 
   const material = new THREE.MeshLambertMaterial({
     color: 0xffffff,

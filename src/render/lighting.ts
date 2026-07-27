@@ -96,6 +96,7 @@ import {
 
 import { DEFAULT_YAW_TRIM_DEGREES, RIG_DISTANCE, YAW_ANGLES } from './camera.js';
 import { setTerrainBounce } from './materials/terrain.js';
+import { setSpriteAmbient } from './materials/sprite.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Contact-hardening shadows (PCSS)
@@ -3046,6 +3047,27 @@ export class LightingRig {
       .copy(this.hemisphere.groundColor)
       .multiplyScalar(Math.max(0, groundLevel));
     setTerrainBounce(this.tmpBounceWarm, this.tmpBounceCool);
+
+    // ── and the same two lobes to the sprites ────────────────────────────────
+    //
+    // ART-DIRECTION PASS. 'uAmbientFloor' in 'materials/sprite.ts' — the light a
+    // unit still receives with the key fully occluded — was the identical bug one
+    // file over: a compile-time 0x1b2438 navy, with an override method
+    // ('UnitSprite.setSceneTone') that has no callers anywhere in 'src/'. So on a
+    // torch-lit courtyard the shadow side of every unit was tinted for a
+    // cool-shadow dawn map, and the white-robed units in the near field measured
+    // as the coolest, greyest objects in a frame otherwise graded warm throughout
+    // — standing two metres from an open brazier.
+    //
+    // A sprite is a card presenting a full face to the whole hemisphere, so its
+    // floor is the SUM of the two lobes rather than either one; the shader's own
+    // 'uSkyOcclusion' does the up/down weighting from there. The gain restores the
+    // magnitude of the old constant on this map so this is a hue correction and a
+    // binding, not a brightness change: it only moves the value where the rig
+    // itself has moved.
+    const SPRITE_AMBIENT_GAIN = 0.85;
+    this.tmpBounceCool.add(this.tmpBounceWarm).multiplyScalar(SPRITE_AMBIENT_GAIN);
+    setSpriteAmbient(this.tmpBounceCool);
   }
 
   /**

@@ -176,20 +176,57 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     // Vibrance rather than saturation: it lifts the *unsaturated* stone and grass toward
     // colour without pushing the already-saturated sprite primaries further out.
     vibrance: 0.22,
-    gain: [1.0, 1.0, 1.05],
-    shadowTint: [0.62, 0.8, 1.34],
-    midTint: [0.98, 0.99, 1.06],
-    highlightTint: [1.14, 1.03, 0.86],
-    // Round-3 answer to "shadows are pure blue with no colour separation". The upper
-    // shadows keep the teal-blue above; the bottom of the range turns violet, so a wall
-    // face in half-light and the black under a stair are no longer the same hue.
-    deepShadowTint: [1.3, 0.9, 1.1],
+    gain: [1.0, 1.0, 1.02],
+    // ART-DIRECTION PASS — the shell was the wrong temperature, measured.
+    //
+    // 'tools/zones.mjs' over five curated frames: EVERY zone of EVERY reference is
+    // warm-positive (mean red − blue), typically +15 to +30 in the corners and the far
+    // band, and that holds even for 'official_003_steam.jpg', the coolest blue-grey
+    // stone frame in the corpus, which measures +18.5 / +24.1 / +16.7 in the corners
+    // and far band while its LIT CENTRE is the one cool zone at −4.1.
+    //
+    // Ours ran the opposite way round: centre +12.9, cornerTL −4.2, farBand −8.0 —
+    // a warm diorama inside a cold shell. That is the single largest reason the frame
+    // read as several systems rather than one picture: the board, the surround and the
+    // sky were each individually defensible and belonged to different times of day.
+    //
+    // Both of the terms that produced it lived here. A shadowTint of [0.62,0.80,1.34]
+    // is a hard blue-negative push over the whole lower two thirds of the range, and
+    // the vast majority of this frame IS the lower two thirds. It is kept cool-relative
+    // — 1.08 blue against 1.02 red still separates a shadow from a highlight — but it no
+    // longer drags every unlit pixel across the neutral line into negative warmth.
+    //
+    // The warm/cool SPLIT is not lost by this: it moves to where it belongs, which is
+    // the lighting rig (warm brazier key against cool sky fill) and the highlight end
+    // below. A grade that manufactures the split by pushing the shadows blue applies it
+    // to the sky, the surround, the near field and the UI backdrop equally, none of
+    // which are lit by anything.
+    shadowTint: [1.02, 0.97, 1.08],
+    midTint: [1.02, 0.99, 1.0],
+    highlightTint: [1.16, 1.04, 0.84],
+    // The deepest family keeps a distinct identity from the shadow family above it —
+    // that was the round-3 fix and it is still right — but it turns toward warm ember
+    // rather than violet. A torch-lit courtyard's darkest corners are full of bounced
+    // firelight; a violet floor is a moonlit assumption imposed on an amber scene.
+    deepShadowTint: [1.34, 1.0, 0.86],
     // Hue secondary, anchors R Y G C B M. The scene's own light rig supplies the amber/navy
     // axis; this exists to keep everything that is NOT on that axis from collapsing into it.
     // Green hard up (garden, moss in the mortar), red up (the banner is the only saturated
     // object in frame and it should stay that way), blue DOWN — the navy was the dominant
     // chroma and pulling it back is what lets the tertiaries be seen at all.
-    hueSat: [1.3, 1.02, 1.42, 1.18, 0.86, 1.14],
+    // ART-DIRECTION PASS — cyan and blue come down hard (C 1.18 -> 0.80,
+    // B 0.86 -> 0.62). At 6x magnification the board's shadow side is not a dark
+    // stone colour, it is near-black carrying saturated cyan SPECKLE: individual
+    // pixels of high-chroma blue-green scattered through a black mass. That is
+    // chroma noise reading as a material, and it is the last hue island left in
+    // the frame now that the shell is warm — it makes the board look like it
+    // belongs to a different scene from everything around it.
+    //
+    // The tertiaries this table exists to protect (green for moss and garden, red
+    // for the banner) are untouched, so the "two-hue lockup" it was written
+    // against does not come back; what goes is only the cool primary that the
+    // lighting rig is already supplying in quantity.
+    hueSat: [1.3, 1.02, 1.42, 0.8, 0.62, 1.14],
     // Negative rotation runs backwards around R->Y->G->C->B->M. Blues go toward cyan so the
     // shade reads blue-GREEN rather than the flat navy the critics measured; greens go
     // toward yellow so foliage is olive rather than emerald; magentas go toward violet so
@@ -206,8 +243,13 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     // So: crush harder, and land what survives on a black point a third as bright. The hue
     // is kept — a neutral black is a listed fail condition — but at this level it reads as
     // "cold black" rather than as the flat violet plate the critics measured.
+    // Same measurement as 'shadowTint' above. The round-4 note that motivated this
+    // block quoted 'official_005_steam.jpg' as "code 6-14 with a WARM CAST" and then
+    // landed the black point on [0.009, 0.014, 0.036] — a 4:1 blue-over-red ratio,
+    // i.e. the cast is cool. The magnitude was measured and right; the hue was not
+    // checked against the same file. Kept at the same luminance, turned warm.
     crush: 0.055,
-    blackPoint: [0.009, 0.014, 0.036],
+    blackPoint: [0.032, 0.021, 0.020],
     // Raised from 0.18. "The highlights near the fire clip straight to white with no filmic
     // shoulder" — at 0.18 the curve still reached 1.0 with slope well above zero, so the
     // brazier core hit a flat plate. 0.32 rolls the top of the range off, which is what keeps

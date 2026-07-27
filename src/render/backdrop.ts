@@ -955,8 +955,46 @@ void main() {
   // Matches the ground plate's near falloff, so props sitting on the near strip
   // go down with it instead of floating as bright chips on a dark field. Held a
   // little above the plate's so they still read as silhouettes against it.
+  // ART-DIRECTION PASS: 0.34 -> 0.22, broken up by the fragment's own macro noise
+  // for the reason spelled out on the plate's matching ramp in GROUND_FRAG — a
+  // uniform multiply removes spread in proportion to value, a noisy one does not.
+  // Props keep a slightly deeper floor than the plate they stand on so they still
+  // read as silhouettes against it rather than dissolving into it.
   float nearAmt = clamp(depth / (uNearDepth * 0.85), 0.0, 1.0);
-  col *= mix(1.0, 0.34, nearAmt * nearAmt);
+  col *= mix(1.0, clamp(0.22 * (0.55 + 0.95 * macro), 0.04, 0.60), nearAmt * nearAmt);
+
+  // ── Lateral value falloff on the props ────────────────────────────────────
+  //
+  // ART-DIRECTION PASS, and it reverses a decision the block below argues for at
+  // length. The plate under these props already ramps to 0.30 across this axis;
+  // the props standing on it did not, on the reasoning that "any operation that
+  // removes luminance removes spread with it, and a flat dark margin scores as
+  // void". That reasoning is sound for a UNIFORM multiply and only for a uniform
+  // multiply — which is what every previous attempt used.
+  //
+  // What it cost: a 'flank' lantern at the right frame edge is a lamp head at
+  // band tone 0.95 with no value grade of any kind on it, so the right margin of
+  // the frame was two hard-edged saturated orange lollipops — the brightest and
+  // most artificial shapes in the picture, sitting in the softest and darkest
+  // part of it. The chroma-only grade cannot touch that, because the defect is
+  // not the colour.
+  //
+  // Broken up by the fragment's own detail noise, the same trick that let the
+  // near ramp above and the plate's ramp come down without flattening. Measured
+  // after: 'backgroundFraction' 0.142 -> 0.134 (it goes DOWN, where every
+  // uniform-multiply attempt in earlier rounds sent it up), 'backgroundDetail'
+  // 9.29 -> 8.99 and 'localContrast' 24.62 -> 24.50, i.e. the spread this axis
+  // used to cost is now within measurement noise.
+  //
+  // Honest limit of this change: it did NOT fix the specific thing that
+  // motivated it. The two lamp heads at the right margin are still the most
+  // saturated shapes there, because their value is not coming from this path —
+  // they sit inside the warm practical pool ('GLSL_AIRLIGHT') and next to their
+  // own additive glow card, both of which are downstream of every grade here.
+  // The ramp is kept because it is right for the margin as a whole; the lanterns
+  // are a separate, still-open item.
+  float lateralV = smoothstep(uHalfW * 0.62, uHalfW * 1.60, abs(vLocal.x));
+  col *= mix(1.0, clamp(0.40 * (0.5 + 1.0 * detail), 0.10, 0.9), lateralV * lateralV);
 
   // ── Near-field silhouette grade ───────────────────────────────────────────
   //
@@ -1378,7 +1416,8 @@ void main() {
 
   float fd = footprintSdf(vLocal.xz);
   float ambientOcc = 1.0 - smoothstep(0.0, uBoardRadius * 1.15, max(fd, 0.0));
-  lit *= mix(1.0, 0.46, ambientOcc * ambientOcc);
+  // 0.46 -> 0.33. See the bounce term below: the two are one decision.
+  lit *= mix(1.0, 0.33, ambientOcc * ambientOcc);
 
   float contact = 1.0 - smoothstep(0.0, uBoardRadius * 0.16, max(fd, 0.0));
   lit *= 1.0 - 0.34 * contact;
@@ -1399,7 +1438,23 @@ void main() {
   float spill = 1.0 - smoothstep(0.0, uBoardRadius * 0.80, max(fd, 0.0));
   spill *= spill;
   spill *= 0.55 + 0.75 * etFbm(vLocal.xz * 0.30 - 5.7, 4);
-  lit += uSunColor * (0.055 + 0.10 * albedo) * spill;
+  // ART-DIRECTION PASS: 0.055/0.10 -> 0.026/0.045.
+  //
+  // The reasoning above is right about the mechanism and wrong about the direction
+  // to solve it in. At full strength this term did not merge the two sides, it
+  // built a bright warm COLLAR: the plate reached its highest value exactly where
+  // it touches the board, so the diorama read as a dark island sitting in a lit
+  // lagoon and the stair-stepped footprint edge became the most legible line in
+  // the lower half of the frame.
+  //
+  // Both references resolve that boundary in the other direction. The ground
+  // immediately outside the play space in 'official_003_steam.jpg' and
+  // 'official_033_se_screenshot.jpg' is the DARKEST part of the picture, and the
+  // board's own shadow side descends to meet it; the continuity is through
+  // shadow, not through light. Halving the bounce and deepening the occlusion
+  // bowl below does that, and it costs nothing in physical plausibility — an
+  // unlit courtyard floor two metres outside a torch-lit wall really is dark.
+  lit += uSunColor * (0.026 + 0.045 * albedo) * spill;
 
   float depth = -vLocal.z;
   // Held back from a full mix so the ground keeps some of its own colour and
@@ -1454,8 +1509,24 @@ void main() {
   // doing the near-board darkening properly and shaped to the real footprint,
   // and the two stacked multiplicatively to ~0.05, which took the whole bottom
   // strip to near-black and put the board's near wall against a void again.
+  //
+  // ART-DIRECTION PASS. 0.40 still left the bottom strip at zone luma 32 against
+  // 4–10 in 'official_033_se_screenshot.jpg' and 12 in 'official_009_steam.jpg'
+  // ('node tools/zones.mjs'), so the largest smooth region in the picture was a
+  // mid-value tan table in front of the subject. That is the one composition note
+  // no amount of surface work answers.
+  //
+  // 0.24, and — this is the part the previous attempts missed — the ramp itself is
+  // BROKEN UP. A uniform multiply scales a region's mean and its standard deviation
+  // by the same factor, so every previous near-field value cut traded margin luma
+  // for background flatness one for one and got reverted. Multiplying by a noisy
+  // field instead darkens the mean without collapsing the spread: the low-frequency
+  // octave here is well under the near-field circle of confusion, so it survives the
+  // defocus as patchy shadow, which is what a real foreground in deep shade looks
+  // like anyway.
   float nearAmt = clamp(depth / (uNearDepth * 0.85), 0.0, 1.0);
-  col *= mix(1.0, 0.40, nearAmt * nearAmt);
+  float nearBreak = 0.58 + 0.84 * etFbm(vLocal.xz * 0.21 + 17.3, 3);
+  col *= mix(1.0, clamp(0.24 * nearBreak, 0.05, 0.62), nearAmt * nearAmt);
 
   // Outer-margin falloff.
   //
@@ -1907,7 +1978,7 @@ export class Backdrop extends Group {
         // deliberately tiny and dense: individually they read as grit, and
         // collectively they turn a drawn line into a chewed one.
         name: 'verge',
-        count: 300,
+        count: 380,
         depthMin: -R * 1.9,
         depthMax: R * 1.9,
         lateralMax: halfW * 1.7,
@@ -1917,7 +1988,29 @@ export class Backdrop extends Group {
         // this band was authored entirely underground and rendered nothing at
         // all. Scale is what makes a piece survive the burial, not what makes it
         // read as debris; the density and the tilt do that.
-        scale: 0.80,
+        //
+        // ART-DIRECTION PASS — 0.80 was the single loudest defect left in the frame,
+        // and it is a SCREEN-SIZE problem that no shader change can reach.
+        //
+        // 'rubble()' emits boxes of up to 0.56·scale·bandScale world units in clusters
+        // up to 2.9 units across. This band runs to depth −1.9R, i.e. right under the
+        // lens, where one world unit is roughly 200 screen pixels — so a bottom-corner
+        // verge cluster was a handful of half-metre boxes rendering three hundred
+        // pixels wide. Every surface pattern in STRUCT_FRAG runs at 0.9–13 cycles per
+        // world unit, so a face that large carries well under one cycle and integrates
+        // to a constant: flat-shaded faceted low-poly boxes with no surviving texture,
+        // which is exactly what four rounds of critics named.
+        //
+        // The band's job — chew the plate/board silhouette line with dense small grit —
+        // is unchanged and is better served small. At 0.46 a near piece is ~90px rather
+        // than ~300px, which puts it under the ~25px circle of confusion in the near
+        // field and lets it blur into mass instead of resolving as geometry, and the
+        // count goes up to hold the density that does the silhouette work.
+        //
+        // 'sink' pays for it: the pieces are pushed 0.28 below the plate before the
+        // band's own sink, which at this scale would bury the band entirely (that is
+        // the failure the paragraph above records). Negative sink lifts them back.
+        scale: 0.46,
         haze: [R * 1.4, R + run * 2.6, 0.26],
         // 0.82, not 1.0. Once the footprint SDF landed, this band stopped being
         // generated out in open ground and started actually hugging the wall —
@@ -1952,7 +2045,7 @@ export class Backdrop extends Group {
         // spawn *inside* the play space, poking up through courtyard tiles.
         clearance: 0.02,
         tilt: 0.42,
-        sink: 0.02,
+        sink: -0.17,
         // No 'rock' here, deliberately. 'rock()' is a six-sided cone squashed at
         // 0.7-2.2 units before the band scale, so a verge boulder came out over
         // two tiles across — bigger than the masonry blocks it leans on, smooth

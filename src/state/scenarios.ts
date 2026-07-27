@@ -443,10 +443,30 @@ const BATTLE_OPEN: Scenario = {
     keyElevation: 54,
     keyAzimuth: 138,
     keyIntensity: 3.1,
-    hemiIntensity: 1.25,
-    ambientIntensity: 0.42,
-    skyColor: 0xa8c4e8,
-    groundColor: 0x6d5b46,
+    // ART-DIRECTION PASS — the shadow floor was the reason the board read as a
+    // black cut-out pasted onto a lighter card.
+    //
+    // At 1.25/0.42 the board's unlit faces bottomed out under luma 15 while the
+    // ground plate immediately outside them sat near 110, so the diorama's
+    // silhouette was a 5x value step across one antialiased edge, and several
+    // rounds of work on the PLATE could not fix it because the plate was not the
+    // side that was wrong. No reference frame does this: the shadow side of the
+    // stone in 'official_003_steam.jpg' holds 40-60, and it is the value
+    // continuity across that boundary — not any amount of dressing laid over it —
+    // that makes a shipped frame read as one solid object rather than two layers.
+    //
+    // Lifting the fill rather than the key also puts the light where the grade
+    // wants it: 'publishTerrainBounce' premultiplies the rig's own graded sky and
+    // ground colours, and 'groundColor' here is a warm ochre, so the extra fill
+    // arrives warm and reinforces the warm-positive shadow the grade now asks for
+    // instead of fighting it.
+    hemiIntensity: 1.62,
+    ambientIntensity: 0.62,
+    // Cooled 0.5 of a step and desaturated. This is the sky lobe of the terrain
+    // bounce; at 0xa8c4e8 it was the source of the saturated cyan speckle visible
+    // at 6x in the board's shadow. Same luminance, a third of the chroma.
+    skyColor: 0xb6c6da,
+    groundColor: 0x7a6248,
     rimIntensity: 0.7,
     shadowRadius: 2.4,
   },
@@ -508,7 +528,7 @@ const BATTLE_OPEN: Scenario = {
   // opposite conclusions. Orbonne at night belongs to the dark subset (36-50), and
   // this lands the frame at meanLuma 45.8 and darkShare 0.42 - inside the night
   // band on both - instead of ~69 with clipped highlights.
-  post: { exposure: 2.1, dof: 1.0, vignette: 1.0 },
+  post: { exposure: 1.94, dof: 1.0, vignette: 1.0 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,

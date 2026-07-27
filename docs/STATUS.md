@@ -76,12 +76,19 @@ regressions (round 10 found the void had drifted to 0.264, past its hard-fail ga
 agent's grade change interacted with another's recession ramp).
 
 Better uses of the next effort, in order:
-1. **Wire the decoded animation** (item 3). Static units are a bigger perceptual gap than any
-   remaining material work, and it is plumbing, not research.
-2. A single **art-directed pass on one scenario** rather than parallel fixers on separate axes —
-   the frame now suffers from too many independently-tuned systems, not too few features.
+1. ~~Wire the decoded animation~~ — **DONE**, and confirmed playing (item 3).
+2. ~~A single art-directed pass~~ — **DONE.** One agent, whole renderer, authority to retune or
+   remove anything a previous round added. Result: the frame lost its cold blue/purple cast and the
+   board and surround now share one warm amber night palette; `backgroundFraction` tightened
+   0.196 -> 0.134, into the reference band. It reads as one picture in a way the round-10 frame did
+   not. This approach was more productive per token than rounds 9-10 combined.
 3. If the blind test is resumed, it needs **n>=30 per measurement** to detect the size of effect
-   these rounds actually produce.
+   these rounds actually produce. Do NOT resume it at n=12.
+
+**If you continue: prefer one director over parallel fixers.** The per-axis fan-out was the right
+tool from round 1 to about round 7, when whole subsystems were missing. Once every subsystem exists
+and is individually defensible, the remaining defect is coherence, and coherence cannot be
+parallelised — six agents each optimising their own axis is what produced the incoherence.
 
 ### Round 9, the first round with enough samples to say anything
 Identification: 5 of 12 then 9 of 12. Tested against a pooled rate of 0.58, P(<=5 of 12)=0.19 and
