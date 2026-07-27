@@ -90,6 +90,21 @@ export interface UnitPlacement {
   ct?: number;
 }
 
+/**
+ * Per-scenario post tuning. `PostStack` tone maps and exposes on its own, so the
+ * lighting preset's `exposure` field never reaches the renderer — the value is
+ * carried here instead and pushed into the stack at boot.
+ */
+export interface ScenarioPost {
+  /** Linear exposure multiplier applied just before the tonemapper. */
+  exposure?: number;
+  /** 0 disables the tilt-shift band entirely; 1 is the stack's default strength. */
+  dof?: number;
+  ao?: number;
+  bloom?: number;
+  vignette?: number;
+}
+
 export interface Scenario {
   readonly id: ScenarioId;
   readonly name: string;
@@ -100,6 +115,7 @@ export interface Scenario {
   readonly grade: string;
   readonly layers: ScenarioLayers;
   readonly camera: ScenarioCamera;
+  readonly post?: ScenarioPost;
   readonly objective: Objective;
   readonly units: readonly UnitPlacement[];
   /**
@@ -406,6 +422,10 @@ const BATTLE_OPEN: Scenario = {
   grade: 'cathedral',
   layers: { terrain: true, sprites: true, ui: true, post: true, highlights: true },
   camera: { yawIndex: 0, frameField: true, focusTile: { x: 6, y: 7, z: 3 } },
+  // The reference games are clean. A tactics board has to stay readable across
+  // the whole frame, so the tilt-shift band is a hint of miniature depth rather
+  // than the wall of blur the stack defaults to.
+  post: { exposure: 1.55, dof: 0.3, ao: 0.85, bloom: 1.0, vignette: 0.7 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,
@@ -530,6 +550,8 @@ export function overrideScenario(scenario: Scenario, params: URLSearchParams): S
   const zoom = params.get('zoom');
   const pitch = params.get('pitch');
   const banner = params.get('banner');
+  const exposure = params.get('exposure');
+  const dof = params.get('dof');
 
   const camera: ScenarioCamera = { ...scenario.camera };
   if (yaw !== null) {
@@ -542,9 +564,14 @@ export function overrideScenario(scenario: Scenario, params: URLSearchParams): S
   }
   if (pitch !== null && Number.isFinite(Number(pitch))) camera.pitchDegrees = Number(pitch);
 
+  const post: ScenarioPost = { ...scenario.post };
+  if (exposure !== null && Number.isFinite(Number(exposure))) post.exposure = Number(exposure);
+  if (dof !== null && Number.isFinite(Number(dof))) post.dof = Number(dof);
+
   const next: Scenario = {
     ...scenario,
     camera,
+    post,
     ...(lighting && lighting in LIGHTING_PRESET_NAMES ? { lighting } : {}),
     ...(grade !== null ? { grade } : {}),
   };

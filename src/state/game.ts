@@ -202,6 +202,7 @@ export class Game {
         quality: 'high',
       });
       this.vfx.attachPost(this.post.stack);
+      this.applyPostProfile();
     }
 
     if (this.scenario.layers.terrain) this.buildTerrain();
@@ -222,6 +223,38 @@ export class Game {
     // so a screenshot never catches the field mid-deploy.
     await this.openingSequence();
     release();
+  }
+
+  /**
+   * Push the scenario's post tuning into the stack.
+   *
+   * `LightingRig` writes its preset exposure to `renderer.toneMappingExposure`,
+   * which is dead once `PostStack` owns tone mapping — so exposure is carried on
+   * the scenario and applied here, multiplied by the preset's own value so a
+   * night map still reads darker than a noon map.
+   */
+  private applyPostProfile(): void {
+    const stack = this.post?.stack;
+    if (!stack) return;
+    const profile = this.scenario.post ?? {};
+    const preset = LIGHTING_PRESETS[this.scenario.lighting];
+
+    stack.settings.exposure = (profile.exposure ?? 1) * preset.exposure;
+
+    const dof = profile.dof ?? 1;
+    if (dof <= 0) {
+      stack.setEffectEnabled('dof', false);
+    } else {
+      stack.settings.dof.intensity = dof;
+      // Widen the sharp band as the effect is dialled down, so the readable
+      // part of the board grows rather than the blur simply getting softer.
+      stack.settings.dof.tiltBand = 0.12 + (1 - Math.min(1, dof)) * 0.2;
+      stack.settings.dof.tiltFalloff = 0.3 + (1 - Math.min(1, dof)) * 0.18;
+      stack.settings.dof.maxCoCPixels = 14 * Math.min(1, dof) + 4;
+    }
+    if (profile.ao !== undefined) stack.setEffectIntensity('ao', profile.ao);
+    if (profile.bloom !== undefined) stack.setEffectIntensity('bloom', profile.bloom * 0.055);
+    if (profile.vignette !== undefined) stack.setEffectIntensity('vignette', profile.vignette * 0.26);
   }
 
   private buildTerrain(): void {
@@ -642,7 +675,7 @@ export class Game {
   private enterCommandMode(unit: Unit): void {
     this.setMode({ kind: 'command' });
     this.ui.setActiveUnit(unitVM(this.state, unit));
-    this.ui.showCommandMenu(commandItemsFor(this.state, unit), this.anchorFor(unit));
+    this.ui.showCommandMenu(commandItemsFor(this.state, unit), this.menuAnchorFor(unit));
     for (const sprite of this.sprites.all) {
       sprite.setSelection(sprite.unitId === unit.id ? 'active' : 'none');
       sprite.setTurnMarker(sprite.unitId === unit.id);
@@ -964,12 +997,28 @@ export class Game {
     return undefined;
   }
 
-  /** Screen-space anchor above a unit, for menus and floating text. */
+  /** Screen-space anchor above a unit, in CSS pixels. */
   private anchorFor(unit: Unit): { x: number; y: number } {
     const world = this.worldOf(unit.pos);
     world.y += 1.6;
     const point = this.camera.worldToScreen(world, this.screen);
     return { x: point.x, y: point.y };
+  }
+
+  /**
+   * Anchor for the command menu: the unit's head, pulled back inside the
+   * viewport. A unit on the south edge of the map projects below the bottom of
+   * the canvas, and a fixed-position panel hung there simply is not on screen.
+   */
+  private menuAnchorFor(unit: Unit): { x: number; y: number } {
+    const { x, y } = this.anchorFor(unit);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const halfPanel = MENU_PANEL_HEIGHT / 2 + 24;
+    return {
+      x: clamp(x, 24, Math.max(24, width - MENU_PANEL_WIDTH - 48)),
+      y: clamp(y, halfPanel, Math.max(halfPanel, height - halfPanel)),
+    };
   }
 
   private floatAt(unit: Unit, vm: Omit<FloatTextVM, 'x' | 'y'> & { x: number; y: number }): void {
@@ -996,6 +1045,14 @@ export class Game {
 // ─────────────────────────────────────────────────────────────────────────────
 // Small pure helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Measured from the shipped stylesheet; only used to keep the panel on screen. */
+const MENU_PANEL_WIDTH = 290;
+const MENU_PANEL_HEIGHT = 300;
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
 
 function isOver(state: BattleState): boolean {
   return state.phase === 'victory' || state.phase === 'defeat';

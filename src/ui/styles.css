@@ -477,11 +477,17 @@
   gap: 10px;
   align-items: stretch;
 }
+/* Centred with margin rather than `transform: translateX(-50%)`: a transformed
+   ancestor becomes the containing block for `position: fixed` descendants, and
+   the anchored command menu inside this row is fixed-positioned against
+   viewport coordinates the game layer computed by projecting a world point. */
 .et-hud__menus {
   position: absolute;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 74px;
-  transform: translateX(-50%);
+  margin-inline: auto;
+  width: fit-content;
   display: flex;
   align-items: flex-end;
   gap: 14px;

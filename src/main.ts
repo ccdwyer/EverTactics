@@ -13,7 +13,7 @@
  */
 
 import { Game } from '@state/game';
-import { contentSummary } from '@state/content';
+import { bootstrapContent, contentSummary } from '@state/content';
 import { DEFAULT_SCENARIO, listScenarios } from '@state/scenarios';
 
 declare global {
@@ -57,6 +57,7 @@ function showFatal(error: unknown): void {
 }
 
 async function main(): Promise<void> {
+  bootstrapContent();
   const summary = contentSummary();
   const game = new Game({ scenarioId, shot: shotMode, params });
 
