@@ -49,7 +49,14 @@ export class CommandMenu implements FocusLayer {
         if (item.icon) row.appendChild(icon(item.icon, 'et-command__icon'));
         row.appendChild(el('span', 'et-command__label', item.label));
         if (item.detail) row.appendChild(el('span', 'et-command__detail', item.detail));
-        if (item.opensSubmenu) row.appendChild(icon('chevron', 'et-command__chevron'));
+        // The submenu caret occupies a RESERVED slot, present on every row.
+        // Rendering it only where it applies made the detail column ragged —
+        // Move's "3" landed 20px right of Battle Skill's "9" because Move has no
+        // caret to sit inside — and a right-hand column that moves row to row is
+        // the difference between a menu and a list of divs.
+        const caret = icon('chevron', 'et-command__chevron');
+        if (!item.opensSubmenu) caret.classList.add('is-empty');
+        row.appendChild(caret);
       },
       onHighlight: (item) => {
         this.hint.textContent = item?.hint ?? '';

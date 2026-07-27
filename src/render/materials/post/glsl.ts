@@ -60,6 +60,32 @@ vec3 tonemapACES(vec3 color) {
   color = ACES_OUT * color;
   return clamp(color, 0.0, 1.0);
 }
+
+/**
+ * Hue-preserving ACES.
+ *
+ * Applying a tonemap per channel is what makes a saturated light source go white: the red
+ * channel of a flame saturates first, then green catches up, then blue, and the hue walks to
+ * neutral long before the value reaches 1.0. The round-5 critics filed exactly that against
+ * us — "the fire core blows straight to 255,255,255 with no hue retained and no roll-off,
+ * it's an additive blob, not a tonemapped light", against "the brightest embers stay orange
+ * even at peak and roll off filmically".
+ *
+ * So tonemap the PEAK channel only — a scalar, and ACES on a neutral is a scalar function
+ * because both ACES matrices have unit row sums — and re-apply the original channel ratios.
+ * That preserves hue exactly, all the way up. A real emulsion does lose some hue at the very
+ * top, so 'whiteShift' blends the ratio toward white on a steep curve: it costs nothing below
+ * a tonemapped peak of ~0.8 and only opens up on genuinely blown values, which keeps the
+ * filmic shoulder while leaving the flame a flame.
+ */
+vec3 tonemapACESPreserveHue(vec3 color, float whiteShift) {
+  color = max(color, vec3(0.0));
+  float peak = max(max(color.r, color.g), max(color.b, 1e-5));
+  vec3 ratio = color / peak;
+  float tPeak = tonemapACES(vec3(peak)).x;
+  ratio = mix(ratio, vec3(1.0), pow(clamp(tPeak, 0.0, 1.0), 8.0) * whiteShift);
+  return clamp(ratio * tPeak, 0.0, 1.0);
+}
 `;
 
 /**
@@ -182,9 +208,32 @@ uniform float uFarClamp;        // ceiling on POSITIVE (far-field) CoC, 0..1
  */
 float focalDistance() {
   if (uFocusAuto < 0.5) return uFocusDist;
-  float dc = rawDepth(uTiltCenter);
-  if (isBackground(dc)) return uFocusDist;
-  return viewDist(viewPosFromDepth(uTiltCenter, dc));
+
+  // Five taps, not one. A single tap at the composition centre is one gap between two blocks
+  // away from reading the backdrop and snapping the focal plane forty tiles back — the whole
+  // frame would pop out of focus because of one pixel. The cross spans about a tile at the
+  // framings this rig uses, so it averages over the subject's own footprint; background taps
+  // are discarded rather than averaged in, since they are exactly the failure being guarded
+  // against. Only if every tap is background does the authored fallback apply.
+  const float SPREAD = 0.02;
+  vec2 taps[5];
+  taps[0] = uTiltCenter;
+  taps[1] = uTiltCenter + vec2(SPREAD, 0.0);
+  taps[2] = uTiltCenter - vec2(SPREAD, 0.0);
+  taps[3] = uTiltCenter + vec2(0.0, SPREAD);
+  taps[4] = uTiltCenter - vec2(0.0, SPREAD);
+
+  float sum = 0.0;
+  float hits = 0.0;
+  for (int i = 0; i < 5; i++) {
+    vec2 uv = clamp(taps[i], vec2(0.001), vec2(0.999));
+    float d = rawDepth(uv);
+    if (isBackground(d)) continue;
+    sum += viewDist(viewPosFromDepth(uv, d));
+    hits += 1.0;
+  }
+  if (hits < 0.5) return uFocusDist;
+  return sum / hits;
 }
 
 /** Signed CoC in [-1,1]: negative = in front of focus (near field), positive = behind. */
@@ -226,13 +275,29 @@ float computeCoC(vec2 uv, float d) {
     coc = s * max(abs(coc), radial);
   }
 
-  // Asymmetric ceiling. A real lens defocuses the near field harder than the far field at
-  // equal distance from the plane, and the round-4 note is explicit on both halves: "far-field
-  // blur is so heavy the town is a featureless navy mush, reading as hiding an empty scene",
-  // against "defocus BOTH the near cliff edge and the far edge — that is what sells the
-  // diorama". So the near side keeps the full radius and the far side is capped, which leaves
-  // the background legible as architecture while the near rim still goes properly soft.
-  coc = coc > 0.0 ? min(coc, uFarClamp) : max(coc, -1.0);
+  // Asymmetric SHOULDER, not a clamp.
+  //
+  // A real lens defocuses the near field harder than the far field at equal distance from the
+  // plane, and the round-4 note is explicit on both halves: "far-field blur is so heavy the
+  // town is a featureless navy mush, reading as hiding an empty scene", against "defocus BOTH
+  // the near cliff edge and the far edge — that is what sells the diorama".
+  //
+  // ROUND 5 — this used to be min(coc, uFarClamp), and the CoC debug view (?postdebug=coc,
+  // see PostStackOptions.debug) showed exactly what that costs: every background pixel in the
+  // frame sat at PRECISELY uFarClamp. The entire backdrop was one flat blur value, which is
+  // the tell the round-5 critics filed twice — "a uniform gaussian ... rather than a lens with
+  // an aperture shape", and "no participating medium, so the tower and the ship sit at the
+  // same apparent distance despite the DOF". A hard clamp destroys the very information depth
+  // of field exists to carry.
+  //
+  // An exponential shoulder is monotonic and asymptotic instead: it approaches the same
+  // ceiling, never crosses it, and keeps a real derivative all the way, so geometry two tiles
+  // behind the board stays measurably crisper than the far skyline. The near side gets the
+  // same treatment against a ceiling of 1.0, which turns the abrupt sharp-to-fully-defocused
+  // step the debug view showed along the near rim into the continuous falloff the references
+  // carry.
+  float ceiling = coc > 0.0 ? uFarClamp : 1.0;
+  coc = sign(coc) * ceiling * (1.0 - exp(-abs(coc) / max(ceiling, 1e-3)));
   return clamp(coc, -1.0, 1.0);
 }
 `;

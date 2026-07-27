@@ -558,6 +558,9 @@ uniform vec3  uWindowColor;
 uniform float uHazeNear;
 uniform float uHazeFar;
 uniform float uHazeMax;
+// Airlight ceiling: the linear value a fully-hazed surface may reach. See the
+// veil block in main() for why a ceiling exists at all.
+uniform float uHazeCeil;
 uniform float uGroundY;
 uniform float uNearDepth;
 uniform float uWindowGain;
@@ -775,6 +778,55 @@ void main() {
   // cut-out and the eye reads "missing texture" rather than "in shadow".
   float edge = pow(clamp(1.0 - abs(n.y), 0.0, 1.0), 3.0) * (0.5 + 0.5 * n.x);
   vec3 toned = lit * uTone + uSkyColor * edge * 0.10 * uTone * tex;
+
+  // ── Aerial perspective is a CEILING, not just a floor ────────────────────
+  //
+  // Mixing toward uHaze alone is only half of atmospheric scattering. It lifts
+  // the blacks toward the airlight, which is correct, but it leaves the top end
+  // nearly intact: a lit roof or a lantern-lit window thirty units back still
+  // renders at close to its full value, because a 60% mix of a bright surface
+  // toward a dark haze is still bright.
+  //
+  // Measured on the round-5 frame, that is exactly what went wrong. Sampling the
+  // top 200 rows (the ridge band) gave sd 64.6 and p95 212/255, against the same
+  // strip in three Triangle references at sd 41-44 and p95 125-180. Our furthest
+  // layer carried MORE contrast and a HIGHER ceiling than our mid-ground — depth
+  // cueing running backwards — which is why the surround competed with the board
+  // instead of receding behind it, and why the frame read as edge-to-edge
+  // clutter with no focal hierarchy.
+  //
+  // Physically the fix is simple: scattered air both adds light and *veils* it,
+  // so nothing beyond a few scattering lengths can be much brighter than the
+  // airlight itself. Compressing the top end toward uHazeCeil as haze rises
+  // reproduces that. The knee is soft (asymptotic, not a clamp) so the band
+  // keeps its internal tonal steps and never posterises into a flat card — the
+  // range narrows, the detail stays.
+  //
+  // Named veil, not ceil: ceil is a GLSL builtin and shadowing it fails to
+  // compile on some drivers.
+  //
+  // The ramp is driven by haze normalised to the band's OWN uHazeMax, and
+  // decays as a quartic. Both details were arrived at by measuring:
+  //
+  //   mix(8.0, uHazeCeil, haze)          → no-op. haze saturates at uHazeMax
+  //     (0.80 on ridge, 0.36 on flank), never 1.0, so a linear blend still
+  //     carried 20-64% of the 8.0 "no ceiling" anchor. veil landed at 1.6-5.2,
+  //     two decades above any value this shader produces. A/B moved the far
+  //     bands by 3 luma.
+  //   quartic on raw haze                → engaged on ridge only. The flank
+  //     band, which covers the most pixels, tops out at haze 0.36 and so still
+  //     sat at veil 1.59.
+  //
+  // Normalising first makes uHazeCeil mean "the value this band is allowed to
+  // reach at its own far extreme", which is both the useful authoring knob and
+  // the thing that actually fires.
+  float hazeN = clamp(haze / max(uHazeMax, 1e-3), 0.0, 1.0);
+  float t = 1.0 - hazeN;
+  float veil = max(uHazeCeil, 1e-3);
+  veil += (8.0 - veil) * t * t * t * t;
+  vec3 over = max(toned - veil, 0.0);
+  toned = min(toned, vec3(veil)) + over / (1.0 + over / veil);
+
   vec3 col = mix(toned, uHaze, haze) * uExposure;
   // Matches the ground plate's near falloff, so props sitting on the near strip
   // go down with it instead of floating as bright chips on a dark field. Held a
@@ -1169,6 +1221,15 @@ interface BandSpec {
   scale: number;
   haze: [number, number, number];
   /**
+   * Airlight ceiling, in the same linear units the band's albedo is authored in.
+   * A fully-hazed surface asymptotes toward twice this. Omitted → no ceiling,
+   * which is what the un-hazed near bands (`nearfield`, `fore`) want.
+   *
+   * Lower = the band recedes harder. This is the knob that puts the depth
+   * ordering back the right way round; see the `veil` block in `STRUCT_FRAG`.
+   */
+  hazeCeil?: number;
+  /**
    * Value multiplier for the band. Near-camera bands go dark: in both reference
    * frames the foreground element is a silhouette, and a pale out-of-focus block
    * sitting in front of the board is the worst of both worlds — it reads as
@@ -1326,6 +1387,9 @@ export class Backdrop extends Group {
         lateralMax: halfW * 2.0,
         scale: 0.78,
         haze: [R * 0.7, R + run * 2.2, 0.36],
+        // Gentle: the flank band straddles the board's own depth, so it should
+        // sit alongside the play space rather than behind it.
+        hazeCeil: 0.30,
         // Measured, not chosen. At 0.62 the near flank house rendered at luma
         // 26/255 with its masonry invisible — a black mass with two lit windows
         // floating on it, which is the void again wearing a building's shape.
@@ -1473,7 +1537,11 @@ export class Backdrop extends Group {
         lateralMax: halfW * 1.95,
         scale: 1.0,
         haze: [R + 0.5, R + run * 1.5, 0.55],
-        tone: 1.0,
+        tone: 0.96,
+        // Looser than `ridge` — this band is one depth step nearer, and the
+        // whole point is that the two now separate by value instead of both
+        // sitting at board brightness.
+        hazeCeil: 0.15,
         windows: 1,
         kinds: ['house', 'house', 'tree', 'wall', 'lantern', 'rock', 'tower'],
       },
@@ -1488,7 +1556,18 @@ export class Backdrop extends Group {
         lateralMax: halfW * 1.95,
         scale: 1.5,
         haze: [R, R + run * 1.1, 0.80],
-        tone: 1.15,
+        // 0.92, down from 1.15. This band was the BRIGHTEST in the surround —
+        // the furthest layer authored a sixth hotter than the apron in front of
+        // it — which is depth cueing running backwards. The over-scale that
+        // makes the roofline crop against the top edge is worth keeping; the
+        // value lift that came with it was not.
+        tone: 0.92,
+        // The tightest ceiling in the set: this is the layer that should read as
+        // a silhouette in air, so its lit faces and its windows both get pulled
+        // down toward the airlight. Not lower than this — the band still has to
+        // clear the void test, and a far layer crushed to near-black is counted
+        // as background by tools/metrics.mjs (and read as one by a critic).
+        hazeCeil: 0.06,
         windows: 1,
         kinds: ['tower', 'house', 'wall', 'tower', 'tree'],
       },
@@ -1886,6 +1965,9 @@ export class Backdrop extends Group {
         uHazeNear: { value: band.haze[0] },
         uHazeFar: { value: band.haze[1] },
         uHazeMax: { value: Math.min(0.96, band.haze[2] * this.opts.hazeStrength) },
+        // 8.0 is "effectively no ceiling" — every value in this shader is far
+        // below it, so the knee is a no-op for bands that opt out.
+        uHazeCeil: { value: band.hazeCeil ?? 8.0 },
         uGroundY: { value: groundY },
         uNearDepth: { value: Math.min(-2, layout.nearDepth) },
         uTone: { value: band.tone },

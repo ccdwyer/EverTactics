@@ -516,9 +516,41 @@ export interface SpriteUniforms {
   uBounceColor: { value: THREE.Color };
   uBounceStrength: { value: number };
 
+  /**
+   * Where this pose's art actually starts and ends inside the 64x80 cell, in
+   * texels from the cell's bottom edge.
+   *
+   * ─────────────────────────────────────────────────────────────────────────
+   * ROUND 5 — every vertical ramp in this shader was anchored to the wrong end.
+   * ─────────────────────────────────────────────────────────────────────────
+   * The foot occlusion, the ground bounce and the sky-occlusion gradient were
+   * all driven by `spriteCellUv.y`, i.e. by position within the **cell**. But an
+   * FFT cell is 80 texels tall and a standing figure fills roughly texels 4-46
+   * of it — the rest is headroom for jump and cast poses, and a couple of texels
+   * of slack underneath. Measured on the shipped sheets, the standing poses sit
+   * 2, 4 or 8 texels above the cell floor depending on the cell (knight_m alone
+   * spans 0-8 across its eight poses).
+   *
+   * Consequences, all of them visible in the round-4 frame:
+   *   • the foot ramp's peak landed on empty texels *below* the boots and had
+   *     already decayed to ~0.65 by the time it reached them, so the contact
+   *     pinch the critics say is missing was in fact being spent on transparent
+   *     pixels;
+   *   • the bounce term, ramping to zero at cell-v 0.62 = texel 50, was applied
+   *     to the entire figure rather than to its legs;
+   *   • the sky-occlusion gradient covered only the bottom half of its intended
+   *     range, so head and boots differed by far less than intended.
+   *
+   * Driving all three from the *measured* art extent — `footBottomY` and
+   * `headTopY` out of `SheetSheet.layout`, updated per frame — is what makes
+   * them land where the body is.
+   */
+  uFootBaseTexels: { value: number };
+  /** Height of this pose's art above `uFootBaseTexels`, in texels. */
+  uBodyTexels: { value: number };
   /** Occlusion baked into the lowest texels of the art, where it meets the tile. */
   uFootShade: { value: number };
-  /** Height of that ramp, in texels. */
+  /** Height of that ramp, in texels **above the art's own baseline**. */
   uFootShadeTexels: { value: number };
   /** 0 while the unit is airborne, so the feet contact term lifts with the hop. */
   uGrounded: { value: number };
@@ -628,6 +660,8 @@ uniform vec3  uBackRimColor;
 uniform float uBackRimStrength;
 uniform vec3  uBounceColor;
 uniform float uBounceStrength;
+uniform float uFootBaseTexels;
+uniform float uBodyTexels;
 uniform float uFootShade;
 uniform float uFootShadeTexels;
 uniform float uGrounded;
@@ -817,7 +851,14 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
     spriteShade = min(spriteShade, vec3(uShadeKnee)) + over / (1.0 + over * uShadeCompress);
   }
 
-  float spriteUp = clamp(spriteCellUv.y, 0.0, 1.0);
+  // ── where we are on the *figure*, not on the cell ───────────────────────────
+  // See uFootBaseTexels. spriteFootTexels is height above the art's own lowest
+  // opaque row, so the contact ramp starts exactly at the boots however high the
+  // pose floats in its cell; spriteUp is the same measure normalised to the
+  // figure's height, so head and feet are 1 and 0 for every pose on every sheet.
+  float spriteTexelY = spriteCellUv.y * uFrameTexels.y;
+  float spriteFootTexels = max(spriteTexelY - uFootBaseTexels, 0.0);
+  float spriteUp = clamp(spriteFootTexels / max(uBodyTexels, 1.0), 0.0, 1.0);
 
   // ── sky occlusion down the body ────────────────────────────────────────────
   // A billboard presents one horizontal normal for its whole height, so three's
@@ -830,17 +871,29 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
   // shadow, which is the difference between the FFT reference's units and a
   // silhouette. Ground bounce (below) then lifts the very bottom back up in the
   // terrain's colour, so the legs read as lit *by the floor* rather than as dark.
-  spriteShade *= mix(1.0 - uSkyOcclusion, 1.0, smoothstep(0.0, 0.8, spriteUp));
+  spriteShade *= mix(1.0 - uSkyOcclusion, 1.0, smoothstep(0.0, 0.85, spriteUp));
 
   // Ground bounce: terrain-coloured light rising into the lower body. Grounding
   // is mostly this plus the contact darkening below — a figure whose legs are as
-  // bright as its shoulders always reads as a sticker.
-  float bounceK = 1.0 - smoothstep(0.0, 0.62, spriteUp);
+  // bright as its shoulders always reads as a sticker. Now genuinely confined to
+  // the legs: spriteUp is normalised to the figure rather than to the cell, so
+  // the term dies at roughly the waist instead of above the head.
+  float bounceK = 1.0 - smoothstep(0.0, 0.42, spriteUp);
   spriteShade += uBounceColor * (uBounceStrength * bounceK * bounceK);
 
-  // Contact occlusion in the art itself, ramping over the lowest few texels.
-  // Lifts away with the unit during a hop so it never detaches from the tile.
-  float footRamp = 1.0 - smoothstep(0.0, max(uFootShadeTexels, 1.0) / max(uFrameTexels.y, 1.0), spriteUp);
+  // ── contact occlusion in the art itself ────────────────────────────────────
+  // The single strongest grounding cue there is, and unlike the ground decal not
+  // one texel of it can ever be hidden behind the billboard.
+  //
+  // Measured on refs/curated/fft/press-311722-...-mediakit-03: the blue-clad
+  // unit's boots run luma 60-75 against a torso at ~150, so the lowest few rows
+  // of the figure sit a full stop under the rest of it, and the transition is
+  // fast — five or six texels, not a gradient up the shins. The ramp is
+  // therefore anchored at uFootBaseTexels (this pose's own lowest opaque row)
+  // and measured in absolute texels, so it covers the same physical band of
+  // boot whatever the figure's height.
+  float footRamp = 1.0 - smoothstep(0.0, max(uFootShadeTexels, 1.0), spriteFootTexels);
+  footRamp *= footRamp;
   spriteShade *= 1.0 - uFootShade * footRamp * uGrounded;
 
   // Grade the art into the scene *before* it is lit: pull chroma toward the
@@ -1086,8 +1139,14 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     // eighth of the figure sits a full stop under the rest of it. That in-art
     // fall-off is what reads as grounding at every camera angle — unlike the
     // ground decal, none of it can ever be hidden behind the billboard.
-    uFootShade: { value: 0.5 },
-    uFootShadeTexels: { value: 10 },
+    // Round 5: anchored to the art rather than to the cell (see uFootBaseTexels),
+    // so for the first time the whole ramp lands on boot. Squared in the shader,
+    // which puts the bulk of the darkening in the lowest three or four texels —
+    // the reference's transition is fast, not a gradient up the shins.
+    uFootBaseTexels: { value: 0 },
+    uBodyTexels: { value: options.frameHeight },
+    uFootShade: { value: 0.72 },
+    uFootShadeTexels: { value: 11 },
     uGrounded: { value: 1 },
 
     uFlashColor: { value: new THREE.Color(0xffffff) },

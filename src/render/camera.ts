@@ -170,6 +170,12 @@ export const MAX_FRAME_MARGIN_FRACTION = 0.15;
  * near side of the rounding at any plausible offset, which frees the offset to be chosen for
  * where the board sits rather than for how big it is. The character-size ceiling still caps
  * the result, so this cannot run away.
+ *
+ * ROUND 5 finished the job round 4 described but could not do: the offset term is gone from
+ * the cover fit entirely (see `frameField`), so this constant is now the ONLY outward bias
+ * and the coupling it was compensating for no longer exists. Measured on `battle-open` at
+ * 1920x1080 the fit lands on 3 device pixels per texel, which puts a character at 13.3% of
+ * frame height — inside the 12-17% the references measure.
  */
 export const COVER_BLEED = 1.05;
 
@@ -253,8 +259,30 @@ export const DEFAULT_YAW_TRIM_DEGREES = 10;
  * bottom edge does not remove the wedges, it merges them into one dark band across the whole
  * width. At +0.025 the near corner stays inside the frame and the two wedges sit under the
  * unit card and the command menu, which were going to cover them anyway.
+ *
+ * ROUND 5 — [-0.02, +0.025] is 2% off centre. That is not a composition, it is a rounding
+ * error, and the measurement says so: a 3x3 luma grid of our frame put the brightest cell at
+ * TOP-CENTRE (the blurred backdrop) with the centre cell at 0.6x of it, while both reference
+ * frames put their brightest cell dead in the middle at 1.6-2.0x the rim. The subject was in
+ * the middle of the frame without being the subject OF the frame.
+ *
+ * [-0.075, +0.02] lands the focus point at UV (0.425, 0.52). The x term is the one doing the
+ * work: it puts the party cluster and the brazier in the left third, which is where
+ * `official_005_steam.jpg` puts its own action, and swings the diamond's long axis into a
+ * lower-left-to-upper-right diagonal instead of sitting square in the frame. The board then
+ * runs out of the right edge and the negative space collects as one wedge in the bottom
+ * right, under the command menu, rather than as a ring of background all the way round.
+ *
+ * The y term is deliberately small. Two rendered frames at +0.065 measured worse, not better:
+ * lifting the board that far pulls the water channel and the dark rock skirt up into the
+ * bottom third, which is both the darkest and the most defocused part of the picture, and
+ * mean frame luma fell from 68 to 57 for it.
+ *
+ * Round 5 also removed the cover fit's dependence on this value — see `frameField`. Pushing
+ * the subject to a third used to zoom the shot in by a whole step as a side effect, which
+ * cropped units at three frame edges.
  */
-export const DEFAULT_COMPOSE_OFFSET: readonly [number, number] = [-0.02, 0.025];
+export const DEFAULT_COMPOSE_OFFSET: readonly [number, number] = [-0.075, 0.02];
 
 export type YawIndex = 0 | 1 | 2 | 3;
 
@@ -669,17 +697,28 @@ export class IsoCamera {
       // still takes it. The character-size ceiling caps the result (FFT's own ~17% of frame
       // height is the outer edge of shipped practice), so this cannot run away.
       //
-      // The cover fit has to know about the composition offset. Sliding the subject a
-      // fraction `o` of the frame off centre means the board now has to reach `0.5 + |o|` of
-      // the way to the far edge instead of `0.5`, i.e. it must span `1 + 2|o|` frames — and
-      // if it does not, the side it was slid AWAY from turns into exactly the flat empty
-      // background the round-1 critique measured at half the frame. Round 3 hit this the
-      // moment the offset went from [0.05, 0] to an off-axis compose: the board pulled up and
-      // left and the lower-right quadrant became void.
-      const bleedX = 1 + 2 * Math.abs(this.composeOffset.x);
-      const bleedY = 1 + 2 * Math.abs(this.composeOffset.y);
-      const coverW = (this.bufferWidth * bleedX) / (TEXELS_PER_UNIT * Math.max(spanH, 1e-3));
-      const coverH = (this.bufferHeight * bleedY) / (TEXELS_PER_UNIT * Math.max(spanV, 1e-3));
+      // ROUND 5 — the composition offset used to inflate this fit by `1 + 2|o|` per axis, on
+      // the reasoning that sliding the subject off centre means the board has to reach
+      // `0.5 + |o|` of the way to the far edge or the side it was slid away from becomes void.
+      // The geometry is right; the conclusion no longer is, for two reasons.
+      //
+      // First, it re-created precisely the coupling round 4 complained about and could not
+      // remove: the zoom step the shot takes is decided by how far off-centre it is staged.
+      // Pushing the subject to a compositional third (see DEFAULT_COMPOSE_OFFSET) took the
+      // zoom from 3 to 4 device pixels per texel on its own, turning a diorama into a
+      // close-up with units cropped at three frame edges — a much louder defect than the one
+      // being guarded against, and one the character-size ceiling only just contains.
+      //
+      // Second, the premise has expired. "The far side becomes void" was true when the world
+      // behind the board was flat background colour. It is not any more: there is a lit
+      // environment out there now, so the far side of an off-centre compose lands on scenery
+      // rather than on emptiness, which is what every reference frame actually does — none of
+      // them fills the frame edge to edge with PLAYABLE board.
+      //
+      // So the fit answers one question only ("what zoom makes the board fill the frame?"),
+      // and where the subject sits inside that frame is a separate decision.
+      const coverW = this.bufferWidth / (TEXELS_PER_UNIT * Math.max(spanH, 1e-3));
+      const coverH = this.bufferHeight / (TEXELS_PER_UNIT * Math.max(spanV, 1e-3));
       const cover = Math.round(Math.max(coverW, coverH) * COVER_BLEED);
       best = Math.min(Math.max(best, Math.min(cover, this.compositionCeilingPixelScale)), ceiling);
     }

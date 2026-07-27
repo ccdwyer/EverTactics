@@ -1632,6 +1632,28 @@ class RisingShapes {
  */
 const MAX_VFX_LIGHTS = 6;
 
+/**
+ * Irradiance ceiling for a spawned VFX light, measured `VFX_LIGHT_NEAR` tiles out.
+ *
+ * ROUND-5, and it is the same defect `lighting.ts` fixed on the braziers.
+ *
+ * Effect definitions in this file author peaks up to 110 candela. At the default
+ * decay of 1.55 that puts an irradiance of **110** on the stone a tile from the
+ * detonation. The composite runs an ACES tonemap, whose usable gradation ends
+ * around 4 — so the entire blast radius arrived as one flat white disc with no
+ * hue, no falloff and no structure, which is exactly what the critics wrote:
+ * "the fire core blows straight to 255,255,255 with no hue retained and no
+ * roll-off — it's an additive blob, not a tonemapped light".
+ *
+ * 8 is deliberately still *above* the shoulder: the innermost tile of an impact
+ * is allowed to clip, because a detonation should have a white-hot centre. What
+ * it may not do is clip out to four tiles. Capped here, the same light lays 8 at
+ * one tile, 2.7 at two and 0.9 at four — a pool with a readable gradient in it,
+ * which is what the reference spell frames actually show.
+ */
+const VFX_LIGHT_PEAK = 8;
+const VFX_LIGHT_NEAR = 0.9;
+
 /** Reused target for the mote colour spread. Motes are never pure white. */
 const WHITE_TINT = /*@__PURE__*/ new Color(1, 0.97, 0.9);
 
@@ -2193,6 +2215,8 @@ export class VfxSystem {
   private readonly hazeAccum: number[] = [];
   private emberScan = 0;
   private readonly ambColor = new Color();
+  /** Scratch for `sampleIrradiance`, which is called while `ambColor` is in use. */
+  private readonly irradiance = new Color();
   /**
    * Mote tint actually used. Defaults to `ambience.color`, but if the map has
    * practicals it drifts toward their average hue, so the dust in a torchlit
@@ -2581,6 +2605,29 @@ export class VfxSystem {
    * `age` back-dates the birth so the field can be primed in a single frame:
    * a screenshot taken 1.2 s after boot must show a settled atmosphere, not
    * twelve motes that have just appeared at the floor.
+   *
+   * ROUND-5: THE FIELD IS LIT, AND IT IS NOT UNIFORM.
+   *
+   * Every round so far has drawn this as a homogeneous cloud with one tint, and
+   * every round the critics have written the same two sentences about it: "the
+   * dust motes are all the same size, opacity and colour and sit on top of
+   * shadowed geometry" and "evenly distributed across the whole frame regardless
+   * of depth, and don't parallax or interact with the fire". Two distinct faults,
+   * both fixed here rather than by adding more particles:
+   *
+   *  1. **Distribution.** Dust is visible where light is; the air ten tiles from
+   *     the nearest flame is scattering nothing you can see. So a good fraction
+   *     of the field is now emitted *around the practicals* — a shell a couple of
+   *     tiles across, biased upward on the thermal — and the rest fills the board
+   *     at a much lower opacity. That is what makes a fire look like it is
+   *     sitting in air rather than in vacuum.
+   *  2. **Irradiance.** Every mote, wherever it spawns, samples the practicals at
+   *     its own position with the same inverse-power falloff the lighting rig
+   *     uses and takes both its colour and its brightness from the result. A mote
+   *     beside a brazier is a hot amber speck; the same mote's cousin across the
+   *     courtyard is a dim cold one. Additive particles cannot receive real
+   *     lighting, so this is the cheapest honest substitute, and it is the
+   *     difference between air and confetti.
    */
   private spawnMote(age: number): void {
     const rng = this.rng;
@@ -2591,19 +2638,47 @@ export class VfxSystem {
     const ceiling = Math.max(b.max.y + spanX * 0.22, floor + 4 * this.tileSize);
 
     const s = this.spawnScratch;
-    // A little wider than the board: motes crossing the silhouette edge are what
-    // stop the diorama looking like it was cut out and pasted on the background.
-    s.position.set(
-      b.min.x - spanX * 0.08 + rng.next() * spanX * 1.16,
-      floor + Math.pow(rng.next(), 0.7) * (ceiling - floor),
-      b.min.z - spanZ * 0.08 + rng.next() * spanZ * 1.16,
-    );
+    // Roughly two in five motes are born in a fire's thermal rather than at
+    // random. Fewer and the clustering does not read; more and the rest of the
+    // board empties out and the diorama stops having air in it at all.
+    const source =
+      this.emberSources.length > 0 && rng.next() < 0.42
+        ? this.emberSources[Math.floor(rng.next() * this.emberSources.length)] ?? null
+        : null;
+
+    if (source) {
+      source.getWorldPosition(this.v1);
+      const a0 = rng.next() * Math.PI * 2;
+      // sqrt-distributed radius fills the disc evenly instead of piling every
+      // mote on the light itself.
+      const r0 = this.tileSize * (0.5 + 2.4 * Math.sqrt(rng.next()));
+      s.position.set(
+        this.v1.x + Math.cos(a0) * r0,
+        // Skewed upward: this is convection, so the column above a fire holds
+        // far more visible dust than the floor beside it.
+        this.v1.y - 0.4 * this.tileSize + Math.pow(rng.next(), 0.55) * 3.2 * this.tileSize,
+        this.v1.z + Math.sin(a0) * r0,
+      );
+    } else {
+      // A little wider than the board: motes crossing the silhouette edge are what
+      // stop the diorama looking like it was cut out and pasted on the background.
+      s.position.set(
+        b.min.x - spanX * 0.08 + rng.next() * spanX * 1.16,
+        floor + Math.pow(rng.next(), 0.7) * (ceiling - floor),
+        b.min.z - spanZ * 0.08 + rng.next() * spanZ * 1.16,
+      );
+    }
 
     const drift = this.ambience.drift * this.tileSize;
-    s.velocity.set(rng.jitter(drift), drift * rng.range(0.12, 0.75), rng.jitter(drift));
-    s.acceleration.set(0, drift * 0.05, 0);
-    s.lifetime = rng.range(5.5, 11);
-    const scale = rng.range(0.6, 1.55);
+    // Motes born in a thermal rise; the rest of the field barely moves. One
+    // drift vector for every particle was itself a note ("one drift vector").
+    const lift = source ? rng.range(0.9, 2.1) : rng.range(0.12, 0.75);
+    s.velocity.set(rng.jitter(drift), drift * lift, rng.jitter(drift));
+    s.acceleration.set(0, drift * (source ? 0.22 : 0.05), 0);
+    s.lifetime = source ? rng.range(3.0, 6.5) : rng.range(5.5, 11);
+    // Widened from 0.6–1.55. A field whose largest mote is 2.5× its smallest is
+    // still, at this camera distance, a field of identical dots.
+    const scale = Math.pow(rng.range(0.34, 1.0), 1.7) * 2.6 + 0.34;
     s.sizeStart = 0.062 * this.tileSize * scale;
     s.sizeEnd = 0.042 * this.tileSize * scale;
 
@@ -2611,7 +2686,16 @@ export class VfxSystem {
     // every mote reads as a lens artefact; a spread reads as dust.
     const c = this.ambColor.copy(this.moteTint);
     if (rng.next() < 0.35) c.lerp(WHITE_TINT, 0.45);
-    const a = rng.range(0.16, 0.52) * this.ambience.intensity;
+    // Sample the real lights at the mote's own position. `warmth` comes back in
+    // roughly 0..1.4 and carries the summed, falloff-weighted colour with it.
+    const warmth = this.sampleIrradiance(s.position, c);
+    const a =
+      rng.range(0.16, 0.52) *
+      this.ambience.intensity *
+      // Unlit air is nearly invisible; lit air is the point. The floor of 0.28
+      // keeps a faint field over the dark half of the board so the diorama still
+      // has atmosphere in it rather than a hard edge where the pools stop.
+      Math.min(1.75, 0.28 + 1.05 * warmth);
     s.color0 = [c.r, c.g, c.b, a];
     s.color1 = [c.r, c.g, c.b, a * 0.15];
     s.sprite = rng.next() < 0.25 ? SPR.spark : SPR.dust;
@@ -2631,6 +2715,52 @@ export class VfxSystem {
     ];
     s.delay = -age;
     this.ambienceBatch.spawn(s, this.clock);
+  }
+
+  /**
+   * Sample the practicals at a world point: how lit is it, and what colour.
+   *
+   * Additive particles have no normal and no BRDF, so three cannot light them —
+   * which is why every previous round's atmosphere was a flat overlay pasted over
+   * a lit scene ("the dust motes… sit on top of shadowed geometry", "untinted by
+   * the fire beside them"). This is a hand-rolled irradiance probe using the same
+   * falloff shape the GPU uses for a `PointLight`: inverse power plus three's
+   * smooth window at the cutoff radius, so a mote fades out at exactly the
+   * distance the stone under it does.
+   *
+   * `tint` is pulled toward the summed light colour in place, weighted by how
+   * strongly lit the point is. The return value is a normalised 0..~1.4
+   * "how much light is here", used to scale opacity.
+   */
+  private sampleIrradiance(at: Vector3, tint: Color): number {
+    const n = this.emberSources.length;
+    if (n === 0) return 0;
+    const acc = this.irradiance.setRGB(0, 0, 0);
+    const tile = this.tileSize;
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+      const light = this.emberSources[i]!;
+      if (!light.visible || light.intensity <= 0) continue;
+      light.getWorldPosition(this.v2);
+      const reach = light.distance > 0 ? light.distance : 6 * tile;
+      const d = this.v2.distanceTo(at);
+      if (d >= reach) continue;
+      // Floor the distance at half a tile: without it a mote that happens to
+      // spawn inside the bowl returns a divide-by-nearly-zero and comes out as a
+      // single blinding white speck, which is its own kind of tell.
+      const dt = Math.max(0.5, d / tile);
+      const window = Math.max(0, 1 - Math.pow(d / reach, 4));
+      const w = (light.intensity / Math.pow(dt, 1.4)) * window * window;
+      acc.r += light.color.r * w;
+      acc.g += light.color.g * w;
+      acc.b += light.color.b * w;
+      total += w;
+    }
+    if (total <= 1e-4) return 0;
+    acc.multiplyScalar(1 / total);
+    const lit = Math.min(1.4, total / 2.2);
+    tint.lerp(acc, Math.min(0.88, lit * 0.8));
+    return lit;
   }
 
   /**
@@ -2828,7 +2958,12 @@ export class VfxSystem {
     // 16-unit cube at the origin regardless of where the diorama actually is.
     if (!this.ambienceBoundsKnown) return;
 
-    const meanLife = 8.25;
+    // Mean over the *mix* spawnMote actually produces, not over the wide field
+    // alone: roughly 42% of motes are born in a fire's thermal and live 3.0–6.5 s
+    // against the drifting field's 5.5–11. Using 8.25 here after the split was
+    // introduced would quietly run the standing population ~18% under whatever
+    // `motes` asked for — a density bug that looks like an art decision.
+    const meanLife = 0.42 * 4.75 + 0.58 * 8.25;
     const rate = opts.motes / meanLife;
 
     if (!this.ambiencePrimed) {
@@ -3132,7 +3267,14 @@ export class VfxSystem {
     slot.rise = Math.max(1e-3, o.rise ?? 0.03);
     slot.hold = Math.max(0, o.hold ?? 0.04);
     slot.fall = Math.max(1e-3, o.fall ?? 0.34);
-    slot.peak = o.intensity;
+    const decay = o.decay ?? 1.55;
+    // See VFX_LIGHT_PEAK. Authored candela survives wherever it is already sane;
+    // this only takes the top off the ones that were driving four tiles of stone
+    // past the end of the tone curve.
+    slot.peak = Math.min(
+      o.intensity,
+      VFX_LIGHT_PEAK * Math.pow(Math.max(0.3, VFX_LIGHT_NEAR * this.tileSize), decay),
+    );
     slot.flicker = o.flicker ?? 0;
     slot.flickerRate = o.flickerRate ?? 11;
     slot.priority = priority;
@@ -3148,7 +3290,7 @@ export class VfxSystem {
     // blast is to clip everything within half a tile of the centre to white. The
     // pool the eye actually reads — several tiles of warm stone with structure
     // still in it — needs a falloff nearer 1/d.
-    slot.light.decay = o.decay ?? 1.55;
+    slot.light.decay = decay;
     slot.light.intensity = 0;
 
     return {

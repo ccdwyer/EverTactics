@@ -484,7 +484,12 @@ const BATTLE_OPEN: Scenario = {
   // both cost mean luma, which fell from 56.5 to 46.8 against the references' 66-80. The
   // right answer to a frame that is too dark because its SHADOWS are finally black is more
   // exposure, not a lighter black point.
-  post: { exposure: 2.05, dof: 1.0, vignette: 1.0 },
+  // Round 5 re-measured again on a 3x3 luma grid rather than a single mean, because the mean
+  // hid the real defect. Ours: 62 mean with the centre cell at 1.0x the frame average.
+  // `official_005_steam.jpg`: 87 mean with the centre cell at 1.8x. Both numbers move the
+  // same way — more light through the middle — and the vignette in `post.ts` takes the rim
+  // back down, so the frame gets steeper rather than merely brighter.
+  post: { exposure: 2.65, dof: 1.0, vignette: 1.0 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,

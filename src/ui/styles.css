@@ -109,9 +109,21 @@
      the HUD pins to an edge now derives from --hud-safe and nothing overrides it. */
   --hud-safe: 32px;
   --hud-gutter: var(--hud-safe);
-  --hud-rail: 112px;       /* left turn-order rail */
-  --hud-col-left: 362px;   /* acting unit, bottom-left */
-  --hud-col-right: 292px;  /* inspected unit + target preview, top-right */
+  /* Left turn-order rail. Sized to the WIDEST chip — the acting one, which runs
+     a 60px face against the others' 46 — so nothing pokes out past the plate's
+     feathered right edge onto raw board pixels. */
+  --hud-rail: 116px;
+  /* Acting unit, bottom-left. Round 4 ran 362x389 — a near-square block eating
+     36% of the frame height in the corner. Measured off the shipped frame
+     (refs/curated/fft/press-042310-...-mediakit-06.png at 1920x1080) the acting
+     panel is 690x210: a WIDE, SHORT band hugging the bottom edge. Trading height
+     for width in the least valuable corner is what keeps the middle of the frame
+     board — the aspect is the whole trick, and we had it inverted. */
+  --hud-col-left: 486px;
+  /* Inspected unit + target preview, top-right. Widened with the band rewrite:
+     at 292 the compact card's data column was 135px, and "BRAVE 74 | FAITH 50"
+     printed straight out through the panel's right frame. */
+  --hud-col-right: 330px;
   --hud-bottom: var(--hud-safe);
   --hud-top: var(--hud-safe);
 
@@ -730,11 +742,22 @@
 }
 .et-command__detail {
   margin-left: auto;
-  font-size: 11px;
+  padding-left: 10px;
+  font-size: 11.5px;
   color: var(--ink-muted);
   font-family: var(--font-display);
+  font-variant-numeric: lining-nums tabular-nums;
 }
-.et-command__chevron { width: 16px; height: 16px; color: var(--gold-dim); margin-left: 4px; }
+/* On the gold highlight the muted grey detail dropped to about 1.6:1 against the
+   plate — the "3" beside MOVE was effectively invisible in every frame we shot.
+   Dark ink on gold, the way an illuminated rubric works. */
+.et-menu__row.is-active .et-command__detail {
+  color: rgba(24, 17, 4, 0.92);
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 246, 223, 0.3);
+}
+.et-command__chevron { width: 16px; height: 16px; flex: none; color: var(--gold-dim); margin-left: 4px; }
+.et-command__chevron.is-empty { visibility: hidden; }
 .et-menu__row.is-active .et-command__chevron {
   color: var(--gold-bright);
   animation: et-nudge 900ms ease-in-out infinite;
@@ -846,12 +869,22 @@
    twelve-entry horizontal strip pinned to the top of the frame was reading as a
    title bar and pushing the board down; vertically it costs ~5% of the width and
    nothing at all of the centre. */
+/* THE HEADER WAS SETTING THE RAIL WIDTH.
+   ---------------------------------------------------------------------------
+   `width: max-content` measured the widest child, and that was never a chip — it
+   was the words "ORDER OF BATTLE" at 9.5px/0.15em (~119px). So the rail rendered
+   136px wide while its content needed 107, every chip stretched to fill, and the
+   faces sat in a column with a 30-49px empty tail down its whole right side
+   (measured: chip w126, portrait right edge at 77). That ragged dead column is
+   the sort of thing that reads as unfinished layout however good the chips are.
+   The rail is now sized by its chips and the caption is allowed to overhang —
+   which is what the shipped Combat Timeline does, its "Combat Timeline" header
+   being noticeably wider than the column of faces beneath it. */
 .et-turnorder {
   position: absolute;
   top: var(--hud-top);
   left: var(--hud-gutter);
-  width: max-content;
-  min-width: var(--hud-rail);
+  width: var(--hud-rail);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -866,6 +899,9 @@
    CT column → faces, with the plate binding all three into one object. */
 .et-turnorder__label {
   position: relative;
+  align-self: flex-start;
+  width: max-content;
+  max-width: 168px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -946,7 +982,10 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 22px auto;
+  /* The tick gutter takes the slack, the faces right-align on one edge — the
+     reference column exactly. A fixed 22px gutter with an `auto` face column put
+     the slack on the OUTBOARD side, where it reads as a missing panel edge. */
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 5px;
   padding: 2px 5px 2px 2px;
@@ -978,9 +1017,11 @@
 .et-turnchip--ally { --team-color: var(--team-ally); }
 .et-turnchip--neutral { --team-color: var(--team-neutral); }
 .et-turnchip:hover { transform: translateX(4px); border-color: rgba(240, 221, 160, 0.55); }
+/* Same right padding as its neighbours: the faces have to land on ONE vertical
+   edge down the whole rail, and a 2px difference on the acting chip is visible
+   as a step. */
 .et-turnchip.is-current {
-  grid-template-columns: 26px auto;
-  padding: 3px 7px 3px 3px;
+  padding: 3px 5px 3px 3px;
   border-color: rgba(240, 221, 160, 0.75);
   background: linear-gradient(90deg, rgba(52, 68, 112, 0.94), rgba(9, 13, 26, 0.7));
   box-shadow:
@@ -1038,8 +1079,11 @@
   pointer-events: none;
   transition: opacity var(--dur-fast) ease;
 }
-.et-turnchip.is-current .et-turnchip__name,
-.et-turnchip:hover .et-turnchip__name { opacity: 1; }
+/* HOVER ONLY. See the note in TurnOrderBar.buildChip: showing this for the
+   acting unit put a floating name plate on raw board pixels in every resting
+   frame, duplicating the 21px name already set in the bottom-left panel. */
+.et-turnchip:hover .et-turnchip__name,
+.et-turnchip:hover .et-turnchip__job { opacity: 1; }
 /* Job caption under the acting unit's name — the rail's one piece of hierarchy
    beyond "face + tick", and the thing that makes the head of the queue read as
    a titled entry rather than as the same chip drawn slightly larger. */
@@ -1057,6 +1101,8 @@
   text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 0.9);
   background: linear-gradient(90deg, rgba(6, 9, 18, 0.9), rgba(6, 9, 18, 0.62) 66%, transparent);
   pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
 }
 /* Round 4: the CT numeral is the rail's second read after the face, and at 13px
    it was neither. In the shipped Combat Timeline the tick numbers are large,
@@ -1188,7 +1234,8 @@
    colour space: slightly cooled, slightly desaturated, blacks lifted toward the
    map's navy so a portrait is never the brightest thing on screen. */
 .et-portrait__img { filter: saturate(0.86) contrast(1.06) brightness(0.94); }
-.et-portrait--lg .et-portrait__img { filter: saturate(0.88) contrast(1.04) brightness(0.96); }
+.et-portrait--lg .et-portrait__img,
+.et-portrait--xl .et-portrait__img { filter: saturate(0.88) contrast(1.04) brightness(0.96); }
 
 /* ===========================================================================
    Meters
@@ -1246,8 +1293,13 @@
 
 .et-meter__track {
   position: relative;
-  height: 10px;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.62));
+  height: 11px;
+  /* The unfilled channel carries a whisper of the gauge's own hue. Pure black
+     read as a hole punched in the panel rather than as the empty part of a
+     gauge, and it made the fill's edge the highest-contrast line in the HUD. */
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.4)),
+    color-mix(in srgb, var(--meter-color) 24%, #05070d);
   /* A deeper inner shadow than round 2 carried: the note was that the bars read
      as "flat CSS gradients", and what sells a bar as a recessed channel is the
      cast running down from the top lip, not the fill on top of it. */
@@ -1261,16 +1313,21 @@
 /* Tick segmentation, over the fill. Ten divisions, so the bar is countable at a
    glance the way a shipped HUD's is, and so the fill stops reading as one
    uninterrupted slab of colour. */
+/* Round 4 ran these full-height at 55% black, which turned a full bar into a
+   barcode — ten hard black bands were the loudest feature of the panel. Inset
+   top and bottom so the divisions read as scribed marks on a gauge face rather
+   than as gaps in the fill, and dropped to a value that survives the tonemap
+   without dominating. */
 .et-meter__track::after {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: 2px 0;
   z-index: 4;
   pointer-events: none;
   background: repeating-linear-gradient(
     90deg,
     transparent 0 calc(10% - 1px),
-    rgba(5, 7, 13, 0.55) calc(10% - 1px) 10%
+    rgba(5, 7, 13, 0.34) calc(10% - 1px) 10%
   );
 }
 .et-meter--compact .et-meter__track { height: 10px; }
@@ -1284,10 +1341,18 @@
   position: absolute;
   inset: 0 auto 0 0;
   width: 0;
+  /* Three layers: a fine diagonal hatch so the fill is not a flat slab of colour
+     (docs/VISUAL_TARGET.md's first fail condition applies to chrome as much as to
+     terrain), then the along-bar and across-bar shading. */
   background:
+    repeating-linear-gradient(
+      126deg,
+      rgba(255, 255, 255, 0.07) 0 1px,
+      transparent 1px 4px
+    ),
     linear-gradient(90deg, color-mix(in srgb, var(--meter-color) 100%, black 42%) 0%, var(--meter-color) 68%, color-mix(in srgb, var(--meter-color) 100%, white 18%) 100%),
     linear-gradient(180deg, color-mix(in srgb, var(--meter-color) 100%, white 22%) 0%, var(--meter-color) 48%, color-mix(in srgb, var(--meter-color) 100%, black 46%) 100%);
-  background-blend-mode: overlay, normal;
+  background-blend-mode: normal, overlay, normal;
   /* No outer glow. A 12px bloom the colour of the fill is what made these bars
      read as emissive UI floating over a graded night scene; the shipped bars are
      lit objects in a channel, so the shading is all inset. */
@@ -1345,7 +1410,39 @@
   to { opacity: 1; transform: none; }
 }
 
+/* ── the wide band (full variant) ────────────────────────────────────────────
+   Portrait column left, one information column beside it. See the note in
+   UnitInfoPanel's constructor for why the panel is laid out across rather than
+   down. `min-width: 0` on the column is load-bearing: without it the meter row's
+   tabular numerals set a min-content floor and the panel refuses to honour
+   --hud-col-left. */
+.et-unitinfo__layout { display: flex; align-items: stretch; gap: 0; }
+/* The `border-image` is the hairline gold rule down the gutter between face and
+   data — the join that makes the two columns read as one plate rather than two
+   panels stuck together. A gradient border keeps it from terminating on a hard
+   dot at top and bottom. */
+.et-unitinfo__column {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Distribute, don't stack. The column is set to the portrait's height, so
+     packing the rows to the top left a band of bare panel colour under the stat
+     cells whenever the unit carried no statuses. */
+  justify-content: space-between;
+  gap: 5px;
+  padding-left: 13px;
+  margin-left: 12px;
+  border-left: 1px solid transparent;
+  border-image: linear-gradient(180deg, transparent, rgba(201, 162, 39, 0.4) 16%, rgba(201, 162, 39, 0.4) 84%, transparent) 1;
+}
+.et-unitinfo__face { flex: none; align-self: flex-start; }
+/* The compact card is half the width, so its two gauges stay stacked and its
+   portrait steps down a size to keep the same portrait:data ratio. */
+.et-unitinfo--band.et-unitinfo--compact .et-unitinfo__column { padding-left: 10px; margin-left: 9px; }
+
 .et-unitinfo__head { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
+.et-unitinfo--band.et-unitinfo--full .et-unitinfo__head { margin-bottom: 3px; }
 .et-unitinfo__ident { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .et-unitinfo__name {
   font-family: var(--font-display);
@@ -1359,14 +1456,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.et-unitinfo__sub { display: flex; align-items: baseline; gap: 10px; }
+.et-unitinfo__sub { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .et-unitinfo__job {
   font-size: 14px;
   letter-spacing: 0.03em;
   color: var(--gold-bright);
   font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .et-unitinfo__level {
+  flex: none;
+  white-space: nowrap;
   font-family: var(--font-display);
   font-size: 10px;
   font-weight: 600;
@@ -1417,10 +1519,8 @@
    width with the name, and "Corvin" rendered as "CORV..." with the level chip
    wrapped onto two lines. Taken out of flow it costs the ident block nothing. */
 .et-unitinfo__team {
-  position: absolute;
-  top: 0;
-  right: 1px;
-  z-index: 2;
+  margin-left: auto;
+  padding-left: 10px;
   font-family: var(--font-display);
   font-size: 8px;
   font-weight: 700;
@@ -1433,6 +1533,10 @@
 }
 
 .et-unitinfo__meters { display: flex; flex-direction: column; gap: 5px; }
+/* Side by side in the band. Two 150px gauges cost 40px of height where stacked
+   they cost 86, and the shipped panel reads HP and MP as a pair on one line. */
+.et-unitinfo--band.et-unitinfo--full .et-unitinfo__meters { flex-direction: row; gap: 20px; }
+.et-unitinfo--band.et-unitinfo--full .et-unitinfo__meters > * { flex: 1 1 0; min-width: 0; }
 .et-unitinfo__bf {
   display: flex;
   align-items: center;
@@ -1458,6 +1562,22 @@
   font-variant-numeric: lining-nums tabular-nums;
 }
 .et-bf__sep { width: 1px; height: 16px; background: rgba(201, 162, 39, 0.3); margin: 0 auto; }
+/* The compact card's data column is ~173px wide. At the full card's type sizes
+   "Dragoon | LV 15 | HOSTILE" measured 188px, so the job name ellipsised to
+   "Drago…" — a truncated job title on an enemy card is a functional failure,
+   not a cosmetic one. Everything on that line steps down until the three fit. */
+.et-unitinfo--band.et-unitinfo--compact .et-unitinfo__sub { gap: 6px; }
+.et-unitinfo--band.et-unitinfo--compact .et-unitinfo__job { font-size: 12.5px; }
+.et-unitinfo--band.et-unitinfo--compact .et-unitinfo__level { font-size: 9px; padding: 2px 6px; letter-spacing: 0.06em; }
+.et-unitinfo--band.et-unitinfo--compact .et-unitinfo__team { font-size: 7.5px; letter-spacing: 0.16em; padding-left: 4px; }
+.et-unitinfo--band.et-unitinfo--compact .et-unitinfo__name { font-size: 19px; }
+
+/* The narrow card runs the same pair in ~180px, so the tracking comes down and
+   the numerals step from 16 to 14. Nothing here may overflow the frame. */
+.et-unitinfo--band.et-unitinfo--compact .et-unitinfo__bf { gap: 6px; padding: 3px 6px; }
+.et-unitinfo--band.et-unitinfo--compact .et-bf { gap: 5px; }
+.et-unitinfo--band.et-unitinfo--compact .et-bf__label { font-size: 9px; letter-spacing: 0.14em; }
+.et-unitinfo--band.et-unitinfo--compact .et-bf__value { font-size: 14px; }
 
 .et-unitinfo__stats { display: flex; flex-wrap: nowrap; gap: 4px; }
 .et-statcell {

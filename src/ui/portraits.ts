@@ -292,7 +292,7 @@ export function portraitForId(id: string, gender?: PortraitGender): string {
 // Rendering
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type PortraitSize = 'xs' | 'sm' | 'md' | 'lg';
+export type PortraitSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
 /**
  * Displayed widths in CSS pixels; heights follow the 128:192 (2:3) aspect.
@@ -302,7 +302,16 @@ export type PortraitSize = 'xs' | 'sm' | 'md' | 'lg';
  * ~116px. Round 1 ran 20-30% larger than the shipped game and the HUD ate the
  * board; these are the reference numbers.
  */
-const SIZES: Record<PortraitSize, number> = { xs: 30, sm: 46, md: 60, lg: 104 };
+/*
+ * `xl` is the acting-unit face in the bottom-left band, and it is sized to FILL
+ * that panel's height rather than to a nominal chip width. In the shipped frame
+ * the acting portrait is 118x190 inside a 210-tall panel — it runs edge to edge,
+ * which is what makes the band read as a portrait plate with data beside it
+ * rather than as a data panel with a stamp in the corner. At `lg` (104x156) our
+ * portrait left 77px of bare navy below it, i.e. the same "empty region of flat
+ * panel colour" the critics keep naming, only in the chrome instead of the map.
+ */
+const SIZES: Record<PortraitSize, number> = { xs: 30, sm: 46, md: 60, lg: 104, xl: 130 };
 
 export interface PortraitOptions {
   size?: PortraitSize;

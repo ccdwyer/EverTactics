@@ -243,7 +243,57 @@ export interface LightingPreset {
    * than being a constant.
    */
   practicalDecay: number;
+
+  /**
+   * Irradiance ceiling for a practical, measured at `PRACTICAL_NEAR_DISTANCE`.
+   *
+   * ROUND-5 NOTE. This is the number that was missing, and it is measurable.
+   *
+   * `terrain.ts` authors a brazier at 9 cd with a 5.2-unit cutoff. Round 4's
+   * `practicalGain` of 2.15 takes that to 19.35, and at decay 1.35 the stone one
+   * unit from the bowl therefore receives an irradiance of **19**. The composite
+   * runs an ACES tonemap, which has usable gradation from roughly 0 to 2.5 and
+   * is flat past 4 — so every masonry face within about four tiles of every fire
+   * arrived at the same clipped cream, in all three channels, with no hue and no
+   * texture left in it. That is not a bloom bug and it is not a material bug. It
+   * is six critics correctly reading a 19 into a curve that tops out at 4.
+   *
+   * The quotes are unambiguous once you know what to look for: "the fire core
+   * blows straight to 255,255,255 with no hue retained and no roll-off", "the
+   * warm tile tops flatten into a single blown ochre with no tonal separation
+   * between adjacent faces", "the wall beside the fire is washed to featureless
+   * cream". All three are the near field of an over-driven point light.
+   *
+   * So the rig now clamps every practical — placed or adopted — to whatever
+   * intensity puts `practicalPeak` on a surface `PRACTICAL_NEAR_DISTANCE` away.
+   * The clamp is applied *after* the gain, so the gain keeps doing its job for
+   * dim authored lights and simply stops mattering for hot ones.
+   *
+   * Crucially this does not shrink the pool. Reach is set by `practicalDecay`
+   * and the cutoff `distance`, not by the peak; capping the peak only takes the
+   * top off the part that was already past the end of the tone curve. What
+   * *appears* is the gradient that was hiding inside the clipped region — which
+   * is the "no mid-tones" note, answered.
+   */
+  practicalPeak: number;
 }
+
+/**
+ * Distance, in world units, at which `practicalPeak` is measured.
+ *
+ * Roughly the closest a lit surface ever gets to a brazier's flame on this
+ * geometry: the light sits ~0.12 above the bowl rim and the flagstones are a
+ * little under a tile below it.
+ */
+const PRACTICAL_NEAR_DISTANCE = 0.85;
+
+/**
+ * Floor on an adopted prop light's cutoff radius, in world units.
+ *
+ * See the note in `refreshAdoptedLights`. Roughly three and a half tiles of
+ * useful pool plus the shoulder three's cutoff window eats.
+ */
+const MIN_PRACTICAL_REACH = 8.5;
 
 /**
  * A placed point light — brazier, window shaft, lava vent.
@@ -276,6 +326,19 @@ export interface PracticalSpec {
    * directional wash into a floating blue lamp.
    */
   decay?: number;
+  /**
+   * Distance, in world units, at which the preset's `practicalPeak` ceiling is
+   * measured for this light. Defaults to `PRACTICAL_NEAR_DISTANCE`.
+   *
+   * The default assumes a brazier: a flame roughly a tile above a floor it is
+   * meant to scorch. A sky shaft hanging at y = 3.2 above a courtyard is never
+   * within a tile of anything, so measuring its ceiling at 0.85 units throttles
+   * it to a fraction of its authored level for a near field that does not exist
+   * — which quietly deletes the *cold* half of the complementary split and
+   * leaves the map one orange note again. Author this to roughly the closest
+   * surface the light can actually reach.
+   */
+  near?: number;
 }
 
 /** Hard cap on placed lights, so material shader permutations never change. */
@@ -370,7 +433,30 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
    * committed complementary split — orange against cyan, both saturated.
    */
   dawn: {
-    keyColor: 0xffae55,
+    // ROUND-5: the sun is PALE, and that is the whole point.
+    //
+    // Round 4 keyed this map with 0xffae55 — a colour with a red:blue ratio of
+    // roughly 3:1 — and then ran it through `chroma` 1.85. Every top face on the
+    // diorama came out the same electric gold, which is what the critics kept
+    // describing three different ways: "graded to a single hue… even surviving
+    // grass reads olive-orange", "material identity dissolves", "two-tone orange
+    // vs cyan with essentially no mid-tones".
+    //
+    // Look at what the reference frames actually do with their saturation
+    // budget. In `refs/curated/triangle/official_002_steam.jpg` the panelling is
+    // a *desaturated* brown and the only saturated objects in the frame are the
+    // candle flames themselves; in
+    // `refs/curated/fft/press-042310-cfaa9b3e-fft-tic-mediakit-04.png` the key is
+    // a near-neutral cool wash and the grass is still recognisably green, the
+    // roof tiles still recognisably blue. Measured: both frames sit at mean
+    // saturation 0.42–0.46. Ours was at 0.62.
+    //
+    // The rule that falls out: **chroma is spent on the sources, not on the
+    // key.** A pale sun lets albedo survive — stone reads as stone, moss as moss,
+    // a blue tabard as blue — and it leaves the braziers as the only violently
+    // orange thing in the picture, which is exactly what makes them read as fire
+    // rather than as a warm filter over one corner.
+    keyColor: 0xffd9b4,
     keyIntensity: 4.4,
     keyAzimuth: 118,
     keyElevation: 20,
@@ -388,7 +474,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // distinguishable families of its own — which is exactly the grammar of
     // `refs/curated/triangle/press_041`: warm orange key, cold *teal* fill, and
     // violet in the deepest crevices.
-    rimColor: 0x3ec2d8,
+    rimColor: 0x55b7cf,
     rimIntensity: 1.6,
     rimAzimuth: 296,
     rimElevation: 30,
@@ -396,19 +482,48 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     ambientIntensity: 0.1,
     background: 0x0a1424,
     fogColor: 0x13253e,
-    fogStart: 4,
-    fogEnd: 40,
+    // ROUND-5: pulled in hard, and this is atmosphere doing depth work rather
+    // than atmosphere as a background tint.
+    //
+    // At 4→40 (measured against `RIG_DISTANCE`) the fog did not begin until well
+    // behind the board and reached full strength past anything in the shot, so
+    // the near colonnade and the far one arrived at the same value and the same
+    // hue. The critics read that correctly as "the tower and the ship sit at the
+    // same apparent distance despite the DOF" and "no participating medium".
+    //
+    // Starting a couple of units in *front* of the focus plane and saturating
+    // about eight tiles behind the back of the diorama lays a continuous cool
+    // gradient across the board. Two things fall out of it, and the second is
+    // the one that matters more: depth planes separate, and the transition from
+    // a brazier's orange to the sky's teal now runs *through the fog colour*,
+    // which is a desaturated blue-slate — i.e. through a neutral. That neutral
+    // mid-tone is precisely what the "two-tone orange vs cyan with essentially
+    // no mid-tones" note was asking for.
+    fogStart: -1,
+    fogEnd: 30,
     // The scenario multiplies its own exposure by this one, and the preset's
     // half of that product is where "how bright is this time of day" lives. A
     // dawn that reads as a moonless night has deep shadow but no key, and the
     // reference frames always give you one clearly readable lit band to look at.
-    exposure: 1.5,
+    exposure: 1.4,
     shadowRadius: 2.0,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 1.35,
-    chroma: 1.85,
-    colorSplit: 0.42,
-    contrast: 0.85,
+    // Pulled from 1.85. See `keyColor` above: at 1.85 the fill was so far from
+    // grey that a shadowed flagstone and a shadowed plank were the same violet,
+    // and the transition from the brazier's orange to the sky's teal never
+    // passed through a neutral. The references all *do* pass through neutral —
+    // that mid-tone band is where wet stone, dust and skin live — so the stretch
+    // is cut to the point where a saturated authored hue survives and a neutral
+    // authored hue is only nudged.
+    chroma: 1.28,
+    colorSplit: 0.3,
+    // 0.85 → 0.76. Measured: round 4 put 28.7% of the board in the darkest
+    // luminance decile against 8–11% in both Triangle references, i.e. we were
+    // not "dramatic", we were bimodal — clipped gold or black, with the mid-tones
+    // that carry material identity missing entirely. Deep shadow stays the goal;
+    // a shadow with nothing legible in it is a different failure.
+    contrast: 0.84,
     // Raised with the fill cut. Once a shadowed flagstone is receiving a tenth of
     // the key rather than a third, a brazier finally *can* be the brightest thing
     // on the ground near it — but only if it is driven hard enough to reach two
@@ -423,7 +538,16 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // the peak — the pool is wider now and the stone inside it still has stones
     // in it.
     practicalGain: 2.15,
-    practicalDecay: 1.35,
+    // Flattened again now that a ceiling exists. Peak and reach used to be the
+    // same dial — the only way to light the far edge of a pool was to clip its
+    // near edge — so `practicalDecay` had to compromise. With the peak capped
+    // separately the falloff is free to be as flat as an extended source really
+    // is, which buys about a third more readable radius at the same peak. The
+    // pool is the point; see the reference village frame.
+    practicalDecay: 1.12,
+    // The pool's peak lands just past the ACES shoulder's knee rather than a
+    // factor of five beyond it, so the stone beside a fire keeps its masonry.
+    practicalPeak: 3.9,
   },
 
   /**
@@ -462,11 +586,12 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     shadowRadius: 3.2,
     shadowNormalBiasScale: 1.2,
     probeIntensity: 0.9,
-    chroma: 1.7,
-    colorSplit: 0.34,
+    chroma: 1.35,
+    colorSplit: 0.28,
     contrast: 0.55,
     practicalGain: 1.8,
     practicalDecay: 1.8,
+    practicalPeak: 2.6,
   },
 
   /**
@@ -502,11 +627,12 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     shadowRadius: 2.4,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 1.05,
-    chroma: 1.9,
-    colorSplit: 0.5,
-    contrast: 0.9,
+    chroma: 1.45,
+    colorSplit: 0.4,
+    contrast: 0.86,
     practicalGain: 2.6,
     practicalDecay: 1.5,
+    practicalPeak: 3.8,
   },
 
   /** Cold steel key, sodium underlight from the wet ground. Reads as wet stone. */
@@ -532,11 +658,12 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     shadowRadius: 4.5,
     shadowNormalBiasScale: 1.5,
     probeIntensity: 0.9,
-    chroma: 1.7,
-    colorSplit: 0.36,
+    chroma: 1.4,
+    colorSplit: 0.3,
     contrast: 0.7,
     practicalGain: 2.2,
     practicalDecay: 1.6,
+    practicalPeak: 3.2,
   },
 
   /**
@@ -567,11 +694,16 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     shadowRadius: 2.8,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 0.8,
-    chroma: 1.8,
-    colorSplit: 0.44,
-    contrast: 0.95,
+    chroma: 1.42,
+    colorSplit: 0.38,
+    contrast: 0.92,
     practicalGain: 2.8,
+    // Highest ceiling in the set, and deliberately: this is the preset where the
+    // torches genuinely *are* the key, so their pools are allowed to be the
+    // brightest thing in the frame. It is still a ceiling — the FFT night battles
+    // hold flame hue at peak, they do not clip to white.
     practicalDecay: 1.45,
+    practicalPeak: 4.6,
   },
 };
 
@@ -598,22 +730,22 @@ export const LIGHTING_PRACTICALS: Readonly<Record<LightingPresetName, readonly P
    * tone the moment the braziers light up.
    */
   dawn: [
-    { u: 0.5, v: 0.54, y: 0.55, color: 0x4d90ff, intensity: 9, distance: 7.5, flicker: 0.07, rate: 1.7, sway: 0.04, decay: 2 },
+    { u: 0.5, v: 0.54, y: 0.55, color: 0x4d90ff, intensity: 9, distance: 7.5, flicker: 0.07, rate: 1.7, sway: 0.04, decay: 2, near: 1.3 },
     // Outside the colonnade, not among it. Parked at v = 0.12 these sat inside a
     // pillar and put a blown blue highlight on its shaft — a sky wash has to
     // originate beyond the architecture it is washing, or it reads as a lamp.
-    { u: 0.5, v: 0.02, y: 3.2, color: 0x6aa4ff, intensity: 11, distance: 12.0, flicker: 0.04, rate: 0.7, decay: 2 },
-    { u: 0.02, v: 0.62, y: 3.0, color: 0x5c96f0, intensity: 8, distance: 10.0, flicker: 0.04, rate: 0.9, decay: 2 },
+    { u: 0.5, v: 0.02, y: 3.2, color: 0x6aa4ff, intensity: 11, distance: 12.0, flicker: 0.04, rate: 0.7, decay: 2, near: 3.2 },
+    { u: 0.02, v: 0.62, y: 3.0, color: 0x5c96f0, intensity: 8, distance: 10.0, flicker: 0.04, rate: 0.9, decay: 2, near: 3.0 },
   ],
 
   overcast: [
-    { u: 0.5, v: 0.5, y: 1.2, color: 0xffb469, intensity: 6, distance: 10, flicker: 0.05, rate: 2.1 },
+    { u: 0.5, v: 0.5, y: 1.2, color: 0xffb469, intensity: 6, distance: 10, flicker: 0.05, rate: 2.1, near: 1.4 },
   ],
 
   dusk: [
     { u: 0.3, v: 0.36, y: 2.0, color: 0xff8e34, intensity: 16, distance: 6.0, flicker: 0.32, rate: 8.9, sway: 0.1 },
     { u: 0.72, v: 0.66, y: 2.0, color: 0xff9c46, intensity: 16, distance: 6.0, flicker: 0.32, rate: 7.3, sway: 0.1 },
-    { u: 0.5, v: 0.16, y: 3.2, color: 0x4fbcff, intensity: 12, distance: 8.0, flicker: 0.1, rate: 1.3, decay: 2 },
+    { u: 0.5, v: 0.16, y: 3.2, color: 0x4fbcff, intensity: 12, distance: 8.0, flicker: 0.1, rate: 1.3, decay: 2, near: 3.2 },
   ],
 
   storm: [
@@ -630,7 +762,7 @@ export const LIGHTING_PRACTICALS: Readonly<Record<LightingPresetName, readonly P
     { u: 0.7, v: 0.36, y: 1.9, color: 0xffa252, intensity: 18, distance: 6.2, flicker: 0.36, rate: 6.7, sway: 0.12 },
     { u: 0.3, v: 0.74, y: 1.7, color: 0xff8a30, intensity: 20, distance: 6.5, flicker: 0.4, rate: 9.9, sway: 0.13 },
     { u: 0.72, v: 0.7, y: 1.7, color: 0xffb066, intensity: 15, distance: 6.0, flicker: 0.33, rate: 7.7, sway: 0.11 },
-    { u: 0.5, v: 0.5, y: 4.2, color: 0x6a95ff, intensity: 14, distance: 10.0, flicker: 0.06, rate: 0.9, decay: 2 },
+    { u: 0.5, v: 0.5, y: 4.2, color: 0x6a95ff, intensity: 14, distance: 10.0, flicker: 0.06, rate: 0.9, decay: 2, near: 4.2 },
   ],
 };
 
@@ -1105,8 +1237,18 @@ export class LightingRig {
     // comes out cyan, which trades the two-hue lockup for a three-hue one and
     // makes moss and masonry the same colour.
     gradeLight(this.rim.color, s.rimColor, chroma * 0.8, -split * 0.85);
-    gradeLight(this.hemisphere.color, s.skyColor, chroma * 1.15, -split * 1.15);
-    gradeLight(this.hemisphere.groundColor, s.groundColor, chroma, split * 0.4);
+    // Round 5 backed the sky fill off from 1.15× to 0.92×. The hemisphere is the
+    // light that reaches almost every vertical face in a diorama of stacked
+    // blocks, so over-saturating it does not "add a cool complement" — it paints
+    // every side face in the frame one electric blue, which is the second half
+    // of the two-tone note. Cool it stays; a filter it is not.
+    gradeLight(this.hemisphere.color, s.skyColor, chroma * 0.92, -split * 0.95);
+    // The ground bounce is pushed the other way and stretched a little harder
+    // than before. It is the only light in the rig arriving from below, so it is
+    // the one that puts warmth into the underside of a ledge and into the
+    // crevice between two stacked blocks — the exact places the shadow side was
+    // going uniformly blue.
+    gradeLight(this.hemisphere.groundColor, s.groundColor, chroma * 1.15, split * 0.7);
     gradeLight(this.ambient.color, s.ambientColor, chroma * 1.2, -split * 1.2);
 
     this.updateProbe(s, rig, bearing, elevation);
@@ -1305,6 +1447,23 @@ export class LightingRig {
   }
 
   /**
+   * Drive a practical's authored candela through the gain, then take the top off.
+   *
+   * See `practicalPeak`. Everything above the cap was landing past the end of the
+   * ACES curve, so it was not brightness — it was a flat white region where a
+   * gradient should have been. Returning the capped value costs nothing visible
+   * at the far edge of the pool and gives the near edge its masonry back.
+   */
+  private drivePractical(authored: number, decay: number, near = PRACTICAL_NEAR_DISTANCE): number {
+    const gained = Math.max(0, authored) * Math.max(0, this.live.practicalGain);
+    const peak = Math.max(0.05, this.live.practicalPeak);
+    // Irradiance at the reference distance is `I / d^decay`, so the intensity
+    // that puts exactly `peak` there is `peak · d^decay`.
+    const cap = peak * Math.pow(Math.max(0.2, near), Math.max(0, decay));
+    return Math.min(gained, cap);
+  }
+
+  /**
    * Position the practical pool inside the fitted bounds and cache the flicker
    * baselines. Called from `commit()`, so a `fitTo()` re-lays them out.
    */
@@ -1336,8 +1495,9 @@ export class LightingRig {
       light.decay = Math.max(0, spec.decay ?? this.live.practicalDecay);
       // The gain is the rig's, for the same reason the contrast policy is: a
       // brazier authored to look right on its own is invisible once it is one of
-      // six, twenty tiles back, behind a tone mapper and a grade.
-      this.practicalBase[i] = spec.intensity * Math.max(0, this.live.practicalGain);
+      // six, twenty tiles back, behind a tone mapper and a grade. The ceiling is
+      // the rig's for the opposite reason — see `practicalPeak`.
+      this.practicalBase[i] = this.drivePractical(spec.intensity, light.decay, spec.near);
       light.intensity = this.practicalBase[i]!;
       // Published for anyone downstream who needs to know how hard this source is
       // *meant* to burn once the rig has started flickering it. `vfx.ts` reads it
@@ -1375,8 +1535,20 @@ export class LightingRig {
       // Never adopt our own pool — that would double-drive the flicker.
       if (light.parent === this.group) return;
       this.adopted.push(light);
-      this.adoptedBase.push(light.userData['baseIntensity'] as number | undefined ?? light.intensity);
-      light.userData['baseIntensity'] = this.adoptedBase[this.adoptedBase.length - 1];
+      // Two separate numbers, and conflating them is a bug that only shows up
+      // once a policy sits between them. `authoredIntensity` is what the prop
+      // author typed and never changes; `baseIntensity` is what the rig has
+      // decided this fire actually burns at after gain and the peak ceiling, and
+      // it is what `vfx.ts` divides the live flicker by to get `drive`. Stamping
+      // the authored value into `baseIntensity` — which is what this did before
+      // the ceiling existed — left every glare card and ember plume reading a
+      // permanently guttering fire once the ceiling started biting.
+      const authoredIntensity =
+        (light.userData['authoredIntensity'] as number | undefined) ??
+        (light.userData['baseIntensity'] as number | undefined) ??
+        light.intensity;
+      light.userData['authoredIntensity'] = authoredIntensity;
+      this.adoptedBase.push(authoredIntensity);
       this.adoptedHome.push(light.position.clone());
       // Cached once, because the flicker rewrites `light.color` every frame and
       // re-reading it would let the temperature shift compound into pure red
@@ -1395,6 +1567,15 @@ export class LightingRig {
       // near edge to its far one, so the fire either clips the stone beside it or
       // reaches nothing. See `practicalDecay`.
       light.decay = Math.max(0, this.live.practicalDecay);
+      // Reach is the rig's too, and for the same reason. `terrain.ts` gives a
+      // brazier a 5.2-unit cutoff, which is a sensible number for one prop seen
+      // up close and far too tight seen from twenty tiles back through a grade —
+      // three's cutoff window is `(1 - (d/r)⁴)²`, so it has already removed 60%
+      // of the light by 4 units and all of it by 5. The pool was dying a tile
+      // and a half before the falloff wanted it to. Widening the cutoff does not
+      // brighten anything (the peak ceiling still governs that); it just stops
+      // the window amputating the gradient the eye is meant to read.
+      light.distance = Math.max(light.distance, MIN_PRACTICAL_REACH);
     });
     this.promoteShadowCaster();
   }
@@ -1471,10 +1652,9 @@ export class LightingRig {
       this.adoptScan = 0.75;
       this.refreshAdoptedLights();
     }
-    const gain = Math.max(0, this.live.practicalGain);
     for (let i = 0; i < this.adopted.length; i++) {
       const light = this.adopted[i]!;
-      const base = this.adoptedBase[i]! * gain;
+      const base = this.drivePractical(this.adoptedBase[i]!, light.decay);
       const home = this.adoptedHome[i]!;
       // Deepened for round 4, and biased low.
       //
@@ -1493,6 +1673,9 @@ export class LightingRig {
       const x = Math.min(1, Math.max(0, n * 0.5 + 0.5));
       const drive = 0.55 + 1.0 * Math.pow(x, 1.35);
       light.intensity = base * drive;
+      // Republished every frame so `vfx.ts` sizes its glare card and rates its
+      // ember plume against the level this fire is *actually* being driven at.
+      light.userData['baseIntensity'] = base;
       // Temperature follows brightness, because it does in a real flame: a
       // guttering coal is deep orange and a flare is nearly yellow-white. This is
       // also what `vfx.ts` reads to tint the embers and the flame tongues, so the

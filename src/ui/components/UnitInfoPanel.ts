@@ -11,13 +11,23 @@ import { icon } from '../icons';
 import { castPortrait, portrait } from '../portraits';
 import type { StatusVM, UnitVM } from '../types';
 import { Meter } from './Meter';
-import { divider, Panel } from './Panel';
+import { Panel } from './Panel';
 
 export interface UnitInfoOptions {
   /** 'full' shows derived stats and the status strip; 'compact' omits stats. */
   variant?: 'full' | 'compact';
   side?: 'left' | 'right';
   title?: string;
+  /**
+   * Lay the card out as a wide, short BAND — portrait column beside a data
+   * column — instead of stacking everything under the head.
+   *
+   * On for the battle HUD, off everywhere else. The band trades height for
+   * width, which is exactly right for a card pinned to a screen corner over a
+   * board and exactly wrong for one dropped into a 390px sidebar on the roster
+   * screen, where it squeezed the meters to 70px and the stat cells to 26.
+   */
+  band?: boolean;
 }
 
 export class UnitInfoPanel {
@@ -35,17 +45,34 @@ export class UnitInfoPanel {
   private readonly statStrip: HTMLDivElement;
   private readonly statusStrip: HTMLDivElement;
   private readonly variant: 'full' | 'compact';
+  private readonly band: boolean;
   private currentId: string | null = null;
 
   constructor(opts: UnitInfoOptions = {}) {
     this.variant = opts.variant ?? 'full';
+    this.band = opts.band ?? false;
     this.panel = new Panel({
-      className: `et-unitinfo et-unitinfo--${this.variant}`,
+      className: `et-unitinfo et-unitinfo--${this.variant}${this.band ? ' et-unitinfo--band' : ''}`,
       from: opts.side === 'right' ? 'right' : 'left',
       title: opts.title,
     });
     this.root = this.panel.root;
 
+    // TWO-COLUMN BAND (full variant).
+    //
+    // The face used to be the first flex child of the head row, so the panel was
+    // a stack: [face + name] / [HP] / [MP] / [Brave-Faith] / [stats]. That stacks
+    // to a near-square 362x389 block — 36% of the frame height sitting in the
+    // corner — and it left a ~150x100px void of empty navy to the right of the
+    // name, because nothing else in the panel was as tall as the portrait.
+    //
+    // The shipped acting panel is a wide short band: portrait on the left running
+    // the panel's full height, everything else in one column beside it with the
+    // two resource bars SIDE BY SIDE. Same information, ~190px shorter, and the
+    // void disappears because the portrait column now has content next to it all
+    // the way down.
+    const layout = div('et-unitinfo__layout');
+    const column = div('et-unitinfo__column');
     const head = div('et-unitinfo__head');
     this.faceSlot = div('et-unitinfo__face');
     const ident = div('et-unitinfo__ident');
@@ -53,12 +80,19 @@ export class UnitInfoPanel {
     const sub = div('et-unitinfo__sub');
     this.jobNode = el('span', 'et-unitinfo__job');
     this.levelNode = el('span', 'et-unitinfo__level');
-    add(sub, this.jobNode, this.levelNode);
-    add(ident, this.nameNode, sub);
     // Allegiance is set in the head, not derived from the reader noticing the
     // panel's tint. Two Knights of the same level are otherwise the same card.
+    //
+    // It rides the job/level line rather than being absolutely positioned in the
+    // panel's top-right corner. Out of flow it had nothing to negotiate with, so
+    // once the head moved into the narrower data column "HOSTILE" printed
+    // straight through "CORVIN". On the sub line it is a flex sibling that the
+    // browser can keep out of the way of the job name.
     this.teamNode = el('span', 'et-unitinfo__team');
-    add(head, this.faceSlot, ident, this.teamNode);
+    add(sub, this.jobNode, this.levelNode, this.teamNode);
+    add(ident, this.nameNode, sub);
+    if (this.band) add(head, ident);
+    else add(head, this.faceSlot, ident);
 
     this.hp = new Meter({ tone: 'hp', label: 'HP' });
     this.mp = new Meter({ tone: 'mp', label: 'MP' });
@@ -78,12 +112,21 @@ export class UnitInfoPanel {
     this.statStrip = div('et-unitinfo__stats');
     this.statusStrip = div('et-unitinfo__statuses');
 
-    add(this.panel.body, head, meters, bf);
-    if (this.variant === 'full') {
-      this.panel.body.appendChild(divider());
-      this.panel.body.appendChild(this.statStrip);
+    // Both variants use the same band, the compact one only narrower and without
+    // the derived stats. The compact card carried the same defect the full one
+    // did — a 104px portrait beside a two-line ident block, so the lower two
+    // thirds of the portrait column faced nothing but flat panel navy.
+    const rows =
+      this.variant === 'full'
+        ? [head, meters, bf, this.statStrip, this.statusStrip]
+        : [head, meters, bf, this.statusStrip];
+    if (this.band) {
+      add(column, ...rows);
+      add(layout, this.faceSlot, column);
+      this.panel.body.appendChild(layout);
+    } else {
+      add(this.panel.body, ...rows);
     }
-    this.panel.body.appendChild(this.statusStrip);
   }
 
   mount(parent: HTMLElement): void {
@@ -110,7 +153,9 @@ export class UnitInfoPanel {
       // Cast on the job the unit is actually doing — a Knight must not turn up
       // in a Time Mage's hat just because the id hashed that way.
       const face = castPortrait(unit.id, unit.portrait, { job: unit.job, gender: unit.gender });
-      this.faceSlot.replaceChildren(portrait(face, { size: 'lg' }));
+      this.faceSlot.replaceChildren(
+        portrait(face, { size: this.band && this.variant === 'full' ? 'xl' : 'lg' }),
+      );
     }
     this.root.dataset['team'] = unit.team;
     this.teamNode.textContent = TEAM_WORD[unit.team] ?? '';

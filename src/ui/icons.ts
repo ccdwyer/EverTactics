@@ -63,10 +63,13 @@ const GLYPHS: Record<string, Glyph> = {
   move: {
     fill: ['M12 2l3 3h-2v5h5V8l3 3-3 3v-2h-5v5h2l-3 3-3-3h2v-5H6v2l-3-3 3-3v2h5V5H9z'],
   },
+  /* A quill at 16px was two hairlines and a dot. Thickened to a solid nib and
+     shaft so it holds a silhouette next to the solid sword/shield/book glyphs. */
   act: {
-    fill: ['M19.5 3.2l1.3 1.3-9.6 9.6-1.3-1.3zM8 15.2l1.1 1.1-3.6 2.5z'],
-    stroke: ['M4.4 19.6l2-.4M8.9 16.3l-3.4 3.3'],
-    width: 1.2,
+    fill: [
+      'M18.4 2.4l3.2 3.2-10.6 10.6-4.2 1 1-4.2z',
+      'M6.2 16.2l1.6 1.6-4.6 2.9z',
+    ],
   },
   item: {
     stroke: ['M9 7V5.5A3 3 0 0115 5.5V7', 'M4.8 7h14.4l-1.1 12.4a1.6 1.6 0 01-1.6 1.4H7.5a1.6 1.6 0 01-1.6-1.4z'],
@@ -83,6 +86,71 @@ const GLYPHS: Record<string, Glyph> = {
   job: {
     stroke: ['M12 2.6l8 4.2-8 4.2-8-4.2z', 'M4 11.6l8 4.2 8-4.2M4 16.2l8 4.2 8-4.2'],
     width: 1.5,
+  },
+
+  /* THE NAMES THE GAME ACTUALLY PASSES.
+     -------------------------------------------------------------------------
+     `state/viewModels.ts` builds the command row with icon ids `move`, `sword`,
+     `book`, `potion`, `shield`, `hourglass`. Only `move` existed here, so five of
+     the six rows fell through `GLYPHS[name] ?? GLYPHS['mark']` and rendered the
+     SAME concentric-ring rune. Shot at 1920x1080 that is a six-item menu with
+     five identical icons — the interface equivalent of the critics' "props repeat
+     as literal duplicates", and visible in every frame we have ever submitted.
+     Each glyph below is drawn to read at 15px: one dominant silhouette, no
+     interior detail finer than the stroke width. */
+  /* Upright, not diagonal. A 45-degree blade at 15px collapses into a bare
+     hairline stroke with no readable silhouette (verified in shots/ui-r5-b2);
+     stood on its pommel the crossguard gives it a shape the eye resolves
+     instantly at any size. */
+  sword: {
+    fill: [
+      'M12 1.6l2 3.6v9.4h-4V5.2z',
+      'M6.4 14.8h11.2v2.1H6.4z',
+      'M11 17.5h2v2.4h-2z',
+      'M12 19.4a1.6 1.6 0 110 3.2 1.6 1.6 0 010-3.2z',
+    ],
+  },
+  book: {
+    stroke: [
+      'M4 4.6h5.4A2.6 2.6 0 0112 7.2v12a2.2 2.2 0 00-2.2-1.6H4z',
+      'M20 4.6h-5.4A2.6 2.6 0 0012 7.2v12a2.2 2.2 0 012.2-1.6H20z',
+      'M12 7.2v12',
+    ],
+    width: 1.5,
+  },
+  potion: {
+    stroke: ['M9.6 2.8h4.8M10.4 2.8v4.4L6.6 15a4.4 4.4 0 003.9 6.2h3a4.4 4.4 0 003.9-6.2l-3.8-7.8V2.8'],
+    width: 1.5,
+    fill: ['M7.4 14.2h9.2a4.5 4.5 0 01-4 7 4.5 4.5 0 01-5.2-7z'],
+  },
+  shield: {
+    stroke: ['M12 2.6l7.8 3v6.2c0 4.6-3.2 8.4-7.8 9.6-4.6-1.2-7.8-5-7.8-9.6V5.6z'],
+    width: 1.6,
+    fill: ['M12 5.6l4.8 1.9v4.2c0 2.9-2 5.3-4.8 6.1z'],
+  },
+  /* Solid caps and a filled lower bulb. The all-stroke version rendered as four
+     spindly hairlines that read as noise beside the solid sword and shield. */
+  hourglass: {
+    fill: [
+      'M5.4 2.2h13.2v2.2H5.4zM5.4 19.6h13.2v2.2H5.4z',
+      'M9 16c.7-1.9 3-3 3-4.4.9 1.5 2.3 2.5 3 4.4z',
+    ],
+    stroke: ['M7.6 4.4v2.4c0 2.4 3.2 3.4 3.2 5.2s-3.2 2.8-3.2 5.2v2.4M16.4 4.4v2.4c0 2.4-3.2 3.4-3.2 5.2s3.2 2.8 3.2 5.2v2.4'],
+    width: 1.7,
+  },
+  bow: {
+    stroke: ['M4.6 19.4C13 18 18 13 19.4 4.6', 'M19.4 4.6L4.6 19.4', 'M19.4 4.6h-4.2M19.4 4.6v4.2'],
+    width: 1.6,
+  },
+  staff: {
+    stroke: ['M6.4 20.6L15.6 8.2'],
+    width: 1.8,
+    fill: ['M17.4 2.2l1.2 3 3 1.2-3 1.2-1.2 3-1.2-3-3-1.2 3-1.2z'],
+  },
+  banner: {
+    stroke: ['M6 2.6v18.8'],
+    width: 1.6,
+    fill: ['M7.4 3.4h11.2l-2.6 3.9 2.6 3.9H7.4z'],
   },
 
   // ── statuses ──────────────────────────────────────────────────────────────
@@ -241,8 +309,48 @@ export function statusTone(id: StatusId): 'buff' | 'debuff' | 'neutral' {
   return 'debuff';
 }
 
+/**
+ * Semantic names the game layer uses that map onto an existing drawing.
+ *
+ * Producers name a command after what it *does* (`attack`, `defend`,
+ * `battle-skill`); this sheet names glyphs after what they *are* (`sword`,
+ * `shield`, `book`). Without this table every one of those resolved to the
+ * fallback rune, which is how six menu rows ended up sharing one icon.
+ */
+const ALIASES: Readonly<Record<string, string>> = {
+  attack: 'sword',
+  strike: 'sword',
+  weapon: 'sword',
+  defend: 'shield',
+  guard: 'shield',
+  skill: 'book',
+  magic: 'book',
+  magick: 'book',
+  spell: 'book',
+  'battle-skill': 'sword',
+  'basic-skill': 'book',
+  'white-magick': 'staff',
+  'black-magick': 'staff',
+  sing: 'banner',
+  dance: 'banner',
+  arrow: 'bow',
+  aim: 'bow',
+  charge: 'bow',
+  flask: 'potion',
+  elixir: 'potion',
+  clock: 'hourglass',
+  end: 'hourglass',
+  rest: 'hourglass',
+};
+
+function resolveGlyph(name: string): string {
+  if (name in GLYPHS) return name;
+  const alias = ALIASES[name];
+  return alias !== undefined && alias in GLYPHS ? alias : 'mark';
+}
+
 export function hasIcon(name: string): boolean {
-  return name in GLYPHS;
+  return name in GLYPHS || (ALIASES[name] !== undefined && ALIASES[name]! in GLYPHS);
 }
 
 /**
@@ -250,7 +358,7 @@ export function hasIcon(name: string): boolean {
  * rune so a missing icon degrades to a mark rather than an empty box.
  */
 export function icon(name: string, className?: string): SVGSVGElement {
-  const glyph = GLYPHS[name] ?? GLYPHS['mark'];
+  const glyph = GLYPHS[resolveGlyph(name)];
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('aria-hidden', 'true');

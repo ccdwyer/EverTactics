@@ -28,6 +28,7 @@ import { getMapDef } from '@core/grid';
 import {
   createSurfaceMaterial,
   isWaterSurface,
+  setTerrainDampLevel,
   TEXTURE_WORLD_SCALE,
   type TerrainMaterialKind,
 } from './materials/terrain';
@@ -43,10 +44,18 @@ export const TILE_SIZE = 1;
 /** `Tile.height` is measured in half-tiles; this is one of those in world units. */
 export const HEIGHT_UNIT = 0.5;
 
-/** Inset of the top face, in tile fractions — the chamfer width. */
-const CHAMFER = 0.062;
+/**
+ * Inset of the top face, in tile fractions — the chamfer width.
+ *
+ * Round 5 widened this from 0.062. The ring is no longer only a light-catcher: on built
+ * surfaces it is now a **coping stone**, drawn from its own material (`edgeKindFor`), and
+ * a coping that is six pixels wide on screen is a highlight, not a stone. At 0.10 it is
+ * about a hand's width at diorama scale, which is what a real kerb is, and it still leaves
+ * 80% of the tile as walkable top face.
+ */
+const CHAMFER = 0.1;
 /** How far the chamfer ring drops below the top face, in world units. */
-const CHAMFER_DROP = 0.052;
+const CHAMFER_DROP = 0.075;
 /**
  * Soil has no arris. A dressed stone kerb ends in a 6% bevel and a crisp highlight;
  * a grass bank ends in a rolled-over shoulder of turf about three times as wide and
@@ -134,8 +143,15 @@ const RELIEF_SURFACES: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
  * a half-tile the swell stops reading as ground and starts reading as crumpled foil,
  * because the slope it implies over one tile is steeper than soil ever sits at; the
  * weighting in `groundRelief` matters more than the amplitude does.
+ *
+ * Round 5 pushed it back to 0.24 — half a half-tile of swell — because with the garth
+ * consolidated into one large lawn rather than a scatter of single tiles there is now
+ * enough continuous soil for the broad octave to actually describe a shape. At 0.18 on
+ * a nine-tile lawn the surface was flat within a couple of centimetres and read as a
+ * lid; the crumpled-foil failure at 0.32 came from the high octaves, which are still
+ * weighted down to 0.32 of the total.
  */
-const RELIEF_AMPLITUDE = 0.18;
+const RELIEF_AMPLITUDE = 0.24;
 /**
  * Per-surface multiplier on that swell. A ploughed dirt bank is lumpier than a
  * mown cloister lawn, and packed snow is smoother than either; giving each its own
@@ -1232,10 +1248,49 @@ function sideKindFor(kind: TerrainMaterialKind): TerrainMaterialKind {
   return kind;
 }
 
+/**
+ * Drop, in world units, above which a masonry face is built from the big load-bearing
+ * ashlar rather than the fine rubble coursing. Two half-tiles: a one-step riser stays
+ * rubble, a retaining wall changes stone.
+ */
+const ASHLAR_MIN_DROP = 1.05;
+
+/**
+ * Coarsen a side material by how much wall it has to hold up.
+ *
+ * Round 5's tell was "one brick motif tiled at a single UV scale across walls, floors,
+ * roofs and stairs". Real masonry grades its module with load: the blocks in a tall
+ * retaining wall are visibly larger than the ones in a knee-high step. Selecting on drop
+ * height means a single wall run whose height varies changes stone as it climbs, which is
+ * something a tile stamper cannot produce.
+ */
+function loadBearingKindFor(kind: TerrainMaterialKind, drop: number): TerrainMaterialKind {
+  if (kind === 'stonewall' && drop >= ASHLAR_MIN_DROP) return 'ashlar';
+  return kind;
+}
+
 /** Which material bucket a tile's solid geometry belongs to. */
 function bucketKindFor(t: Tile): TerrainMaterialKind {
   if (isWaterSurface(t.surface)) return 'bed';
   return t.surface;
+}
+
+/**
+ * Material for the chamfer ring at a tile's **exposed** perimeter — the edge role.
+ *
+ * A mason does not run the floor's paving out to the lip of a terrace; he caps it with
+ * a dressed coping stone, and a carpenter caps a deck with a nosing board. Both are a
+ * different stone/board from the field they edge: longer, paler, and worn smooth. That
+ * band is what makes an edge legible, which is what makes a mass read as having shape
+ * rather than as a continuous field of one brick.
+ *
+ * Returns `undefined` for surfaces that should just roll their own material over the
+ * shoulder — turf does not have an arris, and a cliff top has no mason.
+ */
+function edgeKindFor(kind: TerrainMaterialKind): TerrainMaterialKind | undefined {
+  if (kind === 'stone' || kind === 'roof') return 'coping';
+  if (kind === 'wood' || kind === 'bridge') return 'nosing';
+  return undefined;
 }
 
 /** Top-face inset for a tile: a masonry arris on built ground, a turf roll on soil. */
@@ -2463,8 +2518,14 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
 
   // Which surfaces this map wants rendered as a deck over open air rather than as a
   // solid column of earth (the bridge over Orbonne's reflecting pool, Mandalia's ford).
-  const deckKinds = new Set<SurfaceKind>(getMapDef(field.mapId)?.deckSurfaces ?? []);
+  const mapDef = getMapDef(field.mapId);
+  const deckKinds = new Set<SurfaceKind>(mapDef?.deckSurfaces ?? []);
   const isDeck = (t: Tile): boolean => deckKinds.has(t.surface);
+
+  // Tell the shared terrain shaders where the tide line is for this map, so masonry
+  // near standing water darkens, greens and glosses instead of matching the parapet
+  // four metres above it.
+  setTerrainDampLevel((mapDef?.waterLevel ?? 0) * HEIGHT_UNIT);
 
   const buckets = new Map<TerrainMaterialKind, Bucket>();
   const bucketFor = (k: TerrainMaterialKind): Bucket => {
@@ -2617,6 +2678,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
       const bucket = bucketFor(kind);
       const naturalRock = isNaturalRock(tiles, width, height, tx, ty, kind);
       const sideKind = sideKindFor(kind);
+      const edgeKind = naturalRock ? undefined : edgeKindFor(kind);
       const ox = tx * TILE_SIZE;
       const oz = ty * TILE_SIZE;
 
@@ -2686,6 +2748,12 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
         const bnz = cnz + surf[2] * (0.7 + 0.3 * (1 - cf));
         const bl = Math.hypot(bnx, bny, bnz) || 1;
 
+        // Only a *real* lip gets a coping. `cf` is already 0 wherever this edge is flush
+        // with its neighbour, so keying off it means the kerb traces exactly the profile
+        // the eye sees and never draws a band round an interior tile — which would put
+        // the tile grid straight back into the frame.
+        const ringBucket = cf > 0.4 && edgeKind !== undefined ? bucketFor(edgeKind) : bucket;
+
         const a = v(
           ox + (iu0 - 0.5) * TILE_SIZE,
           solidTopY(tile, tx, ty, iu0, iv0),
@@ -2718,7 +2786,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
           bny / bl,
           bnz / bl,
         );
-        bucket.addQuad(a, b, c, d);
+        ringBucket.addQuad(a, b, c, d);
       }
 
       // ── side faces ──────────────────────────────────────────────────────
@@ -2773,7 +2841,9 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
         // The outer skirt is the diorama's pedestal, not a landscape cliff: it gets the
         // rock material and gentle relief, but no shards and no heavy displacement.
         const isPedestal = !nbSolid;
-        const target = bucketFor(isCliff ? 'cliff' : sideKind);
+        const target = bucketFor(
+          isCliff ? 'cliff' : loadBearingKindFor(sideKind, maxDrop),
+        );
         const rows = isCliff ? Math.min(8, Math.max(3, Math.round(maxDrop / 0.55))) : 1;
         const cols = S;
 

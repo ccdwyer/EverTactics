@@ -43,6 +43,9 @@ uniform vec3  uBloomTint;
 
 uniform float uExposure;
 
+/** 0 = hue survives to pure peak, 1 = classic per-channel ACES walk to white. */
+uniform float uHighlightWhite;
+
 uniform float uVignetteAmount;
 uniform float uVignetteRadius;
 uniform float uVignetteSoftness;
@@ -182,17 +185,29 @@ void main() {
     float rn = sqrt(r2) / max(cornerLen, 1e-4);
     float radial = smoothstep(uVignetteRadius, uVignetteRadius + uVignetteSoftness, rn);
 
-    // Distance to the nearest frame edge, 0 at the edge, 1 at 25% in.
+    // Distance to the nearest frame edge, 0 at the edge, 1 at 25% in — computed per axis,
+    // because the band is not square.
+    //
+    // ROUND 5: this used to be min(e.x, e.y), i.e. all four edges treated alike. Measured on
+    // a 3x3 luma grid, both reference frames put their brightest cell at the CENTRE and run
+    // 1.6-2.0x darker along the top and bottom, while the left and right mid-height cells sit
+    // much closer to the centre value. Ours had its brightest cell at TOP-CENTRE — the
+    // blurred, bloomed backdrop was the best-lit thing in the picture, which is the round-5
+    // note "the sharpest, best-lit region of the image is an empty dock" almost word for word.
+    // A graduated filter across the top and bottom is the standard photographic answer and it
+    // is what the references visibly carry; the vertical axis therefore gets the full weight
+    // and the horizontal a little over half.
     vec2 e = min(uv, 1.0 - uv) * 4.0;
-    float edge = 1.0 - clamp(min(e.x, e.y), 0.0, 1.0);
-    edge = edge * edge;
+    float edgeV = 1.0 - clamp(e.y, 0.0, 1.0);
+    float edgeH = 1.0 - clamp(e.x, 0.0, 1.0);
+    float edge = max(edgeV * edgeV, edgeH * edgeH * 0.55);
 
     float darken = clamp(uVignetteAmount * max(radial, uVignetteEdge * edge), 0.0, 1.0);
     color *= mix(vec3(1.0), uVignetteColor, darken);
   }
 
   color *= uExposure;
-  color = tonemapACES(color);
+  color = tonemapACESPreserveHue(color, uHighlightWhite);
   color = srgbEncode(color);
 
   if (uDebug != 6) {

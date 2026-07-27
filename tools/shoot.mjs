@@ -34,7 +34,11 @@ const width = Number(arg('w', 1920));
 const height = Number(arg('h', 1080));
 const maxWait = Number(arg('wait', 30000));
 const port = Number(arg('port', 5173));
-const url = `http://localhost:${port}/?shot=${encodeURIComponent(scene)}`;
+/** Extra query string appended verbatim, e.g. `--query postdebug=coc`. Diagnostics only. */
+const extraQuery = arg('query', '');
+const url =
+  `http://localhost:${port}/?shot=${encodeURIComponent(scene)}` +
+  (extraQuery ? `&${extraQuery}` : '');
 
 async function serverUp() {
   try {

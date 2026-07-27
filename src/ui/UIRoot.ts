@@ -116,8 +116,11 @@ export class UIRoot {
       onFocus: (unitId) => this.emit({ kind: 'inspect-unit', unitId, focus: false }),
       onSelect: (unitId) => this.emit({ kind: 'inspect-unit', unitId, focus: true }),
     });
-    this.activeInfo = new UnitInfoPanel({ variant: 'full', side: 'left' });
-    this.inspectInfo = new UnitInfoPanel({ variant: 'compact', side: 'right' });
+    // `band: true` — the battle HUD's two cards are wide, short bands pinned to
+    // screen corners. Every other consumer (the roster detail pane) keeps the
+    // stacked card, which is the right shape for a narrow sidebar.
+    this.activeInfo = new UnitInfoPanel({ variant: 'full', side: 'left', band: true });
+    this.inspectInfo = new UnitInfoPanel({ variant: 'compact', side: 'right', band: true });
     this.commandMenu = new CommandMenu({
       onConfirm: (id) => this.emit({ kind: 'command', id }),
       onHighlight: (id) => this.emit({ kind: 'command-highlight', id }),

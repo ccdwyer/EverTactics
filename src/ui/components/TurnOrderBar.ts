@@ -103,8 +103,19 @@ export class TurnOrderBar {
       }),
     );
     if (entry.current) frame.appendChild(icon('crown', 'et-turnchip__crown'));
-    // The name floats out of the chip and only shows for the acting unit or on
-    // hover, so twelve entries cost one narrow column instead of a text block.
+    // The name plate hangs OUTSIDE the rail, over the board — so it is a hover
+    // affordance only, never a resting state.
+    //
+    // Round 4 also showed it for `current`, which meant the default frame always
+    // had "ALDRIC / Knight" floating on raw board pixels a few px right of the
+    // rail with nothing binding it to the chrome. Two problems with that. It is
+    // a listed fail condition (docs/VISUAL_TARGET.md: "Any UI panel sitting over
+    // the playable board"), and it is redundant: the acting unit's name is
+    // already set in 21px display type in the bottom-left panel, so the frame
+    // carried the same word twice, once well and once badly. Measured off the
+    // shipped Combat Timeline (refs/curated/fft/press-042310-...-mediakit-06.png)
+    // the rail carries NO names at all — portrait, tick numeral, HP sliver, and
+    // the acting unit's identity comes entirely from the panel it flows into.
     frame.appendChild(el('span', 'et-turnchip__name', entry.name));
     chip.appendChild(frame);
 
@@ -123,11 +134,7 @@ export class TurnOrderBar {
     );
     if (!entry.current) meta.appendChild(el('span', 'et-turnchip__delta-unit', 'CT'));
     chip.appendChild(meta);
-    // The floating name plate is the only place the rail can carry a job, and the
-    // acting unit is the one entry where the extra line is worth the pixels.
-    if (entry.current && entry.job) {
-      frame.appendChild(el('span', 'et-turnchip__job', entry.job));
-    }
+    if (entry.job) frame.appendChild(el('span', 'et-turnchip__job', entry.job));
     chip.title = entry.note
       ? `${entry.name} — ${entry.note}`
       : entry.job
