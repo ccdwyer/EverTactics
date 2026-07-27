@@ -135,9 +135,16 @@ let verdict = 'NO ROUNDS RUN';
 
 for (let round = 1; round <= maxRounds; round++) {
   console.error(`\n── round ${round}/${maxRounds} · Grok 4.5 implementing ─────────────────`);
+  // `--always-approve` and `--max-turns` are both load-bearing. The first live run
+  // used only `--permission-mode dontAsk` and Grok printed one line — "I'll start by
+  // loading project context..." — then exited having changed nothing. `-p` is a
+  // single-turn prompt; without an explicit turn budget and tool auto-approval it
+  // answers rather than works, and the harness dutifully reported "produced no
+  // changes" as though Grok had failed. It had not been asked to work.
   const build = sh('grok', [
     '-p', buildPrompt(round, feedback),
-    '--permission-mode', 'dontAsk',
+    '--always-approve',
+    '--max-turns', '60',
     '--cwd', process.cwd(),
   ]);
   writeFileSync(`${logDir}/round${round}-grok.txt`, build.out);
