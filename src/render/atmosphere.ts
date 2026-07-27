@@ -94,6 +94,8 @@ uniform float uRise;
 uniform float uBoxMinY;
 uniform float uBoxHeight;
 uniform float uPointScale;
+/** Fraction of a near mote's energy that survives to the back of the volume. */
+uniform float uDepthFade;
 uniform float uZMin;
 uniform float uZMax;
 
@@ -133,6 +135,21 @@ void main() {
   // Conservation of energy, roughly: a mote spread over four times the area is
   // a quarter as bright. Without this the near band is a screen of hard dots.
   vAlpha *= mix(1.0, 0.34, nearT * nearT);
+
+  // ── aerial attenuation ────────────────────────────────────────────────────
+  //
+  // ROUND 11 - the embers "receive no fog". They did not: this material carries
+  // 'fog: false' (it has to - three's fog chunk mixes toward the fog colour, and
+  // mixing an ADDITIVE fragment toward a non-black colour makes distant motes
+  // brighter, which is the opposite of the physics). The right operation for an
+  // additive source is attenuation, not a mix: light scattered out of the path
+  // between the mote and the lens simply does not arrive, so a far mote is dimmer.
+  //
+  // Driven off the same depth stratification the size uses, so a mote's brightness
+  // and its size now agree about where it is. Without this the field was the one
+  // layer in the frame with no distance cue in its VALUE at all, sitting at a
+  // constant energy from the front of the box to the back of it.
+  vAlpha *= mix(uDepthFade, 1.0, nearT);
   vWarm = aWarm;
 }
 `;
@@ -195,6 +212,7 @@ export class MoteField {
         uBoxMinY: { value: 0 },
         uBoxHeight: { value: 20 },
         uPointScale: { value: 1 },
+        uDepthFade: { value: 0.42 },
         uZMin: { value: -40 },
         uZMax: { value: 0 },
         uCool: { value: new Color() },

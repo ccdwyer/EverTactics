@@ -1161,8 +1161,32 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // not as a tile fill. Round 9's 0.60 sigma at weight 0.44 was doing 4x the
         // work of the core over 10x the area, which is precisely how a contact
         // shadow turns into a flat dimmer tile.
-        vec2 p = vec2(q.x / 0.33, q.y * mix(1.0, 1.3, step(0.0, q.y)) / 0.33);
-        float pool = exp(-dot(p, p) * 0.9) * 0.20;
+        //
+        // ROUND 11 - measured, and 0.20 was too low to be a floor at all. The frame
+        // was shot twice, once with 'contactShadow' forced off, and the decal's own
+        // contribution read as the luma ratio over a 60x26 patch at each unit's boots:
+        //
+        //     unit at (490,695)   6.7 %      unit at (1380,420)   9.0 %
+        //     unit at (555,710)   0.0 %      unit at (1010,450)   0.0 %
+        //     unit at (1290,510)  0.0 %
+        //
+        // Three units in five had NO measurable mark, which is exactly the note
+        // ("some units get a soft contact ellipse, others get nothing"). Rendering
+        // the decal's fragment in a signal colour at 40x shows the mark IS drawn for
+        // every one of them, correctly placed and correctly clamped - so this was
+        // never placement, occlusion or the depth fight (raising CONTACT_DEPTH_BIAS
+        // from 0.45 to 1.0 moved none of those numbers). It is density: the core and
+        // the seam are sigma 0.08-0.17 tiles and they are spent on the strip of
+        // ground between the boots and the lens, which on a unit standing near the
+        // far edge of its tile, or against a block, is a handful of device pixels.
+        // The pool is the only lobe wide enough to survive that, and at 0.20 it was
+        // below the level a multiply can show against stone.
+        //
+        // Round 9 cut it from 0.44 because a wide pool reads as a flat dimmer tile.
+        // The answer to that is the SIGMA, not the weight: this is 0.26 rather than
+        // 0.33, so the halo still dies well inside the tile and cannot fill it.
+        vec2 p = vec2(q.x / 0.26, q.y * mix(1.0, 1.3, step(0.0, q.y)) / 0.26);
+        float pool = exp(-dot(p, p) * 0.9) * 0.34;
 
         // ── directional cast ───────────────────────────────────────────────────
         // Projects onto the key's ground heading.

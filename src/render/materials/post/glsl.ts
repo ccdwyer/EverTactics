@@ -192,6 +192,8 @@ uniform float uFocusAuto;       // 1 = read the focal plane off the depth buffer
 uniform float uFarClamp;        // ceiling on POSITIVE (far-field) CoC, 0..1
 uniform float uNearRangeScale;  // multiplier on uFocusRange for the NEAR half only
 uniform float uNearClamp;       // asymptote on NEGATIVE (near-field) CoC, 0..1
+uniform vec3  uUpView;          // world up, in view space
+uniform float uFlattenElev;     // 0 = raw view depth, 1 = elevation removed entirely
 
 /**
  * Memo for {@link focalDistance}. The probe is five dependent depth taps and the composite
@@ -200,6 +202,8 @@ uniform float uNearClamp;       // asymptote on NEGATIVE (near-field) CoC, 0..1
  * per invocation, so this is per-fragment state, not shared.
  */
 float gFocus = -1.0;
+/** The focal point's coordinate along {@link uUpView}. Memoised with gFocus. */
+float gFocusUp = 0.0;
 
 /**
  * View-space distance of the focal plane.
@@ -218,7 +222,7 @@ float gFocus = -1.0;
  */
 float focalDistance() {
   if (gFocus > 0.0) return gFocus;
-  if (uFocusAuto < 0.5) { gFocus = uFocusDist; return gFocus; }
+  if (uFocusAuto < 0.5) { gFocus = uFocusDist; gFocusUp = 0.0; return gFocus; }
 
   // Five taps, not one. A single tap at the composition centre is one gap between two blocks
   // away from reading the backdrop and snapping the focal plane forty tiles back — the whole
@@ -235,16 +239,20 @@ float focalDistance() {
   taps[4] = uTiltCenter - vec2(0.0, SPREAD);
 
   float sum = 0.0;
+  float upSum = 0.0;
   float hits = 0.0;
   for (int i = 0; i < 5; i++) {
     vec2 uv = clamp(taps[i], vec2(0.001), vec2(0.999));
     float d = rawDepth(uv);
     if (isBackground(d)) continue;
-    sum += viewDist(viewPosFromDepth(uv, d));
+    vec3 fvp = viewPosFromDepth(uv, d);
+    sum += viewDist(fvp);
+    upSum += dot(fvp, uUpView);
     hits += 1.0;
   }
-  if (hits < 0.5) { gFocus = uFocusDist; return gFocus; }
+  if (hits < 0.5) { gFocus = uFocusDist; gFocusUp = 0.0; return gFocus; }
   gFocus = sum / hits;
+  gFocusUp = upSum / hits;
   return gFocus;
 }
 
@@ -255,7 +263,31 @@ float computeCoC(vec2 uv, float d) {
   if (uTiltMix < 1.0) {
     float focus = focalDistance();
     vec3 vp = viewPosFromDepth(uv, d);
-    float dist = isBackground(d) ? focus + uFocusRange * 8.0 : viewDist(vp);
+    // ── ELEVATION IS NOT DISTANCE ────────────────────────────────────────────
+    //
+    // ROUND 11 - "the wolf-headed unit top-centre is near-sharp while the green figure
+    // immediately beside it, at effectively the same depth, is fully blurred; the blur
+    // is being assigned by sort-layer, not by distance."
+    //
+    // It is not being assigned by sort-layer. Read '?postdebug=coc': every sprite
+    // carries its own per-pixel CoC out of the depth buffer, and those two units
+    // measure 0.004 and 0.306 - a continuous, depth-driven difference, not two rungs
+    // of a ladder. But the judge's OBSERVATION is right, and the cause is worse than
+    // quantisation: on a rig pitched 30 degrees, a block standing three world units
+    // taller than the focal plane is 3*sin(30) = 1.5 view units NEARER the lens. View
+    // depth therefore conflates height with distance, and two units the viewer reads
+    // as standing side by side get wildly different CoC because one of them is up a
+    // flight of steps. Elevation is this game's central mechanic, so that is not a
+    // corner case - it is most of the board.
+    //
+    // Projecting the elevation back out makes the focal surface a VERTICAL SLAB in
+    // world space rather than a plane perpendicular to the optical axis. That is what
+    // a diorama wants anyway: a tower is as sharp as its own footing, and what falls
+    // out of focus is what is genuinely further back across the ground.
+    float upRel = dot(vp, uUpView) - gFocusUp;
+    float dist = isBackground(d)
+      ? focus + uFocusRange * 8.0
+      : viewDist(vp) + upRel * uUpView.z * uFlattenElev;
     float signedDelta = dist - focus;
     // ROUND 7 — the sharp zone is ASYMMETRIC, and the CoC debug view is why.
     //

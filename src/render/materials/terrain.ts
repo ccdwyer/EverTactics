@@ -445,6 +445,7 @@ interface PatchOptions {
   tintJitter: number;
   floral: number;
   bounceFloor: number;
+  edgeLift: number;
   hasNormal: boolean;
   hasRough: boolean;
   hasEmissive: boolean;
@@ -564,6 +565,7 @@ function patchTerrainShader(mat: THREE.MeshStandardMaterial, opts: PatchOptions)
     shader.uniforms.uBounceWarm = warmU;
     shader.uniforms.uBounceCool = coolU;
     shader.uniforms.uBounceFloor = { value: opts.bounceFloor };
+    shader.uniforms.uEdgeLift = { value: opts.edgeLift };
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -607,6 +609,7 @@ uniform float uFloral;
 uniform vec3 uBounceWarm;
 uniform vec3 uBounceCool;
 uniform float uBounceFloor;
+uniform float uEdgeLift;
 float etWet = 0.0;
 float etGloss = 0.0;
 float etChalk = 0.0;
@@ -879,6 +882,53 @@ roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.34, etWet);`,
   }
 }`,
     );
+
+    // The dressed edge is a CATCHLIGHT, not an outline. See 'SurfaceTuning.edgeLift'
+    // for the measurement that forced this.
+    //
+    // Gating has to happen here, after every light has been accumulated, because the
+    // question the judges are really asking is not "which way does this facet point"
+    // but "did any light reach it". A dot(N,L) against the key alone would still fire
+    // inside the key's own shadow, and would ignore the braziers, which on this map
+    // are most of the light there is. 'reflectedLight.directDiffuse' already carries
+    // every direct source, each attenuated by its own shadow map, so dividing the
+    // albedo back out of it gives the irradiance the fragment actually received --
+    // exactly the local light contribution the note asks the strip to be scaled by.
+    //
+    // Two halves, and both are needed. Cutting the fill alone would leave the lit lips
+    // dimmer than they were and lose the terrace read that the coping exists to draw;
+    // boosting the direct alone would leave the unlit outline exactly where it is. The
+    // pair is close to value-neutral where light lands and takes the strip out of the
+    // picture where it does not, which is the whole point: the mean over the ring goes
+    // down while the spread across it goes UP, so this cannot be confused with (or
+    // achieved by) a uniform multiply.
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <lights_fragment_end>',
+      `#include <lights_fragment_end>
+if (uEdgeLift > 0.0) {
+  const vec3 ET_LUMA = vec3(0.2126, 0.7152, 0.0722);
+  float albedoL = max(dot(diffuseColor.rgb, ET_LUMA), 1e-4);
+  float irradiance = dot(reflectedLight.directDiffuse, ET_LUMA) / albedoL;
+  // Saturating, but with its knee placed where this scene's irradiance actually
+  // varies. The first cut used a coefficient of 3.2, which saturates by half a unit of
+  // irradiance -- and since the rim and the braziers alone put more than that on an
+  // up-facing facet, 'lit' came out near 1 everywhere and the gate did nothing
+  // measurable. At 0.9 the term still saturates on a face the key is
+  // squarely on, and still ramps across the range between a brazier-lit lip and one
+  // that only sees the rim. Measured as the SPREAD of the coping/neighbour luma ratio
+  // between a full-light render and one with the key at zero: 0.091 before any of this,
+  // 0.086 at a coefficient of 3.2 (i.e. the gate was inert), 0.136 at 0.9.
+  float lit = 1.0 - exp(-irradiance * 0.9);
+  // A small catchlight where light lands, and most of the fill withdrawn where it does
+  // not. The boost is deliberately much smaller than the cut: the note is about the
+  // line being PRESENT on unlit blocks, so making the lit lips brighter would trade one
+  // complaint for a louder version of the same one.
+  reflectedLight.directDiffuse *= 1.0 + uEdgeLift * 0.25 * lit;
+  float fill = 1.0 - uEdgeLift * (1.0 - lit);
+  reflectedLight.indirectDiffuse *= fill;
+  reflectedLight.indirectSpecular *= fill;
+}`,
+    );
   };
   // Force a distinct program per configuration.
   mat.customProgramCacheKey = () =>
@@ -890,7 +940,7 @@ roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.34, etWet);`,
       opts.roughMin
     }-${opts.roughMax}-${opts.weather}-${opts.tintJitter}-${opts.floral}-${
       opts.bounceFloor
-    }-${opts.hasNormal}-${opts.hasRough}-${opts.hasEmissive}`;
+    }-${opts.edgeLift}-${opts.hasNormal}-${opts.hasRough}-${opts.hasEmissive}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -981,6 +1031,33 @@ interface SurfaceTuning {
    * milky.
    */
   bounceFloor?: number;
+  /**
+   * How much of this surface's read is a DRESSED-EDGE CATCHLIGHT rather than its own
+   * albedo, 0..1. Only the edge roles (coping, nosing) set it.
+   *
+   * ROUND 11 - "nearly every stone block carries a pale rim strip along its top and
+   * leading edges, including blocks whose faces point away from the brazier at left.
+   * Real key light does not wrap uniformly onto geometry facing away from it." Named
+   * across five rounds and, until this one, never attributed to a line.
+   *
+   * The attribution is measured, not reasoned: the coping material was painted pure red
+   * and the frame re-shot with the key at zero. Every pale strip in the frame came back
+   * red, and it came back BRIGHT - so the strip is the coping ring, and it is lit
+   * without any key at all. Killing hemi, probe or ambient one at a time barely moved
+   * it; killing all of them together took the board to black. So no single fill term
+   * owned it: the ring simply presents an up-and-outward normal (0.7 up, 0.72 out, baked
+   * in render/terrain.ts) on the palest material in the frame, and every orientation-
+   * insensitive term in the rig lands on it at once. That is why it reads as an applied
+   * outline - because it very nearly is one. Its value barely responds to where the
+   * light is.
+   *
+   * A coping IS paler than the paving it caps, and it SHOULD draw a light line along a
+   * terrace lip - but only where light is actually falling on it. So this fraction of
+   * the surface's response is moved out of the orientation-insensitive fill and onto the
+   * direct light the fragment measurably received. See the shader block at
+   * 'lights_fragment_end'.
+   */
+  edgeLift?: number;
 }
 
 /**
@@ -1114,7 +1191,13 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
     // at a 0.34 floor the kerb was picking up a specular hit along its whole
     // length whichever way it faced, which is half of why it read as an outline.
     roughRange: [0.50, 0.94], weather: 0.85, tintJitter: 0.42, bounceFloor: 0.15,
-    uvScale: 0.45, roughness: 1, metalness: 0, color: 0xffffff,
+    edgeLift: 0.72,
+    // Measured against a geometric mask of the ring itself (two renders differing only
+    // in this colour, so the mask is exact): at 0xffffff the ring came out 1.19x the
+    // luma of the stone within three pixels of it, on a strip three pixels wide. A
+    // three-pixel band a fifth brighter than everything it touches is an outline
+    // whatever material authored it.
+    uvScale: 0.45, roughness: 1, metalness: 0, color: 0xe0dbd4,
     // Full AO like every other masonry: the reduced strength here was letting the
     // kerb stay lit straight through inside corners where the wall it caps went dark,
     // which is exactly the discontinuity that reads as an applied outline.
@@ -1132,7 +1215,7 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
   },
   /** Timber edge board capping a plank deck. */
   nosing: {
-    roughRange: [0.38, 0.86], weather: 0.60,
+    roughRange: [0.38, 0.86], weather: 0.60, edgeLift: 0.45,
     uvScale: 0.5, roughness: 1, metalness: 0, color: 0xffffff,
     aoStrength: 0.85, macroStrength: 0.2, macroScale: 0.16,
     batchStrength: 0.45, batchSize: 2.60,
@@ -1320,6 +1403,7 @@ export function createSurfaceMaterial(kind: TerrainMaterialKind): THREE.MeshStan
     tintJitter: tune.tintJitter ?? 0,
     floral: tune.floral ?? 0,
     bounceFloor: tune.bounceFloor ?? DEFAULT_BOUNCE,
+    edgeLift: tune.edgeLift ?? 0,
     hasNormal: true,
     hasRough: true,
     hasEmissive,

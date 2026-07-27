@@ -552,6 +552,11 @@ void main() {
     color = vec3(max(coc, 0.0), max(-coc, 0.0), 0.0);
   } else if (uDebug == 4) {
     color = srgbEncode(texture2D(uDoF, vUv).rgb);
+  } else if (uDebug == 8) {
+    // Near-field coverage carried in the DoF buffer's alpha. This is the only channel
+    // that can defocus a pixel whose own CoC is zero, so it is the first thing to read
+    // when an in-focus sprite comes out soft.
+    color = vec3(texture2D(uDoF, vUv).a);
   } else if (uDebug == 5) {
     color = vec3(texture2D(uSpriteMask, vUv).a);
   } else if (uDebug == 7) {

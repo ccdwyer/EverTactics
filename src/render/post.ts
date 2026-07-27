@@ -79,7 +79,16 @@ export type PostQuality = 'low' | 'medium' | 'high' | 'ultra';
 /** Names the critic loop can toggle individually for an A/B. */
 export type EffectName = 'ao' | 'bloom' | 'dof' | 'grade' | 'vignette' | 'grain' | 'chroma' | 'aa';
 
-export type DebugView = 'off' | 'ao' | 'bloom' | 'coc' | 'dof' | 'sprite-mask' | 'no-grade' | 'aerial';
+export type DebugView =
+  | 'off'
+  | 'ao'
+  | 'bloom'
+  | 'coc'
+  | 'dof'
+  | 'near'
+  | 'sprite-mask'
+  | 'no-grade'
+  | 'aerial';
 
 export interface AoSettings {
   enabled: boolean;
@@ -147,6 +156,14 @@ export interface DofSettings {
   nearRangeScale: number;
   /** Scales how fast CoC grows outside the focus range. */
   cocScale: number;
+  /**
+   * How much of a fragment's ELEVATION is projected out of its depth before the CoC is
+   * computed. 0 leaves the raw view depth; 1 makes the focal surface a vertical slab in
+   * world space, so a block's height no longer moves it through focus.
+   *
+   * See the block at 'ELEVATION IS NOT DISTANCE' in 'materials/post/glsl.ts'.
+   */
+  flattenElevation: number;
   /** Centre of the tilt band, in UV. */
   tiltCenter: [number, number];
   /** Band angle in degrees. 0 = horizontal band. */
@@ -739,7 +756,17 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // top ~15% and bottom ~20% of the frame are visibly soft; only a horizontal band through
       // the middle is sharp". Every countable tile in the staging area, the party cluster and
       // the cursor stay inside it.
-      focusRange: 2.0 * tileSize,
+      //
+      // ROUND 11 - 2.0 -> 2.9, and only because 'flattenElevation' changed what this
+      // number measures. The paragraph above sizes the sharp zone against ~6.5 world
+      // units of VIEW depth across the visible ground plane; with elevation projected
+      // back out, the same board spans further, because a terrace two height units up
+      // used to be reported one view unit nearer than it really is across the ground
+      // and is now reported where it stands. Holding 2.0 through that change would be
+      // silently narrowing the sharp zone by the height of the map, which is how the
+      // upper terrace and every unit standing on it fell out of focus in the first
+      // measurement after the flatten went in (CoC 0.004 -> 0.349 on one of them).
+      focusRange: 2.9 * tileSize,
       // ROUND 7 — read '?postdebug=coc' on the round-6 frame: the near half of the CoC (green)
       // reached from the bottom edge up past the fountain plinth and covered the front rank of
       // the board, the party cluster's own tiles and the cursor's platform. 1.9 pulls the near
@@ -793,6 +820,11 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // still countable) the scale has to be 2.6. The ramp is still a ramp: the shoulder is
       // asymptotic, so the gradient between the back of the board and the backdrop survives.
       cocScale: 2.6,
+      // Not 1.0. A tall silhouette that is genuinely closer to the lens should still
+      // resolve a LITTLE softer than its own footing, or the frame loses the one cue
+      // that says the board has relief at all; 0.85 removes the great majority of the
+      // elevation term while leaving that.
+      flattenElevation: 0.85,
       // Slightly above centre: the reference frames put the sharp band on the action and
       // leave the negative space above it soft. Matches the camera's composition offset,
       // which lifts the subject the same way.
@@ -1346,6 +1378,7 @@ export class PostStack implements PostEffectsHost {
     focusRange: 2.6,
     nearRangeScale: 1.9,
     cocScale: 1.15,
+    flattenElevation: 0.85,
     tiltCenter: [0.425, 0.52],
     tiltAngle: 0,
     tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
@@ -1364,6 +1397,11 @@ export class PostStack implements PostEffectsHost {
   private readonly waveUniform: Vector4[] = [];
 
   private readonly projInv = new Matrix4();
+  /**
+   * World up expressed in view space, refreshed each frame. The CoC uses it to project
+   * a fragment's elevation back out of its depth -- see 'DofSettings.flattenElevation'.
+   */
+  private readonly upView = new Vector3(0, 1, 0);
   private readonly tmpVec3 = new Vector3();
   private readonly clearColor = new Color();
   private time = 0;
@@ -1480,6 +1518,8 @@ export class PostStack implements PostEffectsHost {
       uFarClamp: { value: this.settings.dof.farClamp },
       uNearRangeScale: { value: this.settings.dof.nearRangeScale },
       uNearClamp: { value: this.settings.dof.nearClamp },
+      uUpView: { value: new Vector3(0, 1, 0) },
+      uFlattenElev: { value: this.settings.dof.flattenElevation },
     });
 
     this.cocPass = new FullScreenPass(DOF_COC_FRAG, {
@@ -1846,6 +1886,8 @@ export class PostStack implements PostEffectsHost {
     }
 
     this.projInv.copy(camera.projectionMatrix).invert();
+    // Rotation only: matrixWorldInverse's translation would turn a direction into a point.
+    this.upView.set(0, 1, 0).transformDirection(camera.matrixWorldInverse).normalize();
     const ortho = (camera as OrthographicCamera).isOrthographicCamera === true ? 1 : 0;
     const projScaleY = 0.5 * (camera.projectionMatrix.elements[5] ?? 1) * this.height;
 
@@ -2150,6 +2192,8 @@ export class PostStack implements PostEffectsHost {
     u['uNearRangeScale']!.value = Math.max(dof.nearRangeScale, 1e-3);
     u['uNearClamp']!.value = dof.nearClamp;
     (u['uCoCAspect']!.value as Vector2).set(this.width / Math.max(this.height, 1), 1);
+    (u['uUpView']!.value as Vector3).copy(this.upView);
+    u['uFlattenElev']!.value = dof.flattenElevation;
   }
 
   /**
@@ -2174,6 +2218,7 @@ export class PostStack implements PostEffectsHost {
     out.focusRange = d.focusRange;
     out.nearRangeScale = d.nearRangeScale;
     out.cocScale = d.cocScale;
+    out.flattenElevation = d.flattenElevation;
     out.tiltCenter = d.tiltCenter;
     out.tiltAngle = d.tiltAngle;
     out.nearStrength = d.nearStrength;
@@ -2273,7 +2318,17 @@ export class PostStack implements PostEffectsHost {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DEBUG_VIEWS: readonly DebugView[] = ['off', 'ao', 'bloom', 'coc', 'dof', 'sprite-mask', 'no-grade', 'aerial'];
+const DEBUG_VIEWS: readonly DebugView[] = [
+  'off',
+  'ao',
+  'bloom',
+  'coc',
+  'dof',
+  'near',
+  'sprite-mask',
+  'no-grade',
+  'aerial',
+];
 
 /**
  * '?postdebug=coc' on the page URL. The screenshot harness can only pass query parameters,
@@ -2293,6 +2348,7 @@ function debugCode(view: DebugView): number {
     case 'bloom': return 2;
     case 'coc': return 3;
     case 'dof': return 4;
+    case 'near': return 8;
     case 'sprite-mask': return 5;
     case 'no-grade': return 6;
     case 'aerial': return 7;

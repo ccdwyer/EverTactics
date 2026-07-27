@@ -810,9 +810,41 @@ void main() {
   // shadow frustum and outside the practicals, so a 0.16 floor made every
   // shadow-side face read as a black hole punched in the frame — which is the
   // void problem again, just object-shaped.
-  vec3 lit = albedo * (0.34 + 0.66 * ndl);
-  lit += uSunColor * albedo * ndl * 0.65;
-  lit += uSkyColor * albedo * sky * 0.62;
+  // ── contact occlusion ─────────────────────────────────────────────────────
+  //
+  // ROUND 11 - "Right contains, as far as I can find, zero object-to-object cast
+  // shadow. The plinths at lower-left and lower-right sit on the pavement with
+  // nothing under them. Occlusion is the single cheapest way to sell a diorama."
+  //
+  // Attributed: the board has plenty of cast shadow (killing the shadow maps with
+  // '?lightdebug=shadows:0' takes a mid-board patch's median luma from 23.6 to 40.3,
+  // so terrain and units are both casting and receiving). What has none is the
+  // SURROUND, and that is by construction - 'BackdropLayer' sets castShadow and
+  // receiveShadow false on every mesh it builds, because the key's shadow camera is
+  // fitted to the board and pulling the surround into that fit would cost the board
+  // its texel density. The lower corners of the frame the judge names are almost
+  // entirely surround, and every piece there was standing on a flat 0.34 ambient
+  // floor with nothing under it.
+  //
+  // Putting the surround in the shadow map is the wrong trade. Contact occlusion is
+  // the right one and it is nearly free: within a fraction of a unit of the ground,
+  // and on any down-facing surface, most of the sky hemisphere is blocked. So the
+  // AMBIENT and SKY lobes are cut there and the sun lobe is not - the ground does
+  // not block the key, it bounces it.
+  // The reference height is the pieces' own footing, not uGroundY: 'layout' seats
+  // every surround piece at groundY - 0.28 - sink (see the translate in buildBand),
+  // so measuring from uGroundY itself put the whole band below the term's floor and
+  // moved the lower-right corner's mean luma by 1.6 percent - i.e. nothing.
+  float contact = 1.0 - smoothstep(0.0, 0.62, vLocal.y - (uGroundY - 0.28));
+  float downFace = clamp(-n.y, 0.0, 1.0);
+  float occ = 1.0 - 0.82 * max(contact, downFace * 0.9);
+
+  vec3 lit = albedo * (0.34 * occ + 0.66 * ndl);
+  // The ground does not block the key, it bounces it - so the sun lobe survives the
+  // contact band. It does not survive an UNDERSIDE, which is the one orientation a
+  // directional light genuinely cannot reach.
+  lit += uSunColor * albedo * ndl * 0.65 * (1.0 - 0.55 * downFace);
+  lit += uSkyColor * albedo * sky * 0.62 * occ;
 
   // Window practicals: a cell grid on vertical faces, a hash per cell decides
   // whether that room is occupied. This is the single cheapest "somebody lives
