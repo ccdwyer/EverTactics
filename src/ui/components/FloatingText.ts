@@ -25,10 +25,25 @@ const LIFETIME: Record<FloatTextVM['kind'], number> = {
   mp: 1200,
 };
 
+/** Clear space kept between two live floats, in px. */
+const FLOAT_GAP = 6;
+/** How far up a float may be pushed before it gives up and just overlaps. */
+const MAX_PUSH = 240;
+
+interface LiveFloat {
+  node: HTMLDivElement;
+  left: number;
+  top: number;
+  w: number;
+  h: number;
+}
+
 export class FloatingTextLayer {
   readonly root: HTMLDivElement;
   /** Small horizontal jitter so simultaneous hits do not stack exactly. */
   private spawnCounter = 0;
+  /** Boxes currently on screen, for collision avoidance. */
+  private readonly live: LiveFloat[] = [];
 
   constructor() {
     this.root = div('et-floats');
@@ -36,6 +51,7 @@ export class FloatingTextLayer {
 
   clear(): void {
     this.root.replaceChildren();
+    this.live.length = 0;
   }
 
   spawn(vm: FloatTextVM): void {
@@ -73,8 +89,62 @@ export class FloatingTextLayer {
     }
 
     this.root.appendChild(node);
+    const entry = this.place(node, vm.x + drift, vm.y + lift);
     const life = LIFETIME[vm.kind] + (vm.delay ?? 0) + i * 34;
-    window.setTimeout(() => node.remove(), life + 120);
+    window.setTimeout(() => {
+      node.remove();
+      const at = this.live.indexOf(entry);
+      if (at >= 0) this.live.splice(at, 1);
+    }, life + 120);
+  }
+
+  /**
+   * Push a freshly spawned float clear of every other live float.
+   *
+   * "Damage numbers physically collide — 224 overlaps 208, both overlap the
+   * sprites they belong to, so the readout is illegible at the exact moment it
+   * matters" was filed against round 6, and the modulo jitter it replaced was
+   * never a fix: `(n % 5 - 2) * 17` gives the same offset to every fifth float,
+   * so two hits on the same target one beat apart could land byte-identical. It
+   * also could not know how WIDE the numbers were, and a four-digit crit is
+   * three times the width of "8".
+   *
+   * So: measure, then walk UP until the box is clear. Up rather than sideways
+   * because a float's whole motion is a rise — pushing it up puts it earlier in
+   * the same path the eye is already following, whereas pushing it sideways
+   * detaches it from the unit it belongs to. The layer is `position: absolute`
+   * over the scene and floats never wrap, so one measure per spawn is enough;
+   * their animations run on `transform`, which does not disturb the layout box
+   * we measured.
+   */
+  private place(node: HTMLDivElement, left: number, top: number): LiveFloat {
+    const r = node.getBoundingClientRect();
+    const host = this.root.getBoundingClientRect();
+    const w = r.width || 40;
+    const h = r.height || 24;
+    // getBoundingClientRect is viewport-space; the float is positioned in the
+    // layer's own space, so compare in layer space or a scrolled/offset HUD
+    // silently stops colliding.
+    let y = r.top - host.top;
+    const x = r.left - host.left;
+    const limit = y - MAX_PUSH;
+    let guard = 0;
+    for (;;) {
+      const hit = this.live.find(
+        (o) =>
+          x < o.left + o.w + FLOAT_GAP &&
+          x + w + FLOAT_GAP > o.left &&
+          y < o.top + o.h + FLOAT_GAP &&
+          y + h + FLOAT_GAP > o.top,
+      );
+      if (!hit || y <= limit || guard++ > 24) break;
+      y = hit.top - h - FLOAT_GAP;
+    }
+    const shift = y - (r.top - host.top);
+    if (shift !== 0) node.style.top = `${top + shift}px`;
+    const entry: LiveFloat = { node, left: x, top: y, w, h };
+    this.live.push(entry);
+    return entry;
   }
 
   /** Convenience for a burst of hits landing on one target. */

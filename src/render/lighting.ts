@@ -359,15 +359,34 @@ export interface LightingPreset {
   exposure: number;
 
   /**
-   * PCF kernel radius, in shadow texels.
+   * MAXIMUM penumbra width, in shadow texels.
    *
-   * Only 'PCFShadowMap' reads this — 'PCFSoftShadowMap', which is what
-   * 'bindRenderer()' selects, derives its own kernel from the texel size and
-   * ignores the field. It is kept because the softness a preset *wants* is real
-   * information (a storm wants a wide diffuse penumbra, a night brazier scene
-   * wants a tight one) and because 'setShadowMapSize()' is the lever that
-   * actually delivers it: penumbra under PCF-soft is a fixed number of texels,
-   * so halving the resolution doubles the blur.
+   * ROUND-7: this field went from decorative to load-bearing, and every preset's
+   * value moved by roughly 4x as a result. Read the change before comparing them
+   * against anything written in an earlier round.
+   *
+   * It used to be dead. 'PCFSoftShadowMap' — which is what 'bindRenderer()'
+   * selects — derives its kernel from the texel size and never reads
+   * 'shadow.radius' at all, so a preset asking for a wide storm penumbra and one
+   * asking for a tight brazier penumbra rendered identically. That is the
+   * mechanism behind the sprite-free judge's note that "shadow terminators are
+   * uniformly soft at every distance… one blur radius everywhere, which reads
+   * instantly as a shadowmap with a fixed PCF kernel". It was not a tuning
+   * mistake; the field was never wired to anything.
+   *
+   * 'installContactHardeningShadows()' replaces that filter with PCSS, which
+   * reads this value as the widest the kernel may open. What a given surface
+   * actually gets is scaled between 'PCSS_MIN_RADIUS' and this number by how far
+   * its occluder floats above it — so a wall's own base stays crisp while the
+   * tip of the shadow it throws across the plaza goes soft, which is the
+   * behaviour the note asked for and which no single number can produce.
+   *
+   * The old values (2–4.5) were authored against a filter that ignored them and
+   * are far too tight to show a gradient at all: at 2048² over a 24-tile map a
+   * shadow texel is about two centimetres, so a 2-texel ceiling put the widest
+   * penumbra in the frame at four centimetres — visually indistinguishable from
+   * the 0.75-texel floor. These are sized so the far end of a long cast shadow
+   * is unmistakably softer than its root.
    */
   shadowRadius: number;
   /** Multiplier on the auto-computed normal bias; raise if acne appears. */
@@ -707,7 +726,7 @@ const BOUNCE_DROP = 0.95;
  * geometry counts, so the physical ceiling is well under 0.2. This sits below
  * that because the probe term is still carrying part of the same energy.
  */
-const BOUNCE_FRACTION = 0.16;
+const BOUNCE_FRACTION = 0.5;
 
 /**
  * Falloff exponent for a bounce light. Flatter than any direct practical, and
@@ -941,7 +960,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // the ratio work above widens the histogram, this slides it down to where
     // the shoulder stops eating the mortar lines out of lit stone.
     exposure: 0.78,
-    shadowRadius: 26.0,
+    shadowRadius: 11.0,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 1.35,
     // Pulled from 1.85. See 'keyColor' above: at 1.85 the fill was so far from
@@ -1061,7 +1080,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // post-off diagnostic and it uses 'overcast'.) At 1.0 the cloister read as a
     // silhouette; this is what makes the garden legible.
     exposure: 1.75,
-    shadowRadius: 3.2,
+    shadowRadius: 16.0,
     shadowNormalBiasScale: 1.2,
     probeIntensity: 0.9,
     chroma: 1.35,
@@ -1105,7 +1124,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // condition, and exposure is the right lever because it moves the whole
     // curve rather than putting the flat fill back and flattening the volume.
     exposure: 1.26,
-    shadowRadius: 2.4,
+    shadowRadius: 12.0,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 1.05,
     chroma: 1.45,
@@ -1139,7 +1158,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     fogStart: -5,
     fogEnd: 24,
     exposure: 1.2,
-    shadowRadius: 4.5,
+    shadowRadius: 20.0,
     shadowNormalBiasScale: 1.5,
     probeIntensity: 0.9,
     chroma: 1.4,
@@ -1178,7 +1197,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     fogStart: -1,
     fogEnd: 32,
     exposure: 1.35,
-    shadowRadius: 2.8,
+    shadowRadius: 9.0,
     shadowNormalBiasScale: 1.0,
     probeIntensity: 0.8,
     chroma: 1.42,
@@ -2102,7 +2121,24 @@ export class LightingRig {
     // "brightness-neutral" was supposed to mean.
     const sine = Math.max(0.35, Math.sin(MathUtils.degToRad(keyElevation)));
     const throughput = Math.max(0.5, (1 + sine) * 0.5);
-    const recovered = Math.max(0, surrendered - rimCost * 0.5) / throughput;
+    // ROUND-7: the rim's cost is charged in FULL rather than at half.
+    //
+    // The half-charge was correct while the rim was a small unoccluded term that
+    // only grazed silhouette edges — most of what it emitted never landed on a
+    // surface the histogram cared about, so charging all of it against the key
+    // over-darkened the frame. Raising 'targetRim' to a third of the key and
+    // giving it a shadow map changed both halves of that: it is now a major
+    // contributor that lands broadly, and it is occluded, so it behaves like a
+    // second key rather than like a rim.
+    //
+    // Measured: leaving it at half-charge took mean luma from 54 to 59 and
+    // 'darkShareOfSubject' from 0.32 down to 0.20 against a reference 0.60 — i.e.
+    // the occlusion work above was quietly being paid for by making the whole
+    // frame a stop brighter, which is the exact trade round 6 was fought over.
+    // Charging in full keeps the redistribution honest: what the rim gains, the
+    // key gives up, and the only thing that changes is *how much of the total is
+    // blockable*.
+    const recovered = Math.max(0, surrendered - rimCost) / throughput;
 
     // ROUND-6: 0.85 → 0.42, and this is the single number behind 'lumaP95'.
     //
@@ -2262,9 +2298,17 @@ export class LightingRig {
     // dramatic presets, which are exactly the ones lit by fire, are the ones
     // that lose their bounce.
     if (this.bounceLevel > 1e-4) {
+      // ROUND-7: the lobe weights are cut by a third, because this term is no
+      // longer alone. 'driveBounceLights()' now carries the *localised* half of
+      // the bounce with a real position and a real falloff, and running both at
+      // their old strength would double-count the same photons — worse, it would
+      // do so in the one way that undoes the point of adding the local half, by
+      // putting a flat warm wash back over the geometry thirty metres from any
+      // fire. What survives here is the job only a probe can do: colouring the
+      // ambient by whatever is actually burning on this map.
       const w = this.bounceLevel / Math.max(0.05, rig.probe);
-      addColor(this.bounceColor, 0, -34, w * 0.62);
-      addColor(this.bounceColor, this.bounceAzimuth, 12, w * 0.38);
+      addColor(this.bounceColor, 0, -34, w * 0.40);
+      addColor(this.bounceColor, this.bounceAzimuth, 12, w * 0.26);
     }
 
     this.probe.sh.copy(sh);

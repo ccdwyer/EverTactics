@@ -594,6 +594,20 @@ ${MACRO_CHUNK}`,
     diffuseColor.rgb *= 1.0 + j * 0.26 * uTintJitter;
     vec3 lean = mix(vec3(1.14, 0.94, 0.76), vec3(0.84, 1.06, 0.92), j * 0.5 + 0.5);
     diffuseColor.rgb *= mix(vec3(1.0), lean, uTintJitter * 0.75);
+
+    // A minority of plants are in flower. The reference cloister garden
+    // (refs/curated/triangle/official_007_steam.jpg) is not a field of one green: it
+    // carries red beds, blue clumps and yellow-green cypress against the clipped box,
+    // and that chroma is a large part of why the planting reads as planting. Keyed to
+    // the extreme of the same per-instance jitter, so roughly one plant in six blooms
+    // and it is always the *whole* plant, never a patch of one.
+    float bloom = smoothstep(0.62, 0.94, abs(j)) * uTintJitter;
+    vec3 petal = j > 0.0 ? vec3(0.62, 0.16, 0.20) : vec3(0.42, 0.30, 0.62);
+    // Only the outer, brighter foliage flowers — the shaded interior stays leaf.
+    float lit = smoothstep(0.30, 0.80, clamp(vEtAO, 0.0, 1.0));
+    diffuseColor.rgb = mix(diffuseColor.rgb,
+                           petal * (0.55 + dot(diffuseColor.rgb, vec3(0.9))),
+                           bloom * lit * 0.72);
   }
 
   // Tide band. Ragged, because a waterline is drawn by capillary action and algae, not

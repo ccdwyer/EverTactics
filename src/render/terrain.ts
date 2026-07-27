@@ -2569,7 +2569,7 @@ function populateProps(
         }
       } else if (t.surface === 'grass' || t.surface === 'dirt' || t.surface === 'swamp') {
         if (roll > 0.80) {
-          addShrub(foliage, timber, px, y, pz, 0.54 + rnd(tx, ty, 204) * 0.34, PROP_SEED ^ here);
+          addShrub(foliage, timber, px, y, pz, 0.46 + rnd(tx, ty, 204) * 0.30, PROP_SEED ^ here);
         } else if (roll > 0.50) {
           addTuft(foliage, px, y - 0.02, pz, 0.42 + rnd(tx, ty, 205) * 0.34, PROP_SEED ^ here);
           if (rnd(tx, ty, 206) > 0.6) {

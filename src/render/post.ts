@@ -734,7 +734,16 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // and both of those edges fall to near-black — the darkening is what tells you the
       // playfield continues rather than ending at the frame. Ours held them at nearly centre
       // value, which is a third of the "everything equally lit" complaint on its own.
-      edgeWeights: [1.8, 0.75, 0.9],
+      // ROUND 7 also lifts the BOTTOM weight, 0.6 -> 1.0. The near rim is no longer defocused
+      // into mush now that the CoC's near half is honest (see 'nearRangeScale'), so the rock
+      // skirt and the rubble field read at full detail and full value and compete with the
+      // board. In 'refs/curated/triangle/official_009_steam.jpg' the equivalent near cliff is
+      // the darkest thing in the frame. Foreground is meant to be dense and dark.
+      // 0.85 rather than the 1.0 that was tried first: at 1.0 'tools/metrics.mjs' put
+      // 'backgroundFraction' at 0.184, i.e. the bottom band had gone flat enough to be
+      // counted as void against a reference band of 0.087-0.180 and a hard fail at 0.25.
+      // Subordinating the foreground must not turn it into background.
+      edgeWeights: [1.8, 0.85, 0.9],
       // Just over half. At 1.0 (a falloff centred exactly on the subject at u = 0.425) the
       // right edge lost twice the light the left did, and the right edge is a third of the
       // playable board — the darkest corner should be the one furthest from the action, not

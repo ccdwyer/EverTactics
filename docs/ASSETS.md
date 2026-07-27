@@ -359,27 +359,245 @@ Adobe Color Tables and are inlined into the manifest.
 
 ---
 
-## 5. Not done yet
+## 5. Animation — `assets-src/unit/*_shp.bin` and `*_seq.bin`
 
-* **`*_shp.bin` / `*_seq.bin` are not decoded.** They live in
-  `assets-src/unit/` (25 files: `type1`-`type4`, `mon`, `other`, `arute`,
-  `cyoko`, `kanzen`, `wep1`, `wep2`, `eff1`, `eff2`) and hold the real frame
-  assembly and animation timing. Until they are decoded, animation must be built
-  from the whole-body pose frames, which means (a) `chocobo` cannot be rendered
-  at all and (b) `SpriteSheetMeta.animations` in `src/core/types.ts` has no
-  pipeline-produced value — the manifest exposes `poses` instead and deliberately
-  does not fabricate `SpriteAnimation` records.
+Decoded by `tools/decode-shp-seq.mjs` into `public/assets/animations.json`.
+
+```
+node tools/decode-shp-seq.mjs --report        # decode + summary
+node tools/preview-anim.mjs --sheet knight_male --anim 6,7,8,9,10,11
+node tools/preview-anim.mjs --sheet chocobo --shp cyoko --first 0 --limit 48
+```
+
+`preview-anim.mjs` writes a contact sheet to `tools/out/`. **That is the
+verification**: a parse that does not throw proves nothing, a knight that looks
+like a knight proves a great deal.
+
+The container layout and the SEQ instruction set are documented by the FFT
+modding community — the FFHacktics wiki pages *SHP & Graphic info page* and
+*SEQ & Animation info page* (the live site is behind a bot challenge; both pages
+are readable through the Wayback Machine). Everything the wiki leaves in RAM
+rather than on disk was measured here, and is called out as such below.
+
+### 5.1 Which files exist, and which pair with which
+
+25 files, 11 `*_shp.bin` and 14 `*_seq.bin`. The pairing is **not** by filename:
+
+| sprite type | SHP | SEQ |
+|---|---|---|
+| TYPE1 | `type1` | `type1` |
+| TYPE2 | `type2` | **`type3`** |
+| CYOKO | `cyoko` | `cyoko` |
+| MON | `mon` | `mon` |
+| OTHER | `other` | `other` |
+| RUKA | **`mon`** | `ruka` |
+| ARUTE | `arute` | `arute` |
+| KANZEN | `kanzen` | `kanzen` |
+
+There is no `ruka_shp.bin`, and `type2_seq.bin`, `type4_seq.bin`, `eff2_*` are
+present but never indexed by the game. `wep1/2` and `eff1/2` are weapon and
+swing-effect sheets and use a different section-1 size (see below).
+
+### 5.2 SHP — frame assembly
+
+| offset | size | meaning |
+|---|---|---|
+| `0x000` | u16 | **swim pointer** — start of the submerged frame table, or 8 when the unit has none |
+| `0x002` | u16 | zero in every shipped file |
+| `0x004` | u16 | **`atk`** — first frame index that reads the sheet's *second half* |
+| `0x006` | u16 | deprecated |
+| `0x008` | `0x400` | 256 `u32` frame pointers, relative to the frame block |
+| `0x408` | u16 | byte length of the frame block |
+| `0x40A` | … | frame block |
+
+WEP/EFF files use a `0x44`-byte section 1 and a `0x800` pointer table.
+
+A **frame** is two header bytes then its parts:
+
+```
+u8  header    bits 0-2 = part count, bits 3-7 = index into the Y-rotation table
+u8  flags     VRAM / transparency flags
+… parts, 4 bytes each
+```
+
+A **part** is:
+
+```
+i8  dx        destination x, relative to the unit origin
+i8  dy        destination y
+u16 desc      0x001F  source x, in 8-pixel tiles
+              0x03E0  source y, in 8-pixel tiles
+              0x3C00  index into the graphic size table
+              0xC000  0x4000 = mirror horizontally, 0x8000 = mirror vertically
+```
+
+Two things here are **corrections to the wiki, forced by the data**:
+
+* The wiki calls `header & 7` "No. graphics to load". Read literally, the frames
+  do not tile the block. Read as **count − 1** they tile it exactly, and every
+  non-zero frame pointer of every unit SHP lands on an exact record boundary:
+  182/182 for `type1`, 199/199 `type2`, 101/101 `cyoko`, 207/207 `mon`, 51/51
+  `arute`, 53/53 `kanzen`, 17/17 `other`. That is the reading used.
+* The wiki's section-3 example shows a 4-byte size field at `0x408`. Taking it
+  as **u16** puts the frame block at `0x40A`, and then `0x40A + size` equals the
+  swim pointer *exactly* for every file that has one (`type1` 3762, `type2` 4004,
+  `cyoko` 3660, `other` 1136). Taking it as u32 misses by two.
+
+`atk` is the split between the sheet's halves. Frames `>= atk` add **256** to
+their source y, i.e. they read the lower 256×232 region of the 256×488 canvas.
+`type1` splits at frame 84, `type2` at 76, `cyoko` at 61, `mon` at 29.
+
+All coordinates are in **original SPR pixels**. The HD rip is a clean 2× upscale
+(§1.1), so every value doubles before sampling an HD sheet.
+
+#### The graphic size table — measured, not read
+
+The `0x3C00` field indexes a 16-entry table of `(width, height)` pairs that lives
+in RAM at `0x800946c8` and is in **no file in this rip**. It was measured: for
+every size index, the column and row opacity profiles of every part carrying that
+index were accumulated over real sheets; a part's box is the period at which that
+profile returns to a valley — where the next packed part begins. The result was
+then checked against a connectivity objective (assembled frames must form one
+figure, not scattered shards) and by eye.
+
+| idx | tiles | px | samples | confidence |
+|---|---|---|---|---|
+| 0 | 2×2 | 16×16 | 311 | medium |
+| 1 | 3×2 | 24×16 | 4 | **low** |
+| 2 | 2×2 | 16×16 | 73 | medium |
+| 3 | 2×3 | 16×24 | 45 | medium |
+| 4 | 3×1 | 24×8 | 12 | **low** |
+| 5 | 3×2 | 24×16 | 191 | medium |
+| 6 | 3×3 | 24×24 | 3472 | **high** |
+| 7 | 3×4 | 24×32 | 0 | **unused, inferred** |
+| 8 | 4×2 | 32×16 | 105 | medium |
+| 9 | 4×3 | 32×24 | 31 | medium |
+| 10 | 4×4 | 32×32 | 1004 | **high** |
+| 11 | 4×5 | 32×40 | 432 | **high** |
+| 12 | 5×3 | 40×24 | 2 | **low** |
+| 13 | 5×4 | 40×32 | 16 | **low** |
+| 14 | 6×6 | 48×48 | 259 | **high** |
+| 15 | 8×8 | 64×64 | 615 | **high** |
+
+Indices 6, 10 and 11 carry 4908 of the ~6800 human and chocobo parts, and 14/15
+carry essentially all monster parts, so the entries that matter are the measured
+ones. The low-confidence entries are rare and, where they are wrong, produce a
+few stray pixels at a limb edge rather than a broken figure.
+
+### 5.3 SEQ — animation sequences
+
+| offset | size | meaning |
+|---|---|---|
+| `0x000` | u16 | animation at which the attacker's sprites unpack to VRAM |
+| `0x002` | u16 | animation at which the SP2 sheet is opened instead |
+| `0x004` | `0x400` | 256 `u32` animation pointers, relative to the data block |
+| `0x404` | u32 | byte length of the data block |
+| `0x408` | … | animation data |
+
+An instruction is either
+
+```
+u8 frame, u8 wait          # LoadFrameAndWait, when the lead byte is not 0xFF
+0xFF, u8 opcode, params…   # a command
+```
+
+so frame ids cap at `0xFE`. In practice they never exceed the paired SHP's frame
+count — `type1` tops out at `0xB5` = 181 against 182 decoded frames, which is
+what first confirmed the frame/opcode split. `wait` is in ticks of 1/60 s and is
+always even, because the global animation speed is sometimes doubled.
+
+The opcode table (values, names and parameter counts) is transcribed from the
+wiki into `SEQ_OPS` in `tools/decode-shp-seq.mjs`. It covers 68 opcodes; the
+useful ones for a renderer are `MoveUp1/2`, `MoveDown1/2`, `MoveForward1/2`,
+`MoveBackward1/2`, `MoveUnitFB/DU/RL`, `MoveUnit` (per-frame displacement),
+`IncrementLoop` (the clip loops), `PostGenericAttack` and `PlayAttackSound` (the
+impact cue), and `EndAnimation` / `PauseAnimation` (terminators).
+
+**Validation**: with that table, **2123 of 2134** animations across all 14 SEQ
+files parse to a terminator without desyncing (99.5 %). The 11 that do not are
+4 in `type2` and 4 in `type4` — files the game never indexes — plus 1 each in
+`type1`, `mon` and `arute`.
+
+Many pointer slots alias into the *same* byte stream at 2-byte increments, so
+animations 0-6 of `type1` are progressively shorter suffixes of one sequence.
+That is a property of the data, not a decode error; the decoder exposes every
+slot and lets the consumer pick.
+
+### 5.4 What is decoded, and what is still guesswork
+
+Fully decoded and visually verified:
+
+* **All 11 SHP files parse**: 2023 frames, 4138 parts.
+* **All 14 SEQ files parse**: 2134 animations.
+* Assembled frames read as figures on `knight_male` (`type1`), `chocobo`
+  (`cyoko`) and `behemoth` / `malboro` (`mon`) — checked as contact sheets, not
+  as parse statistics. **`chocobo` in particular has zero whole-body pose frames
+  on its sheet (§1.4) and now assembles correctly**, which is the strongest
+  independent evidence the decode is right: nothing about that result could come
+  from accidentally reading a pre-composed pose.
+
+Still unresolved, and deliberately not faked:
+
+* **Animation names.** The wiki's *Unit Animation Index* page — the one that
+  would name each SEQ slot — is unreachable and not archived. Three names are
+  asserted in `SEQ_ANIM_INDEX` from structural evidence: slot 6 is a symmetric
+  seven-frame gait (`walk`), slot 8 is the same frame list at shorter waits
+  (`run`), slot 12 holds one frame and alternates `MoveUp1`/`MoveDown1` (`idle`).
+  Slots 42/43 step monotonically through frames 1-8, which are the eight standing
+  rotations, so those are turn-in-place. **Everything else — attack, cast, hurt,
+  KO — is left `null` and keeps the procedural pose curve.** A wrongly named
+  attack is worse than an honest procedural one.
+* **TYPE1 vs TYPE2.** Which sheet is which sprite type is a field in the game's
+  unit table, which this rip does not include. The two share a container layout
+  and produce near-indistinguishable assemblies on every human sheet tested, so
+  `manifest.sheets[*].spriteType` assigns `type1` to all 128 human sheets.
+* **Small monsters.** `MON.SHP` addresses the sheet with absolute 48×48 boxes,
+  which only fits a sheet whose figures sit on a 48-px pitch. `behemoth` measures
+  92-100 HD px between poses; `goblin` measures 62-68 and would be assembled with
+  the neighbouring figure bleeding into every box. The pipeline therefore assigns
+  `mon` only to the 23 sheets that clear an 88-HD-pixel pitch, and leaves the rest
+  on the pose-frame fallback, which they have plenty of.
+* **WEP/EFF.** `wep1/2` and `eff1/2` parse under the documented `0x44`/`0x800`
+  layout (422 / 449 / 171 / 171 frames) but have **not** been visually verified
+  against the weapon atlases.
+* **Pose→facing mapping** is still not established (see §1.4); the decoded clips
+  are used for all five views and `resolveView` still does the mirroring.
+
+### 5.5 `animations.json`
+
+```
+{ version, hdScale: 2, tile: 8, sizeTable, spriteTypes,
+  shp: { type1: { atk, frameCount, frames: [ { i, p: [...] } ] } },
+  seq: { type1: { animCount, anims: [ { i, f, d, o, loop, impactAt } ] } },
+  warnings }
+```
+
+* `frames[].p` — flat, **8 numbers per part**:
+  `[dx, dy, sx, sy, w, h, flipBits, sizeIndex]`, all in original SPR pixels.
+  `flipBits`: 1 = mirror horizontally, 2 = mirror vertically.
+* `anims[].f` / `.d` — frame ids and durations in ms, parallel.
+* `anims[].o` — flat, 2 numbers per frame: accumulated unit displacement in
+  original SPR pixels at that frame.
+
+439 KB raw. `ShpLibrary` in `src/render/animation.ts` parses it;
+`decodedAnimationSet(library, fallback)` overlays authentic clips onto the
+pose-cell set, one `AnimName` at a time, so a sheet with partial data degrades
+gracefully instead of falling off a cliff.
+
+### 5.6 Still not done
+
 * **Pose→facing mapping is not established.** Visual inspection of band 0
   suggests column order runs side → 3/4 front → front → 3/4 back → back, then
-  further frames, but that ordering is only confirmable against `seq` data and is
-  therefore *not* asserted in the manifest. Poses are exposed by index.
+  further frames, but that ordering is only confirmable against a named `seq`
+  index, which §5.4 explains we do not have. Poses are exposed by index.
 * Event sheets 020, 041, 062, 105, 141 and `altima_second_form` are too sparse
   or too irregular for the pose detector and yield no frames.
 
 ## 6. Manifest field reference
 
 Top level: `version`, `generator`, `generatedAt`, `grid`, `notes`, `stats`,
-`sheets`, `byNumber`, `palettes`, `summons`, `portraits`, `weapons`, `warnings`.
+`animations`, `sheets`, `byNumber`, `palettes`, `summons`, `portraits`,
+`weapons`, `warnings`.
 
 Compact encodings (all documented inline in `notes`, and parsed for you by
 `SpriteAtlas`):
@@ -393,6 +611,9 @@ Compact encodings (all documented inline in `notes`, and parsed for you by
   `[bandIndex, column, x, y, w, h, feetX, feetY]` in sheet pixels, origin
   top-left. `atlas.getPoses(key)`.
 * `contentBands` / `poseBands` — `[y, height]` and `[y, height, figureCount]`.
+* `spriteType` — which SHP/SEQ pair in `assets/animations.json` animates this
+  sheet: `type1`, `mon`, `cyoko`, `arute`, or `null` for no decoded animation.
+  Derived from the measured art layout, not read from the game — see §5.4.
 * `basePalette`, `palettes[*].battle[n]`, `palettes[*].portrait[n]` — base64 of
   48 bytes (16 RGB triplets).
 

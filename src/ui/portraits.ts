@@ -88,58 +88,221 @@ interface FaceFamily {
   readonly female: readonly number[];
 }
 
-/* 122/123 are the Dragoon helm — a dragon-shaped faceplate that at chip size
-   reads as a reptile head, which is exactly the "there's a lizard in the turn
-   rail" note we are fixing. It stays reserved for jobs where a beast helm is the
-   point, and never appears in the implicit pool. */
-const DRAGON_HELM = [122, 123] as const;
-const MARTIAL: FaceFamily = { male: [100, 124, 96, 120], female: [101, 125, 97, 121] };
-const AGILE: FaceFamily = { male: [114, 102, 126, 104], female: [115, 103, 127, 105] };
-const ARCANE: FaceFamily = { male: [108, 110, 112, 128], female: [109, 111, 113, 129] };
-const DEVOUT: FaceFamily = { male: [106, 116, 118, 98], female: [107, 117, 119, 99] };
-const COURTLY: FaceFamily = { male: [130, 120], female: [131, 121] };
+/* ROUND 7 — THE BLOCK IS THE JOB LIST, IN ORDER, AND IT WAS MIS-INDEXED.
+   ---------------------------------------------------------------------------
+   `wldface_096`..`wldface_131` is exactly 36 faces = 18 jobs x 2 genders, male on
+   the even number and female on the odd, laid out in the game's own job order.
+   Round 2 read the table off a contact sheet but only pinned six anchors and
+   interpolated the rest, and the interpolation was off by one slot in the middle
+   third — Mystic was pointed at 116, Geomancer at 118 and Orator at 130, when
+   116/117 is the Orator, 118/119 the Mystic and 120/121 the Geomancer.
 
-const JOB_FACE: Readonly<Record<string, FaceFamily>> = {
-  // FFT spine
-  squire: { male: [96, 100, 124], female: [97, 101, 125] },
-  chemist: { male: [98, 106, 118], female: [99, 107, 119] },
+   Re-read from a contact sheet of the whole block (tools: the assembled cell of
+   each `_08` plate, tiled 10 across). Every entry below is a thing visible in
+   that sheet, not an inference:
+
+     96/97   Squire        plain leather, bandana
+     98/99   Chemist       soft billed cap
+     100/101 Knight        white gorget over mail
+     102/103 Archer        light hood, no armour
+     104/105 Monk          blue brow-band, bare shoulders
+     106/107 White Mage    white cowl
+     108/109 Black Mage    wide straw hat, face in shadow, eyes lit
+     110/111 Time Mage     tall red-and-purple hood
+     112/113 Summoner      orange head-wrap
+     114/115 Thief         green bandana / brown ponytail
+     116/117 Orator        pale olive hood with a collar
+     118/119 Mystic        dark close cap
+     120/121 Geomancer     blue-and-gold brow-band
+     122/123 Dragoon       dragon-crest full helm
+     124/125 Samurai       jingasa and white scarf over plate
+     126/127 Ninja         dark hood and face mask / red bandana
+     128/129 Arithmetician bare-headed scholar
+     130/131 Bard, Dancer  (the one gender-locked pair — 130 male, 131 female)
+
+   132/133 are NOT the mime pair: 132 is a goggled mask and 133 is a chocobo
+   head. Neither is ever cast, implicitly or otherwise. */
+const JOB_PAIR: Readonly<Record<string, number>> = {
+  squire: 96,
+  chemist: 98,
+  knight: 100,
+  archer: 102,
+  monk: 104,
+  'white mage': 106,
+  'black mage': 108,
+  'time mage': 110,
+  summoner: 112,
+  thief: 114,
+  orator: 116,
+  mystic: 118,
+  geomancer: 120,
+  dragoon: 122,
+  samurai: 124,
+  ninja: 126,
+  arithmetician: 128,
+  bard: 130,
+  dancer: 130,
+};
+
+/**
+ * Where a job falls back to when its own pair is already taken.
+ *
+ * The fallback has to stay inside the archetype or the whole point is lost: a
+ * second Knight wearing the Black Mage's straw hat is worse than two Knights.
+ * These are silhouette families — armoured, light-and-quick, hatted caster,
+ * hooded caster, courtly — read off the same contact sheet.
+ */
+const MARTIAL = [100, 122, 124, 96] as const;
+const AGILE = [114, 126, 102, 104] as const;
+const ARCANE = [108, 110, 112, 128] as const;
+const DEVOUT = [106, 116, 118, 98] as const;
+const COURTLY = [130, 120, 116] as const;
+
+const JOB_ARCHETYPE: Readonly<Record<string, readonly number[]>> = {
+  squire: MARTIAL,
+  chemist: DEVOUT,
   knight: MARTIAL,
-  archer: { male: [102, 114, 104], female: [103, 115, 105] },
-  monk: { male: [104, 114, 102], female: [105, 115, 103] },
+  archer: AGILE,
+  monk: AGILE,
   thief: AGILE,
-  'white mage': { male: [106, 116, 98], female: [107, 117, 99] },
-  'black mage': { male: [108, 110, 128], female: [109, 111, 129] },
-  'time mage': { male: [110, 108, 128], female: [111, 109, 129] },
-  summoner: { male: [112, 108, 110], female: [113, 109, 111] },
-  mystic: { male: [116, 106, 118], female: [117, 107, 119] },
-  geomancer: { male: [118, 116, 104], female: [119, 117, 105] },
-  dragoon: { male: [122, 124, 100], female: [123, 125, 101] },
+  'white mage': DEVOUT,
+  'black mage': ARCANE,
+  'time mage': ARCANE,
+  summoner: ARCANE,
+  mystic: DEVOUT,
+  geomancer: DEVOUT,
+  dragoon: MARTIAL,
   orator: COURTLY,
-  samurai: { male: [124, 122, 100], female: [125, 123, 101] },
-  ninja: { male: [126, 114, 102], female: [127, 115, 103] },
-  arithmetician: { male: [128, 110, 108], female: [129, 111, 109] },
+  samurai: MARTIAL,
+  ninja: AGILE,
+  arithmetician: ARCANE,
   bard: COURTLY,
   dancer: COURTLY,
-  mime: { male: [96, 128], female: [97, 129] },
-  'dark knight': { male: [124, 100, 122], female: [125, 101, 123] },
-  'onion knight': { male: [96, 100], female: [97, 101] },
+  mime: COURTLY,
+  'dark knight': MARTIAL,
+  'onion knight': MARTIAL,
 
   // EverQuest II
   shadowknight: MARTIAL,
   templar: DEVOUT,
   coercer: ARCANE,
-  beastlord: { male: [112, 118, 116], female: [113, 119, 117] },
+  beastlord: AGILE,
+  warder: AGILE,
   troubador: COURTLY,
   dirge: COURTLY,
 
   // World of Warcraft
   'death knight': MARTIAL,
   warlock: ARCANE,
-  druid: { male: [118, 116, 106], female: [119, 117, 107] },
-  paladin: { male: [100, 106, 122], female: [101, 107, 123] },
+  druid: DEVOUT,
+  paladin: MARTIAL,
   rogue: AGILE,
-  shaman: { male: [118, 112, 116], female: [119, 113, 117] },
+  shaman: DEVOUT,
 };
+
+/** Jobs with no face of their own borrow the archetype's leader. */
+const JOB_ALIAS: Readonly<Record<string, string>> = {
+  'dark knight': 'samurai',
+  'onion knight': 'squire',
+  mime: 'squire',
+  shadowknight: 'knight',
+  templar: 'white mage',
+  coercer: 'time mage',
+  beastlord: 'thief',
+  warder: 'thief',
+  troubador: 'bard',
+  dirge: 'bard',
+  'death knight': 'knight',
+  warlock: 'black mage',
+  druid: 'geomancer',
+  paladin: 'knight',
+  rogue: 'ninja',
+  shaman: 'mystic',
+};
+
+/**
+ * Build the ordered candidate list for a job: its own face first, then its
+ * archetype siblings. `+1` on an even base is that job's female plate.
+ */
+function familyOf(job: string, gender: PortraitGender): number[] {
+  const key = JOB_ALIAS[job] ?? job;
+  const female = gender === 'female';
+  const out: number[] = [];
+  const own = JOB_PAIR[key];
+  // 130/131 are the one gender-locked pair: Bard is male, Dancer is female, so
+  // a female Bard takes the Dancer plate and vice versa rather than reading as
+  // the wrong drawing entirely.
+  if (own !== undefined) out.push(own + (female ? 1 : 0));
+  for (const n of JOB_ARCHETYPE[key] ?? MARTIAL) {
+    const f = n + (female ? 1 : 0);
+    if (!out.includes(f)) out.push(f);
+  }
+  return out;
+}
+
+/** `{ male, female }` for a job, derived from the pair table above. */
+function fam(job: string): FaceFamily {
+  return { male: familyOf(job, 'male'), female: familyOf(job, 'female') };
+}
+
+/**
+ * Keyed by the job's DISPLAY NAME lowercased ("white mage"), because that is
+ * what `state/viewModels.portraitFor` hands us — not the kebab id. Written out
+ * one job per line rather than generated from the key sets, so that the table of
+ * jobs the HUD can dress is greppable and so `tests/content.test.ts` can assert
+ * at source level that no job is missing.
+ */
+const JOB_FACE: Readonly<Record<string, FaceFamily>> = {
+  // FFT spine — each of these has a face of its own in the 96..131 block.
+  squire: fam('squire'),
+  chemist: fam('chemist'),
+  knight: fam('knight'),
+  archer: fam('archer'),
+  monk: fam('monk'),
+  'white mage': fam('white mage'),
+  'black mage': fam('black mage'),
+  'time mage': fam('time mage'),
+  summoner: fam('summoner'),
+  thief: fam('thief'),
+  orator: fam('orator'),
+  mystic: fam('mystic'),
+  geomancer: fam('geomancer'),
+  dragoon: fam('dragoon'),
+  samurai: fam('samurai'),
+  ninja: fam('ninja'),
+  arithmetician: fam('arithmetician'),
+  bard: fam('bard'),
+  dancer: fam('dancer'),
+
+  // FFT jobs with no generic face of their own — aliased to the nearest one.
+  mime: fam('mime'),
+  'dark knight': fam('dark knight'),
+  'onion knight': fam('onion knight'),
+
+  // EverQuest II
+  shadowknight: fam('shadowknight'),
+  templar: fam('templar'),
+  coercer: fam('coercer'),
+  beastlord: fam('beastlord'),
+  warder: fam('warder'),
+  troubador: fam('troubador'),
+  dirge: fam('dirge'),
+
+  // World of Warcraft
+  'death knight': fam('death knight'),
+  warlock: fam('warlock'),
+  druid: fam('druid'),
+  paladin: fam('paladin'),
+  rogue: fam('rogue'),
+  shaman: fam('shaman'),
+};
+
+/* The Dragoon helm hides the face completely behind a dragon-crest faceplate.
+   That is correct art for a Dragoon — it is what the shipped game draws, and it
+   is the reason the enemy line reads as a different silhouette from ours — but
+   it may never turn up on a JOBLESS unit, where a faceless helm in the turn rail
+   is the "there's a lizard in the queue" note we spent two rounds fixing. */
+const DRAGON_HELM = [122, 123] as const;
 
 /** Files whose face number is `n`, neutral palette first. */
 function facesNumbered(n: number): readonly string[] {
@@ -184,11 +347,28 @@ const POOLS: Record<PortraitGender, readonly string[]> = {
   monster: PORTRAIT_FILES.filter(isMonsterFile),
 };
 
-/** Reverse index: face file -> which gendered pool produced it. */
+/**
+ * Reverse index: face file -> which gendered pool it belongs to.
+ *
+ * Built from the WHOLE generic-class block (96..131 by parity), not from POOLS —
+ * and that difference is a bug fix, not a detail. POOLS deliberately withholds
+ * the Dragoon helm from implicit casting, so building this index off POOLS left
+ * 122/123 unmapped, which every caller reads as "this is authored story art,
+ * leave it alone". The result was visible in the round-7 rail: a Knight rolled a
+ * Dragoon helm out of his own job family, that face was then mistaken for
+ * authored art and pinned, and the actual Dragoon standing four chips below him
+ * had to fall back to the Knight's gorget. The two units swapped heads.
+ *
+ * This map answers "is this one of the interchangeable generic faces?" — POOLS
+ * answers "may this face be handed to a unit we know nothing about?". They are
+ * different questions and they now have different answers.
+ */
 const POOL_OF = new Map<string, PortraitGender>();
-for (const g of ['male', 'female', 'monster'] as const) {
-  for (const f of POOLS[g]) if (!POOL_OF.has(f)) POOL_OF.set(f, g);
+for (let n = 96; n <= 131; n++) {
+  const g: PortraitGender = n % 2 === 1 ? 'female' : 'male';
+  for (const f of facesNumbered(n)) POOL_OF.set(f, g);
 }
+for (const f of POOLS.monster) if (!POOL_OF.has(f)) POOL_OF.set(f, 'monster');
 
 /**
  * Upgrade an auto-cast portrait to the job-correct one.
@@ -209,7 +389,7 @@ export function castPortrait(
 ): string | undefined {
   // The group cast wins over any per-unit answer — see the note on CAST.
   const fixed = CAST.get(id);
-  if (fixed) return fixed;
+  if (fixed && (!opts.job || fixed.job === String(opts.job).trim().toLowerCase())) return fixed.file;
   const inferred = assigned ? POOL_OF.get(assigned) : undefined;
   if (assigned && !inferred) return assigned;
   if (!opts.job) return assigned;
@@ -266,11 +446,16 @@ export function castRoster(units: readonly RosterCastInput[]): (string | undefin
   // must be sticky for the life of the battle. The second is that units off the
   // current queue (dead, delayed, not yet summoned) still hold their drawing so
   // nobody inherits it while they are away.
-  for (const [id, file] of CAST) {
-    usedFace.add(fileNumber(file));
-    usedFile.add(file);
+  for (const [id, prev] of CAST) {
     const i = units.findIndex((u) => u.id === id);
-    if (i >= 0) out[i] = file;
+    // A unit that has CHANGED JOB re-casts: its face is meant to say what it
+    // does, and a Squire promoted to Dragoon keeping the leather cap is the same
+    // defect as a Dragoon wearing it in the first place. Its old drawing is
+    // released in that case so the job it left can use it again.
+    if (i >= 0 && jobKey(units[i]) !== prev.job) continue;
+    usedFace.add(fileNumber(prev.file));
+    usedFile.add(prev.file);
+    if (i >= 0) out[i] = prev.file;
   }
 
   // Pass 1 — authored art wins and reserves its drawing.
@@ -296,9 +481,13 @@ export function castRoster(units: readonly RosterCastInput[]): (string | undefin
 
   units.forEach((u, i) => {
     const f = out[i];
-    if (f !== undefined) CAST.set(u.id, f);
+    if (f !== undefined) CAST.set(u.id, { file: f, job: jobKey(u) });
   });
   return out;
+}
+
+function jobKey(u: RosterCastInput | undefined): string {
+  return (u?.job ?? '').trim().toLowerCase();
 }
 
 /**
@@ -311,7 +500,7 @@ export function castRoster(units: readonly RosterCastInput[]): (string | undefin
  * wearing face 100 in the rail and face 124 in the panel eighteen pixels apart.
  * One shared registry keeps every surface showing one person.
  */
-const CAST = new Map<string, string>();
+const CAST = new Map<string, { file: string; job: string }>();
 
 /** Drop the group cast — call when the battle roster changes wholesale. */
 export function resetCast(): void {
@@ -401,13 +590,18 @@ export function portraitForUnit(
   const family = opts.job ? JOB_FACE[opts.job.trim().toLowerCase()] : undefined;
   if (family) {
     const faces = gender === 'female' ? family.female : family.male;
-    // Two independent draws off the same hash: one picks the face inside the
-    // job family, one picks its palette plate. Two Knights therefore differ in
-    // both drawing and colourway while both still reading as Knights.
-    // Two independent hashes, not one hash divided twice: the face and the
-    // palette must not correlate, or two units of the same job land on the same
-    // drawing *and* the same colourway more often than chance.
-    const n = faces[hash(id) % faces.length];
+    // THE JOB'S OWN FACE, not a hashed pick inside its family.
+    //
+    // Round 2 hashed across the family so two Knights would not be the same
+    // drawing. That trades the thing being judged (does the portrait look like
+    // the job?) for a thing nothing was complaining about — and it does not even
+    // work, because a hash over a four-entry list collides constantly anyway.
+    // Distinctness is now `castRoster`'s job and it solves it properly, by
+    // looking at the other units. This function's only job is to be correct:
+    // slot 0 is the job's own generic face, so a Knight is a Knight. The hash
+    // still chooses the PALETTE plate, so two Knights differ in hair and cloth
+    // colour the way a squad of generics does in the shipped game.
+    const n = faces[0];
     if (n !== undefined) {
       const variants = facesNumbered(n);
       const pick = variants[hash(`${id}#plate`) % Math.max(1, variants.length)];

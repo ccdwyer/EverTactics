@@ -111,8 +111,17 @@ Metric gates (`node tools/metrics.mjs <frame>`), all passing as of round 5:
    detailed, lit and sharp, so the eye has nowhere to land.
 2. **Inventory** — consumables were infinite; an agent was mid-way adding a party stock model.
    Verify with `npx vitest run tests/inventory.test.ts`.
-3. **SHP/SEQ animation data** in `assets-src/unit/*.bin` is still undecoded. Units use whole-body
-   pose cells. Decoding gives authentic FFT animation and is the largest remaining art win.
+3. **SHP/SEQ animation — PARTIALLY decoded, deliberately NOT shipped.**
+   `tools/decode-shp-seq.mjs` and `tools/preview-anim.mjs` exist and produce
+   `public/assets/animations.json` for 12 sheets. `src/render/animation.ts` can consume it.
+   **But the assembly is incomplete**: run `node tools/preview-anim.mjs` and look at
+   `tools/out/anim-knight_male-frames.png` — heads and torsos assemble, limbs and lower bodies do
+   not, and the decoder's own SHP-table fit scores top out at 0.294, i.e. it is guessing which
+   table applies. A partial figure is WORSE than a complete static pose, so nothing fetches
+   `animations.json` at runtime and units still use whole-body pose cells. Do not wire it in until
+   the preview sheet shows complete figures.
+   This remains the largest available art win; it is a real reverse-engineering problem, not a
+   plumbing one.
 4. **22 sprite sheets in the rip are broken stubs** (see docs/ASSETS.md §1.2). Dark Knight and
    Onion Knight are re-pointed at Knight/Squire sheets; `chocobo` has zero whole-body frames.
 

@@ -878,8 +878,13 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
   // bright as its shoulders always reads as a sticker. Now genuinely confined to
   // the legs: spriteUp is normalised to the figure rather than to the cell, so
   // the term dies at roughly the waist instead of above the head.
+  // Gated on uGrounded like the contact ramp: light bouncing off the floor into
+  // a unit's shins is a property of the unit being *on* the floor. A figure at
+  // the top of a hop that keeps its ground bounce is carrying a lighting cue for
+  // a surface it is no longer touching, which is the same class of error as a
+  // contact shadow that flies with the caster.
   float bounceK = 1.0 - smoothstep(0.0, 0.42, spriteUp);
-  spriteShade += uBounceColor * (uBounceStrength * bounceK * bounceK);
+  spriteShade += uBounceColor * (uBounceStrength * bounceK * bounceK * uGrounded);
 
   // ── contact occlusion in the art itself ────────────────────────────────────
   // The single strongest grounding cue there is, and unlike the ground decal not

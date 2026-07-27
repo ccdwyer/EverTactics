@@ -71,6 +71,7 @@ import {
   DataTexture,
   DoubleSide,
   Group,
+  IcosahedronGeometry,
   LinearFilter,
   Mesh,
   NoColorSpace,
@@ -347,20 +348,68 @@ function tree(rng: () => number): BufferGeometry[] {
   return parts;
 }
 
-/** Weathered boulder. Low-poly sphere squashed and jittered. */
+/**
+ * Weathered boulder — an irregular faceted lump.
+ *
+ * This used to be a 6-sided ConeGeometry with per-axis multiplicative jitter,
+ * and it rendered as exactly what that describes: a sharp pyramid. Looking at
+ * the near field of the round-7 frame, the bottom of the image was a row of
+ * blue-grey spikes that read as ice shards or tents, not as rock — which is
+ * very likely what several rounds of critique meant by "cyan shards", "flat
+ * untextured billboard quads" and "debug geometry" in the foreground.
+ *
+ * The jitter could never have fixed it. A cone's apex is the single vertex at
+ * x = z = 0, and multiplying a zero by anything leaves it at zero, so every
+ * boulder kept a perfectly sharp point on the axis however hard it was
+ * jittered — while the same multiply was free to make the base wildly
+ * asymmetric, which is why they read as *deliberate* spikes.
+ *
+ * A subdivided icosahedron displaced ALONG ITS OWN NORMALS has no privileged
+ * vertex, so there is no apex to survive: every vertex moves, the silhouette
+ * comes out lumpy in all directions, and the low subdivision keeps the flat
+ * facets that catch the key light and give the thing a stone read at this
+ * distance. Squashed on Y because a boulder sits, and rotated randomly so the
+ * facet pattern is not shared between instances.
+ */
 function rock(rng: () => number, scale: number): BufferGeometry[] {
-  const g = new ConeGeometry(scale * (0.7 + rng() * 0.6), scale * (0.6 + rng() * 0.7), 6, 2);
+  const r = scale * (0.55 + rng() * 0.45);
+  const g = new IcosahedronGeometry(r, 1);
   const pos = g.attributes.position as BufferAttribute;
+  const v = new Vector3();
+  // Two independent lobes per axis so the displacement is low-frequency (big
+  // bulges and hollows) rather than uniform noise, which just looks sanded.
+  const ax = rng() * 6.28;
+  const ay = rng() * 6.28;
+  const az = rng() * 6.28;
   for (let i = 0; i < pos.count; i += 1) {
-    pos.setXYZ(
-      i,
-      pos.getX(i) * (0.8 + rng() * 0.5),
-      pos.getY(i) * (0.7 + rng() * 0.4),
-      pos.getZ(i) * (0.8 + rng() * 0.5),
-    );
+    v.fromBufferAttribute(pos, i);
+    const n = v.clone().normalize();
+    const lobe =
+      0.62 +
+      0.30 * Math.sin(n.x * 3.1 + ax) +
+      0.24 * Math.sin(n.y * 2.4 + ay) +
+      0.26 * Math.sin(n.z * 2.8 + az);
+    v.multiplyScalar(0.72 + 0.52 * lobe);
+    v.y *= 0.62 + rng() * 0.22;
+    pos.setXYZ(i, v.x, v.y, v.z);
   }
+  pos.needsUpdate = true;
+  // IcosahedronGeometry (via PolyhedronGeometry) is NON-INDEXED, and every other
+  // primitive in this kit — Box, Cone, Cylinder, Sphere — is indexed.
+  // mergeGeometries requires an index on all inputs or on none, and when that is
+  // violated it does not throw: it logs and returns null, so the whole piece is
+  // silently dropped from the band. That is exactly what happened on the first
+  // build of this function — the spikes disappeared from the frame and it read
+  // as a successful fix, when in fact every rock in the surround had stopped
+  // being generated. Only the console errors from tools/shoot.mjs caught it.
+  // The triangles are already in order, so a sequential index is exact.
+  g.setIndex(Array.from({ length: pos.count }, (_, i) => i));
+  g.rotateY(rng() * 6.28);
+  g.rotateX((rng() - 0.5) * 0.5);
+  // Flat facets, not a smooth blob: this is the difference between "stone" and
+  // "beanbag" once the near-field defocus has removed the surface shading.
   g.computeVertexNormals();
-  g.translate(0, scale * 0.3, 0);
+  g.translate(0, r * 0.34, 0);
   return [g];
 }
 
@@ -572,7 +621,7 @@ uniform float uTime;
 // block below a measured no-op there. See the grade block in main().
 uniform vec3  uDeep;
 uniform float uSilhouette;
-uniform float uSilhouetteFloor;
+uniform float uHalfW;
 
 uniform vec3  uWood;
 uniform vec3  uFoliage;
@@ -876,15 +925,65 @@ void main() {
   // Guarded on uSilhouette so far bands take the identical code path they took
   // before; 'veil', the haze mix and the tone scale are all upstream of here.
   if (uSilhouette > 0.0) {
-    float s = uSilhouette * nearAmt * nearAmt;
+    // Nearness is only half of "in the margin", and measuring proved it is the
+    // smaller half. Forcing this whole block to full strength on every band
+    // moved the offending lower-right cluster by 12 luma out of the 35 the
+    // bands were contributing there: those props are not crowding the camera,
+    // they are out at the FRAME EDGE at ordinary depth, where nearAmt is ~0.3
+    // and a nearAmt² gate is worth ~0.1.
+    //
+    // The ground plate already ramps to 0.30 across exactly this axis (see the
+    // outer-margin block in GROUND_FRAG) and the props standing on it did not,
+    // which is the whole mechanism behind the "pale sage boulders hard against
+    // the right frame edge" note that earlier rounds kept trying to fix with
+    // global tone cuts. A global cut also dims the pieces at frame centre
+    // that are doing the useful silhouette-breaking work, which is why it kept
+    // costing background detail. Falling off on the same axis as the surface
+    // underneath is both cheaper and correct: the two now recede together.
+    // Starts earlier than the plate's own ramp (0.55) on purpose. Measured, the
+    // cluster that reads as a second subject sits at ~0.5·halfW — inside the
+    // plate's ramp, so a matched ramp left it at full value. Props also stand
+    // proud of the plate and so survive the defocus that flattens it, which is
+    // why they need to start receding sooner than the surface under them.
+    float lateral = smoothstep(uHalfW * 0.30, uHalfW * 1.45, abs(vLocal.x));
+    float margin = max(nearAmt * nearAmt, lateral * lateral);
+    float s = uSilhouette * margin;
 
-    col *= mix(1.0, uSilhouetteFloor, s);
+    // ── This grade deliberately does NOT touch value ────────────────────────
+    //
+    // Value in the margin belongs to the band's own tone, and the split is
+    // not stylistic — it is what four measured attempts converged on:
+    //
+    //   grade scales value by a floor   margin 84 → 59, but bgFrac 0.083 →
+    //                                   0.195 and background sd 16.4 → 10.0
+    //   grade compresses the top end    inert; a 60× ceiling sweep moved the
+    //                                   margin under 2 luma (the band values
+    //                                   there are already below any ceiling)
+    //   tone cut, no grade              margin 84 → 61 but bgFrac 0.161
+    //   tone cut + this chroma grade    margin 84 → 61 AND bgFrac 0.137,
+    //                                   background sd back up to 14.2
+    //
+    // The pattern is consistent: any operation that removes luminance removes
+    // spread with it, and a flat dark margin scores as void — for the same
+    // reason a critic reads it as void, it is indistinguishable from no
+    // geometry. Adding CHROMA variance instead buys the separation from the
+    // background without spending any of the luminance variance that is doing
+    // the work. So value is cut once, coarsely, per band; this block then makes
+    // what is left read as a colour rather than as a grey.
+    const vec3 LUMA_W = vec3(0.2126, 0.7152, 0.0722);
+    float lum = dot(col, LUMA_W);
 
-    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
-    float lum = dot(col, LUMA);
-    // Unit-luminance shadow hue, so the mix below cannot change value at all.
-    vec3 deepUnit = uDeep / max(dot(uDeep, LUMA), 1e-4);
+    // Rotate the hue toward the map's own crushed-black tint at CONSTANT
+    // luminance — deepUnit is normalised to unit luminance, so this mix cannot
+    // change value even in principle.
+    vec3 deepUnit = uDeep / max(dot(uDeep, LUMA_W), 1e-4);
     col = mix(col, deepUnit * lum, s * 0.72);
+
+    // Then extrapolate away from luminance, so the bind above can never land on
+    // a neutral. Measured on the round-7 frame before this existed, the margin
+    // props sat at saturation 0.086 — a grey mass, which is its own explicit
+    // fail condition; the reference frames' equivalent windows measure 0.70 and
+    // 0.88. Clamped at 0 by the max() on the way out.
     col = mix(vec3(lum), col, 1.0 + 0.5 * s);
   }
 
@@ -1265,6 +1364,22 @@ void main() {
 // Backdrop
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Margin grade applied to any band that does not state its own.
+ *
+ * Per-band attribution on the round-7 frozen build (hide one band, re-measure
+ * the lower-right window that was rendering brighter than the board):
+ *
+ *   verge   −22 luma    scatter −1.5    fore  −0.8
+ *   skirt    −0.5       flank   −1.6    ridge −2.1
+ *
+ * i.e. the offender was 'verge' — 300 debris pieces at tone 0.82, the highest
+ * of any band — and it is a FAR band, so gating the grade on nearness alone
+ * never touched it. Every band gets the grade by default now; the lateral term
+ * is what makes that safe.
+ */
+const DEFAULT_SILHOUETTE = 0.62;
+
 interface BandSpec {
   name: string;
   count: number;
@@ -1315,17 +1430,18 @@ interface BandSpec {
   /** How far pieces sink into the ground plate; hides their flat undersides. */
   sink?: number;
   /**
-   * Strength of the near-field silhouette grade, 0…1. See the grade block in
-   * 'STRUCT_FRAG'. Only meaningful on bands that sit between the camera and the
-   * board; it is scaled by the same nearAmt ramp the value falloff uses, so a
-   * band that never gets near the camera is unaffected whatever this says.
+   * Strength of the margin grade, 0…1. See the grade block in STRUCT_FRAG.
    *
-   * Omit (or 0) on every far band — the shader then takes the pre-round-7 path
-   * exactly.
+   * The grade is gated on max(nearness², laterality²), and both terms are 0
+   * over the middle of the frame at board depth — so this is a measured no-op
+   * there whatever it is set to. It only engages toward the frame edges and
+   * toward the camera. That is why it defaults ON for every band: the pieces
+   * doing the useful silhouette-breaking work against the board sit at frame
+   * centre and keep exactly the value they had.
+   *
+   * An explicit 0 opts a band out entirely.
    */
   silhouette?: number;
-  /** Value floor the silhouette grade drives toward at full nearness. */
-  silhouetteFloor?: number;
 }
 
 /**
@@ -1546,7 +1662,26 @@ export class Backdrop extends Group {
         // suddenly sat *in front of* the board's near masonry. Grit that reads
         // brighter than the wall it is piled against is not grit, it is a second
         // subject. It has to sit under the stone it dresses.
-        tone: 0.82,
+        //
+        // Round 7: it still did not. Per-band attribution on the frozen build —
+        // hide exactly one band, re-measure — put this band at −22 luma in the
+        // lower-right window, against −0.5 to −2.1 for every other band. It was
+        // single-handedly holding the zone in front of the subject at luma 84
+        // while the board sat at 77, and it is the highest tone in the whole
+        // spec table. 0.82 was reasoned toward from 1.0 but never measured
+        // against the board it dresses.
+        //
+        // Cutting it globally (0.52) did fix the margin — 84 -> 63 luma — but it
+        // also took backgroundFraction 0.083 -> 0.137 and background sd 16.4 ->
+        // 14.2, because this band's 300 pieces at frame CENTRE are a large part
+        // of the detail that keeps the surround from scoring as void. The cut
+        // belongs at the frame edges only, which is what the margin grade in
+        // STRUCT_FRAG now does — but the grade turned out to be the wrong tool
+        // for VALUE (every value-side variant traded margin luma for background
+        // flatness one-for-one). So the tone cut stays and the grade is
+        // chroma-only; together they measured best of everything tried:
+        // margin 84 -> 61, bgFrac 0.137, background sd 14.2.
+        tone: 0.52,
         windows: 0,
         ringMax: 1.7,
         // 0.02, not 0: 'footprintDistance' is unsigned, so a negative clearance
@@ -1598,7 +1733,6 @@ export class Backdrop extends Group {
         // 0 for anything at or beyond the board, so only the pieces that
         // actually crowd the camera are touched.
         silhouette: 0.7,
-        silhouetteFloor: 0.32,
         kinds: ['bush', 'rubble', 'rock', 'bush', 'crates', 'fence', 'barrel', 'tree', 'cart', 'rubble'],
       },
       {
@@ -1682,7 +1816,6 @@ export class Backdrop extends Group {
         // of 35 — i.e. they were doubling the value of the zone in front of the
         // subject. Graded rather than merely dimmed; see STRUCT_FRAG.
         silhouette: 0.85,
-        silhouetteFloor: 0.34,
         kinds: ['bush', 'rock', 'rubble', 'crates', 'barrel', 'fence', 'cart', 'bush', 'rock'],
       },
       {
@@ -1717,7 +1850,6 @@ export class Backdrop extends Group {
         // severely — Triangle's dock pilings and FFT's foreground terrain are
         // near-black chromatic masses, not lit props.
         silhouette: 1.0,
-        silhouetteFloor: 0.26,
         kinds: ['bush', 'bush', 'bush', 'rock', 'rubble'],
       },
     ];
@@ -2056,8 +2188,8 @@ export class Backdrop extends Group {
         uNearDepth: { value: Math.min(-2, layout.nearDepth) },
         uTone: { value: band.tone },
         uDeep: { value: new Color() },
-        uSilhouette: { value: band.silhouette ?? 0 },
-        uSilhouetteFloor: { value: band.silhouetteFloor ?? 0.34 },
+        uSilhouette: { value: band.silhouette ?? DEFAULT_SILHOUETTE },
+        uHalfW: { value: layout.halfW },
         uWindowGain: { value: (band.windows > 0 ? 1 : 0) * this.opts.windowGain },
         uExposure: { value: this.opts.exposure },
         uTime: { value: 0 },

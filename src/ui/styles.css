@@ -1044,7 +1044,13 @@
 }
 .et-turnorder__label-text {
   font-family: var(--font-display);
-  font-size: 9.5px;
+  /* 9.5 -> 11.5. Measured off the shipped frame, "Combat Timeline" sets at a
+     ~14px cap height on a 1080 frame; at 9.5px uppercase Cinzel ours was ~7px,
+     i.e. half the reference, and the rail read as a column with a footnote
+     rather than as a titled instrument. Now that the rail's plate is gone the
+     header is also the only thing binding the column to the frame corner, so it
+     has to carry some weight. */
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.15em;
   text-transform: uppercase;

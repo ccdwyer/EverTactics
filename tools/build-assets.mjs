@@ -36,6 +36,60 @@ const SUMMON_DIR = path.join(ASSETS, 'summons');
 const WEAPON_DIR = path.join(ASSETS, 'weapons');
 const OUT_FILE = path.join(ASSETS, 'manifest.json');
 
+/**
+ * Sheets that are drawn whole rather than assembled from parts carry complete
+ * figures across many bands (docs/ASSETS.md §1.4); those are the MON.SHP units.
+ * Six or more pose bands is the measured separator — human sheets top out at
+ * five, monsters run to nine.
+ */
+const MONSTER_POSE_BANDS = 6;
+
+/** Minimum band-0 pose pitch, in HD pixels, for MON.SHP's 48px boxes to fit. */
+const MON_PITCH_HD = 88;
+
+/**
+ * Pick the SHP/SEQ sprite type for a sheet.
+ *
+ * Honest about its limits: the real mapping is a per-unit field in the game's
+ * unit table, which this rip does not include. What is available is the art
+ * layout, and that separates the four structurally distinct classes — chocobo,
+ * whole-drawn monster, the two Altima forms, and everything human. It does NOT
+ * separate TYPE1 from TYPE2, which share a container layout and produce
+ * near-identical assemblies on the human sheets tested, so all humans get type1.
+ */
+function resolveSpriteType(entry) {
+  if (entry.broken) return null;
+  if (/chocobo/.test(entry.key)) return 'cyoko';
+  if (entry.key === 'altima_second_form') return 'arute';
+  if (entry.key === 'altima_first_form') return 'kanzen';
+  // Cutscene sheets are pose-only: half height, no parts region to assemble from.
+  if (/^event_/.test(entry.key)) return null;
+  if ((entry.poseBands?.length ?? 0) >= MONSTER_POSE_BANDS) {
+    // MON.SHP addresses the sheet with absolute 48x48 boxes, so it only fits a
+    // sheet whose figures are actually laid out on a 48px original-pixel pitch
+    // (96px in the HD rip). Behemoth measures 92-100; goblin measures 62-68 and
+    // would be assembled with a neighbouring figure bleeding into every box.
+    // Those sheets keep the pose-frame fallback, which they have plenty of.
+    const pitch = posePitchHd(entry);
+    return pitch !== null && pitch >= MON_PITCH_HD ? 'mon' : null;
+  }
+  return 'type1';
+}
+
+/** Median horizontal spacing between whole-body poses in band 0, in HD pixels. */
+function posePitchHd(entry) {
+  const xs = [];
+  for (let i = 0; i + 8 <= entry.poses.length; i += 8) {
+    if (entry.poses[i] === 0) xs.push(entry.poses[i + 2]);
+  }
+  if (xs.length < 3) return null;
+  xs.sort((a, b) => a - b);
+  const gaps = [];
+  for (let i = 1; i < xs.length; i++) gaps.push(xs[i] - xs[i - 1]);
+  gaps.sort((a, b) => a - b);
+  return gaps[gaps.length >> 1];
+}
+
 /** Sprite sheet cell geometry. HD sheets are 2x the original 32px FFT cell. */
 const CELL = 64;
 const SHEET_W = 512;
@@ -806,6 +860,14 @@ function main() {
     };
   }
 
+  // Which SHP/SEQ sprite type each sheet animates with. The authoritative
+  // assignment lives in the game's unit table, which is not part of this rip, so
+  // it is derived from the measured art layout instead — see docs/ASSETS.md §5.4
+  // for exactly how far that gets us.
+  for (const entry of Object.values(sheets)) {
+    entry.spriteType = resolveSpriteType(entry);
+  }
+
   const manifest = {
     version: 2,
     generator: 'tools/build-assets.mjs',
@@ -823,6 +885,10 @@ function main() {
         'SHP-assembled body parts. Monster sheets contain no whole-body frames at all.',
       cellBoxes: 'Flat array, 6 numbers per occupied cell: [cellIndex, x, y, w, h, pixels], x/y relative to the cell origin.',
       poseArray: 'Flat array, 8 numbers per whole-body pose: [bandIndex, column, x, y, w, h, feetX, feetY] in sheet pixels (origin top-left).',
+      spriteType:
+        'SHP/SEQ sprite type for public/assets/animations.json. Derived from the measured art ' +
+        'layout, not read from the game: type1 vs type2 is NOT distinguishable from this rip and ' +
+        'every human sheet is assigned type1.',
       occupancy: 'Hex string, 1 nibble per 4 cells, bit i of the nibble = cell (i) of that group, row-major.',
     },
     stats: {
@@ -831,6 +897,14 @@ function main() {
       summons: Object.keys(summons).length,
       portraits: Object.keys(portraits).length,
       weapons: Object.keys(weapons).length,
+    },
+    animations: {
+      url: 'assets/animations.json',
+      generator: 'tools/decode-shp-seq.mjs',
+      note:
+        'Decoded SHP/SEQ frame assembly and animation sequences. A sheet uses the SHP/SEQ pair ' +
+        'named by its `spriteType`; sheets with spriteType null have no decoded animation and ' +
+        'fall back to the whole-body pose frames in `poses`.',
     },
     sheets,
     byNumber,

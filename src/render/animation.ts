@@ -127,6 +127,27 @@ export function resolveView(facing: Facing, cameraYaw: number): ViewSelection {
 // Clips
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * One blit in an authentic SHP frame: a rectangle of the sheet, placed at a
+ * signed offset from the unit's origin. Mirrors the record 'tools/decode-shp-seq.mjs'
+ * emits into 'public/assets/animations.json' — 'i8 dx, i8 dy, u16 desc', unpacked.
+ *
+ * All values are in **sheet texels at 1× (the original 256×512 SPR space)**; the
+ * renderer scales by the sheet's 'hdScale' when sampling an HD sheet.
+ */
+export interface ShpPart {
+  /** Placement offset from the unit origin, +x right, +y down. */
+  dx: number;
+  dy: number;
+  /** Source rect on the sheet. */
+  sx: number;
+  sy: number;
+  w: number;
+  h: number;
+  flipX?: boolean;
+  flipY?: boolean;
+}
+
 /** One drawn frame: a flat cell index into the sheet's frame grid. */
 export interface AnimFrame {
   /** 'row * columns + column' in the sheet's frame grid. */
@@ -136,6 +157,13 @@ export interface AnimFrame {
   /** Per-frame pixel nudge, in sheet texels. */
   offsetX?: number;
   offsetY?: number;
+  /**
+   * Authentic SHP frame assembly, when the sheet has decoded animation data.
+   * Present *instead of* 'cell' being meaningful: a renderer that understands
+   * parts must draw these and ignore 'cell'; one that does not can keep using
+   * 'cell' and get the pose-frame fallback. See 'ShpLibrary'.
+   */
+  parts?: readonly ShpPart[];
 }
 
 /**
@@ -950,4 +978,250 @@ export class PathWalker {
     this.sample.progress = this.totalDistance > 0 ? this.travelled / this.totalDistance : 1;
     return true;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Decoded SHP/SEQ animation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 'ShpPart' is declared above, next to 'AnimFrame'. Its coordinates are in
+ * **original 256x488 SPR pixels**: the HD rip is an exact 2x upscale of that
+ * canvas (docs/ASSETS.md §1.1), so a renderer sampling the HD texture
+ * multiplies every field by 'DecodedAnimations.hdScale'.
+ *
+ * '(sx, sy)' is the source rect's top-left on the sheet; '(dx, dy)' is where
+ * that rect's top-left lands relative to the unit's origin — the point the game
+ * places on the tile surface. Both are negative for a standing human, i.e. the
+ * origin sits low and central inside the figure.
+ */
+
+/** One SHP frame: the parts that compose it, drawn in order. */
+export interface ShpFrame {
+  readonly index: number;
+  readonly parts: readonly ShpPart[];
+}
+
+/** One SEQ animation reduced to what a player needs. */
+export interface SeqClip {
+  readonly index: number;
+  /** SHP frame ids, in play order. */
+  readonly frames: readonly number[];
+  /** Milliseconds per frame, parallel to 'frames'. */
+  readonly durations: readonly number[];
+  /** Accumulated unit displacement at each frame, in original SPR pixels. */
+  readonly offsets: readonly (readonly [number, number])[];
+  readonly loop: boolean;
+  /** Frame at which the blow connects, or null if the clip never strikes. */
+  readonly impactAt: number | null;
+}
+
+/** The shape of 'public/assets/animations.json'. */
+export interface DecodedAnimations {
+  version: number;
+  hdScale: number;
+  tile: number;
+  sizeTable: Record<string, [number, number]>;
+  spriteTypes: Record<string, { shp: string; seq: string }>;
+  shp: Record<string, { atk: number; frameCount: number; frames: { i: number; p: number[] }[] }>;
+  seq: Record<
+    string,
+    { animCount: number; anims: { i: number; f: number[]; d: number[]; o: number[]; loop: boolean; impactAt: number | null }[] }
+  >;
+}
+
+/** Numbers per part in the packed 'animations.json' encoding. */
+const PART_STRIDE = 8;
+
+/**
+ * A decoded SHP + SEQ pair, ready to play.
+ *
+ * Constructed from 'animations.json' rather than owning any fetching, so it
+ * stays unit-testable and this file keeps its no-three.js, no-DOM property.
+ */
+export class ShpLibrary {
+  private readonly framesById = new Map<number, ShpFrame>();
+  private readonly clipsByIndex = new Map<number, SeqClip>();
+
+  private constructor(
+    readonly shpKey: string,
+    readonly seqKey: string,
+    readonly hdScale: number,
+    frames: ShpFrame[],
+    clips: SeqClip[],
+  ) {
+    for (const f of frames) this.framesById.set(f.index, f);
+    for (const c of clips) this.clipsByIndex.set(c.index, c);
+  }
+
+  /**
+   * Build a library for one sprite type. Returns null when the requested type
+   * is absent, so a caller can fall back to pose cells without special-casing.
+   */
+  static fromJson(data: DecodedAnimations, shpKey: string, seqKey: string): ShpLibrary | null {
+    const shp = data.shp?.[shpKey];
+    const seq = data.seq?.[seqKey];
+    if (!shp || !seq) return null;
+
+    const frames: ShpFrame[] = shp.frames.map((f) => {
+      const parts: ShpPart[] = [];
+      for (let o = 0; o + PART_STRIDE <= f.p.length; o += PART_STRIDE) {
+        const flags = f.p[o + 6] ?? 0;
+        parts.push({
+          dx: f.p[o] ?? 0,
+          dy: f.p[o + 1] ?? 0,
+          sx: f.p[o + 2] ?? 0,
+          sy: f.p[o + 3] ?? 0,
+          w: f.p[o + 4] ?? 0,
+          h: f.p[o + 5] ?? 0,
+          flipX: (flags & 1) === 1,
+          flipY: (flags & 2) === 2,
+        });
+      }
+      return { index: f.i, parts };
+    });
+
+    const clips: SeqClip[] = seq.anims.map((a) => {
+      const offsets: [number, number][] = [];
+      for (let i = 0; i < a.f.length; i++) offsets.push([a.o[i * 2] ?? 0, a.o[i * 2 + 1] ?? 0]);
+      return { index: a.i, frames: a.f, durations: a.d, offsets, loop: a.loop, impactAt: a.impactAt };
+    });
+
+    return new ShpLibrary(shpKey, seqKey, data.hdScale ?? 2, frames, clips);
+  }
+
+  get frameCount(): number {
+    return this.framesById.size;
+  }
+
+  get clipCount(): number {
+    return this.clipsByIndex.size;
+  }
+
+  frame(id: number): ShpFrame | null {
+    return this.framesById.get(id) ?? null;
+  }
+
+  clip(index: number): SeqClip | null {
+    return this.clipsByIndex.get(index) ?? null;
+  }
+
+  /**
+   * Expand a SEQ animation into drawable frames. Frames the SHP does not define
+   * are dropped rather than substituted — a missing frame is a data problem and
+   * silently drawing the wrong body is worse than dropping one tick.
+   */
+  assemble(index: number): AnimFrame[] {
+    const clip = this.clipsByIndex.get(index);
+    if (!clip) return [];
+    const out: AnimFrame[] = [];
+    for (let i = 0; i < clip.frames.length; i++) {
+      const id = clip.frames[i];
+      const frame = id === undefined ? undefined : this.framesById.get(id);
+      if (!frame) continue;
+      const [ox, oy] = clip.offsets[i] ?? [0, 0];
+      out.push({ cell: 0, parts: frame.parts, offsetX: ox, offsetY: oy });
+    }
+    return out;
+  }
+
+  /** True when every frame a clip references exists in the SHP. */
+  isComplete(index: number): boolean {
+    const clip = this.clipsByIndex.get(index);
+    if (!clip || clip.frames.length === 0) return false;
+    return clip.frames.every((f) => this.framesById.has(f));
+  }
+}
+
+/**
+ * SEQ animation index for each 'AnimName', for the human sprite types.
+ *
+ * **This mapping is inferred, not documented.** FFHacktics documents the SEQ
+ * container and instruction set but the wiki's "Unit Animation Index" page —
+ * which would name each slot — is not reachable and is not archived. What is
+ * below was read off the decoded data itself:
+ *
+ * * 6 loops frames 10,9,10,11,12,13,12 with waits 6,8,10,8 — a symmetric
+ *   seven-frame gait. 8 is the same frame list at waits 2,4,6,4 (faster) and 10
+ *   at 10,12,14,12 (slower), which is what a walk / run / slow-walk triple looks
+ *   like. Verified visually: 'tools/preview-anim.mjs --anim 6,7,8,9,10,11'
+ *   renders a knight taking steps.
+ * * 12 holds a single frame and alternates MoveUp1 / MoveDown1 — a one-pixel
+ *   breathing bob, i.e. idle.
+ * * 42 and 43 step monotonically through frames 1-8, which are the eight
+ *   standing rotations, so they are turn-in-place rather than a named clip.
+ *
+ * Everything else is left null: the clips exist and are playable by index, but
+ * naming them would be a guess, and a wrong 'attack' is worse than a procedural
+ * one. Consumers get the fallback curve for any name that maps to null.
+ */
+export const SEQ_ANIM_INDEX: Readonly<Record<AnimName, number | null>> = {
+  idle: 12,
+  walk: 6,
+  run: 8,
+  attack: null,
+  cast: null,
+  charge: null,
+  item: null,
+  hurt: null,
+  ko: null,
+  crystal: null,
+  victory: null,
+  jump: null,
+  land: null,
+  defend: null,
+  sing: null,
+  dance: null,
+  aim: null,
+  throw: null,
+  punch: null,
+  kick: null,
+};
+
+/**
+ * Overlay decoded clips onto a fallback set.
+ *
+ * Any 'AnimName' with a mapped, complete SEQ animation gets authentic drawn
+ * frames and 'procedural: false'; everything else keeps the pose-cell clip and
+ * its tuned pose curve. This is deliberately a merge rather than a replacement
+ * so a sheet with partial data degrades one clip at a time instead of falling
+ * off a cliff.
+ *
+ * The same assembled frames are used for every view: an FFT sheet draws each
+ * facing as its own SHP frame, and which SEQ slot holds which facing is exactly
+ * the thing 'SEQ_ANIM_INDEX' does not yet resolve. 'resolveView' therefore still
+ * does the mirroring, as it does for the pose-cell path.
+ */
+export function decodedAnimationSet(
+  library: ShpLibrary,
+  fallback: AnimSet,
+  mapping: Readonly<Record<AnimName, number | null>> = SEQ_ANIM_INDEX,
+): AnimSet {
+  const out: Record<string, AnimClip> = { ...fallback };
+  for (const [name, index] of Object.entries(mapping) as [AnimName, number | null][]) {
+    if (index === null || !library.isComplete(index)) continue;
+    const clip = library.clip(index);
+    const frames = library.assemble(index);
+    if (!clip || frames.length === 0) continue;
+    const base = fallback[name];
+    out[name] = {
+      ...base,
+      views: {
+        front: frames,
+        frontQuarter: frames,
+        side: frames,
+        backQuarter: frames,
+        back: frames,
+      },
+      durations: clip.durations,
+      loop: clip.loop,
+      impactAt:
+        clip.impactAt !== null && frames.length > 0
+          ? Math.min(1, clip.impactAt / frames.length)
+          : base.impactAt,
+      procedural: false,
+      pose: undefined,
+    };
+  }
+  return out as AnimSet;
 }

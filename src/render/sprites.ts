@@ -71,6 +71,27 @@
  *     on. That is the round-6 change and it is the one that moved the axis.
  *  3. **Contact darkening** — a tight multiply patch on the tile, covering the
  *     hairline the shadow map cannot resolve at the feet.
+ *
+ *     **Round 7 rebuilt this and it is where the axis was actually losing.**
+ *     Two independent faults, both found by rendering the decal's own 'occ'
+ *     term as a signal colour and shooting the board:
+ *
+ *       a. The lobes were sized in tiles and never checked in *pixels*. A
+ *          0.125-tile gaussian in the depth axis is, at 30° pitch and this
+ *          zoom, about three and a half device pixels of visible ground. The
+ *          mark was not subtle; it was below the noise floor.
+ *       b. The quad is horizontal and this map is not. Anything reaching past
+ *          the edge of the 1-tile block a unit stands on carried on through
+ *          open air and depth-tested against terrain a level below, so the
+ *          "contact shadow" drew a detached hard-edged patch most of a
+ *          body-height away from the unit. The decal is now windowed to the
+ *          occupied tile's footprint in world XZ ('uTileHalf'), which is the
+ *          only region guaranteed to be one planar face at the quad's own
+ *          elevation.
+ *
+ *     Measured after: ground at the feet reads 1.5–1.6x darker than the same
+ *     ground with the decal off, against 1.45–2.0x measured on
+ *     'refs/curated/fft/press-311722-…-mediakit-03'.
  *  4. **Exposure parity.** A billboard presents a near-perfect normal to any
  *     light it faces and therefore over-collects direct light compared with the
  *     terrain around it; 'uDirectGain' discounts that back down.
@@ -773,7 +794,7 @@ const SHADOW_SIZE = TILE_SIZE * 1.6;
  * 2.0x drop (129 → 64) on lit ground; bloom and the DOF resolve downstream lift
  * a soft mark back up, so the source has to be a little past the target.
  */
-const SHADOW_DENSITY = 0.74;
+const SHADOW_DENSITY = 0.84;
 
 /**
  * Procedural grounding decal.
@@ -891,8 +912,8 @@ function createShadowDecalMaterial(): THREE.ShaderMaterial {
         // the density is spent where it can be seen.
         float fwd = -q.y;
         float yc = fwd - 0.06;
-        float coreSy = yc > 0.0 ? 0.30 : 0.13;
-        vec2 c = vec2(q.x / 0.32, yc / coreSy);
+        float coreSy = yc > 0.0 ? 0.27 : 0.12;
+        vec2 c = vec2(q.x / 0.29, yc / coreSy);
         float core = exp(-dot(c, c));
 
         // Skirt: the 1.45x band. Wider and weaker, carrying the mark out to the
