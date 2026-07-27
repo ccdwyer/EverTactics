@@ -38,33 +38,37 @@ const crop = A.crop || 0.6
  */
 
 // Triangle Strategy frames (same title).
+// Twelve, not six. The first two runs put the test arm at 6 pairs, where 5/6 -> 3/6
+// is only two judgements and p = 0.32 against a pooled rate — readable as a
+// position between the controls, but not as a delta. Doubling the test arm roughly
+// halves its standard error, which is what this measurement now needs.
 const TRI = [
   'press_002_gematsu_1920x1080.jpg', 'press_004_gematsu_1920x1080.jpg',
   'official_009_steam.jpg', 'official_033_se_screenshot.jpg',
   'official_003_steam.jpg', 'official_019_se_screenshot.jpg',
+  'official_001_steam.jpg', 'official_007_steam.jpg',
+  'official_008_steam.jpg', 'official_016_nintendo.jpg',
+  'official_021_se_screenshot.jpg', 'official_031_se_screenshot.jpg',
 ]
 // official_029 is Vanillaware's Unicorn Overlord, not Triangle Strategy — a
 // different shipped title, verified visually. That is what makes it a control.
 const OTHER = ['official_029_se_screenshot.png']
 
 const PAIRS = [
-  // control-same: Triangle vs Triangle
-  { kind: 'control-same', a: `refs/curated/triangle/${TRI[0]}`, b: `refs/curated/triangle/${TRI[1]}` },
-  { kind: 'control-same', a: `refs/curated/triangle/${TRI[2]}`, b: `refs/curated/triangle/${TRI[3]}` },
-  { kind: 'control-same', a: `refs/curated/triangle/${TRI[4]}`, b: `refs/curated/triangle/${TRI[5]}` },
-  { kind: 'control-same', a: `refs/curated/triangle/${TRI[0]}`, b: `refs/curated/triangle/${TRI[3]}` },
-  // control-diff: Triangle vs Unicorn Overlord
-  { kind: 'control-diff', a: `refs/curated/triangle/${TRI[0]}`, b: `refs/curated/triangle/${OTHER[0]}` },
-  { kind: 'control-diff', a: `refs/curated/triangle/${TRI[2]}`, b: `refs/curated/triangle/${OTHER[0]}` },
-  { kind: 'control-diff', a: `refs/curated/triangle/${TRI[4]}`, b: `refs/curated/triangle/${OTHER[0]}` },
-  { kind: 'control-diff', a: `refs/curated/triangle/${TRI[5]}`, b: `refs/curated/triangle/${OTHER[0]}` },
-  // test: ours vs Triangle
-  { kind: 'test', a: shot, b: `refs/curated/triangle/${TRI[0]}` },
-  { kind: 'test', a: shot, b: `refs/curated/triangle/${TRI[1]}` },
-  { kind: 'test', a: shot, b: `refs/curated/triangle/${TRI[2]}` },
-  { kind: 'test', a: shot, b: `refs/curated/triangle/${TRI[3]}` },
-  { kind: 'test', a: shot, b: `refs/curated/triangle/${TRI[4]}` },
-  { kind: 'test', a: shot, b: `refs/curated/triangle/${TRI[5]}` },
+  // control-same: Triangle vs Triangle (6)
+  ...[[0,1],[2,3],[4,5],[0,3],[6,7],[8,9]].map(([a,b]) => ({
+    kind: 'control-same',
+    a: `refs/curated/triangle/${TRI[a]}`,
+    b: `refs/curated/triangle/${TRI[b]}`,
+  })),
+  // control-diff: Triangle vs Unicorn Overlord (6)
+  ...[0,2,4,6,8,10].map((a) => ({
+    kind: 'control-diff',
+    a: `refs/curated/triangle/${TRI[a]}`,
+    b: `refs/curated/triangle/${OTHER[0]}`,
+  })),
+  // test: ours vs Triangle (12)
+  ...TRI.map((ref) => ({ kind: 'test', a: shot, b: `refs/curated/triangle/${ref}` })),
 ]
 
 const SCHEMA = {
