@@ -16,7 +16,8 @@
     "verify:quick": "node tools/verify.mjs --quick",
     "play": "node tools/play.mjs",
     "metrics": "node tools/metrics.mjs",
-    "animations": "node tools/decode-shp-seq.mjs"
+    "animations": "node tools/decode-shp-seq.mjs",
+    "delegate": "node tools/delegate.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"
