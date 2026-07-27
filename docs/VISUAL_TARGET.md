@@ -33,13 +33,23 @@ Consequences for us:
   committed colour scheme with a warm/cool split.
 - Light falloff must be aggressive. Reference frames have genuinely dark regions.
 
-### 3. Depth of field is strong, not subtle
+### 3. Depth of field is strong — but it must never blur a playable tile
 Reference: `refs/Triangle/press_041...` — the top ~15% and bottom ~20% of the frame are visibly
 soft; only a horizontal band through the middle is sharp. FFT's frame has the entire background
 blurred out.
 
-This is *the* diorama tell and we are likely to under-do it out of timidity. Push it until it
-reads as a miniature, then back off slightly.
+**Refined after round 1** (an earlier version of this section said only "push it harder", and a
+critic correctly called that out): look at *what* is blurred in the references. It is scenery —
+foreground props, background architecture, distant terrain. The tiles the player has to count,
+and the units standing on them, stay sharp in both games.
+
+So the rule is not "more blur". It is: the focus band must contain the whole playable board, and
+the blur lives beyond it. Blurring pillars and gameplay-relevant tiles at the top and bottom of
+the board is a defect, not atmosphere. Get the diorama read from the *scenery* falloff plus a
+world that extends past the board — not by softening the game itself.
+
+Vignette obeys the same logic: it frames, it does not darken the play space. If the vignette is
+compounding an already-dark frame, it is too strong.
 
 ### 4. Sprites are lit by, and grounded in, the scene
 In the FFT frame the White Mage is visibly underlit by the fire in front of her; the Squire on the
@@ -78,6 +88,20 @@ only on genuinely bright things (torches, spell light, emissive lattice) — nev
 - FFT: warm amber against deep navy.
 - Neither uses neutral greys. Crush blacks toward the map's cool tone and push highlights warm.
 
+## The void problem — read this before touching materials
+
+Measured in round 1: roughly **half of our 1920×1080 frame is flat background colour**. The map is
+a small object centred in emptiness with a hard silhouette, like a 3D asset viewer with a turntable.
+
+Neither reference game ever does this. In both, the map **bleeds off the frame edges** and is backed
+by sky, haze, distant silhouettes or painted scenery. Triangle Strategy's environments continue past
+the play area — background walls, crates, lanterns, drifting embers.
+
+This is worth more than any material improvement. A perfectly textured object floating in a black
+void still reads as a tech demo. Fixing it means: a graded sky and distance haze, a far silhouette
+layer, letting the board extend past the frame, and an irregular map footprint so the silhouette
+is not a rectangle from every camera yaw.
+
 ## Explicit fail conditions
 
 A frame with any of these is not shippable:
@@ -91,6 +115,12 @@ A frame with any of these is not shippable:
 - Opaque flat-coloured tile-highlight overlays
 - An empty prop-less battlefield
 - Visible z-fighting anywhere
+- A map whose silhouette is a rectangle from every camera yaw
+- More than ~25% of the frame being flat background colour
+- Any UI panel sitting over the playable board and occluding units
+- Depth of field or vignette obscuring tiles the player must count
+- Sprites at full saturation over a graded, desaturated map — they must share one grade
+- Turn-order portraits that do not match the units actually on the field
 
 ## How the blind test works
 
