@@ -479,7 +479,12 @@ const BATTLE_OPEN: Scenario = {
   // Both now sit at 1.0 and the shape lives in `REFERENCE_FLOOR`.
   // Exposure measured, not guessed: `tools/shoot.mjs` reports mean frame luma, the reference
   // frames sit at 66-80/255, and at 1.05 this scene came back at 39.
-  post: { exposure: 1.75, dof: 1.0, vignette: 1.0 },
+  // Round 4 re-measured after the grade stopped lifting blacks into navy and the vignette
+  // stopped painting a code-28 violet floor over the corners: both changes are correct and
+  // both cost mean luma, which fell from 56.5 to 46.8 against the references' 66-80. The
+  // right answer to a frame that is too dark because its SHADOWS are finally black is more
+  // exposure, not a lighter black point.
+  post: { exposure: 2.05, dof: 1.0, vignette: 1.0 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,

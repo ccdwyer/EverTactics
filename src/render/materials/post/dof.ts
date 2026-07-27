@@ -97,8 +97,23 @@ void main() {
     // Does this sample's disc actually cover us?
     float w = smoothstep(r - 1.0, r + 1.0, sRadius);
 
-    // A far-field sample must not bleed onto a sharp foreground pixel.
-    if (s.a > 0.0 && centerCoC < 0.0) w *= 0.15;
+    // ROUND 4 — "the sharp foreground geometry has a soft halo of background colour smeared
+    // over its edge; classic single-pass CoC blur with no depth-aware weighting", filed twice.
+    //
+    // That was exactly what this did. The old guard only fired when the CENTRE pixel was in
+    // the near field (centerCoC < 0.0), so an in-focus silhouette — CoC near zero, the common
+    // case along every roof line and tower top — still gathered blurred background at full
+    // weight, because the gather radius is floored at uMaxCoCPixels * uNearSpread to let
+    // near-field blur bleed outward.
+    //
+    // Occlusion is one-directional in a real lens: a FAR sample may only wash over a pixel
+    // that is at least as defocused as it is; a NEAR one may wash over anything behind it.
+    // Weighting by the ratio of the two CoCs enforces that continuously, so the transition
+    // along a silhouette is a ramp rather than the hard cutout the alternative produces.
+    if (s.a > 0.0) {
+      float occlusion = max(centerCoC, 0.0) / max(s.a, 1e-3);
+      w *= smoothstep(0.0, 0.6, occlusion);
+    }
 
     float boost = 1.0 + max(luma(s.rgb) - 1.0, 0.0) * uBokehBoost;
     acc += s.rgb * w * boost;

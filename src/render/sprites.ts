@@ -644,13 +644,20 @@ const CONTACT_SHADOW_LIFT = 0.012;
  * So this decal is authored to be the thing the map cannot give us: a shadow
  * that *agrees with the key's azimuth*, anchored at the feet and leaning away
  * from the light, with a tight occlusion core where the boots meet the stone.
- *   • the **core** is the contact term — the hairline of unoccluded ground
- *     directly under the figure that no shadow map resolves, and the single
- *     thing that stops a billboard reading as hovering;
+ *   • the **contact** lobe is the hairline of unoccluded ground directly under
+ *     the figure that no shadow map resolves, and the single thing that stops a
+ *     billboard reading as hovering;
+ *   • the **pool** is the part that actually reaches the viewer. At a 32° camera
+ *     pitch the only ground a standing billboard does not cover is the ground
+ *     *around* it, so the pool has to clear the boot silhouette on every side —
+ *     roughly 0.6 of a tile — before any of the shadow is visible at all;
  *   • the **tail** is the directional term — it stretches with `cot(elevation)`
  *     and rotates with the azimuth, so it always points where the terrain's own
  *     cast shadows point. A round blob under every unit regardless of the light
  *     is the "generic dark ellipse" the visual target calls an instant fail.
+ *     It is deliberately faint: on `battle-open`'s 138° key the tail lies almost
+ *     entirely behind the billboard, and what does escape lands on lantern-lit
+ *     stone where a low-density multiply reads as haze rather than as shade.
  *
  * Authored in a canonical space with the feet at v = FOOT_V and the tail running
  * to v = 1; `UnitSprite` does the rotate/stretch. Multiplies, and is cooled
@@ -713,7 +720,7 @@ function getGroundShadowTexture(): THREE.CanvasTexture {
 
       const pu = du / 0.40;
       const pv = (v - SHADOW_FOOT_V) / 0.30;
-      const pool = Math.exp(-(pu * pu + pv * pv) * 0.85) * 0.58;
+      const pool = Math.exp(-(pu * pu + pv * pv) * 0.85) * 0.78;
 
       // Directional tail: fades and widens with distance, so the far end
       // dissolves into the ground instead of ending on an edge. Deliberately
@@ -722,10 +729,19 @@ function getGroundShadowTexture(): THREE.CanvasTexture {
       // a tile and a half of lantern-lit stone — and at that density a multiply
       // does not read as a shadow, it reads as haze over the terrain. The pool
       // is what grounds the unit; the tail only has to say where the light is.
+      // ── Round 4, measured against the reference rather than re-guessed ─────
+      // `refs/curated/fft/press-311722-...-mediakit-03`, the squire standing on
+      // the plank floor: the stone immediately at his boots reads luma 62 and
+      // the shadow raking away from him 87, against a clean floor at 168 — a
+      // 2.0-2.7x darkening that dies out inside roughly one body-width. So the
+      // reference tail is *short and dense*, not long and faint. Ours ran a
+      // tile and a half at a third of that density, which is what turned it
+      // into the haze the previous pass complained about; pulling the exponent
+      // up concentrates the same energy where a shadow actually lives.
       const t = Math.min(1, Math.max(0, (v - SHADOW_FOOT_V) / (1 - SHADOW_FOOT_V)));
       const width = 0.17 + 0.13 * t;
       const lobe = Math.exp(-((du / width) * (du / width)));
-      const tail = lobe * Math.pow(1 - t, 2.6) * 0.34;
+      const tail = lobe * Math.pow(1 - t, 3.6) * 0.55;
 
       const occlusion = Math.min(1, Math.max(contact, Math.max(pool, tail)));
       const value = Math.round(255 * (1 - occlusion * 0.84));

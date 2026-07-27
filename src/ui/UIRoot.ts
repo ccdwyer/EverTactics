@@ -42,12 +42,20 @@ import type {
 } from './types';
 
 /** Default hint rail for normal field play. */
+/**
+ * Default hint rail for normal field play.
+ *
+ * Four groups, not five. Both reference games run three or four prompts and no
+ * more — FFT's corner reads "Move Here / Cancel / Zoom / Change Display" — and a
+ * five-group rail was wide enough to reach a third of the way across the frame,
+ * which is part of what the critics meant by the chrome crowding the board. The
+ * two camera binds fold into one group.
+ */
 const FIELD_HINTS: readonly HintDef[] = [
   { keys: ['↑', '↓'], label: 'Select' },
   { keys: ['Enter'], label: 'Confirm' },
   { keys: ['Esc'], label: 'Back' },
-  { keys: ['Q', 'E'], label: 'Rotate' },
-  { keys: ['+', '−'], label: 'Zoom' },
+  { keys: ['Q', 'E', '±'], label: 'Camera' },
 ];
 
 export class UIRoot {
@@ -77,6 +85,9 @@ export class UIRoot {
   /** Base layer: owns the camera keybinds and the "cancel with nothing open" case. */
   private readonly fieldLayer: FocusLayer;
   private openScreen: ScreenName | null = null;
+  /** Last unit handed to setInspectedUnit, restored when targeting ends. */
+  private inspected: UnitVM | null = null;
+  private targeting = false;
   private motionQuery: MediaQueryList | null = null;
   private readonly disposers: (() => void)[] = [];
 
@@ -208,9 +219,20 @@ export class UIRoot {
     this.activeInfo.set(unit);
   }
 
-  /** The unit under the cursor / hovered in the turn bar — drives the right panel. */
+  /**
+   * The unit under the cursor / hovered in the turn bar — drives the right panel.
+   *
+   * Suppressed while a target preview is up. The preview already names the
+   * target, shows its HP and the predicted result, so running the inspect card
+   * above it duplicates the same unit twice in the same column — and stacked
+   * they are tall enough to run into the command window docked below (measured:
+   * the column reached y=782 against a menu top of y=769 on a 1080 frame).
+   * Collapsing to one card is also the fix the critics asked for by name: "fold
+   * the key legend away and only show the enemy card on hover/target".
+   */
   setInspectedUnit(unit: UnitVM | null): void {
-    this.inspectInfo.set(unit);
+    this.inspected = unit;
+    this.inspectInfo.set(this.targeting ? null : unit);
   }
 
   setTurnOrder(entries: readonly TurnEntryVM[]): void {
@@ -269,7 +291,9 @@ export class UIRoot {
   }
 
   setTargetPreview(vm: TargetPreviewVM | null): void {
+    this.targeting = vm !== null;
     this.targetPreview.set(vm);
+    this.inspectInfo.set(this.targeting ? null : this.inspected);
   }
 
   /** Spawn floating combat text at a screen-space point. */

@@ -96,13 +96,24 @@
      Round 1 put a 12-card roster strip across the top, two large panels across
      the bottom corners and the command menu dead-centre over the map — a picture
      frame with the game squeezed inside it. Everything below is sized so the
-     board keeps the middle ~62% of the width and ~78% of the height. */
-  --hud-gutter: 20px;
-  --hud-rail: 104px;       /* left turn-order rail */
+     board keeps the middle ~62% of the width and ~78% of the height.
+
+     Round 4 — ONE SAFE AREA. The critics' note was specific: "the top-left
+     order-of-battle strip is flush against the screen edge while the bottom-right
+     hint row floats on a different margin". Round 3 ran four different insets
+     (gutter 20, top 18, bottom 30, hint rail 26), which is exactly the kind of
+     drift that reads as unfinished even when every individual panel is good.
+     Measured off the FFT frame: the combat timeline's left edge sits at ~3.4% of
+     frame width and the bottom prompt row's baseline at ~2.8% of frame height —
+     i.e. the shipped game keeps a single generous, square-ish margin. Everything
+     the HUD pins to an edge now derives from --hud-safe and nothing overrides it. */
+  --hud-safe: 32px;
+  --hud-gutter: var(--hud-safe);
+  --hud-rail: 112px;       /* left turn-order rail */
   --hud-col-left: 362px;   /* acting unit, bottom-left */
   --hud-col-right: 292px;  /* inspected unit + target preview, top-right */
-  --hud-bottom: 30px;
-  --hud-top: 18px;
+  --hud-bottom: var(--hud-safe);
+  --hud-top: var(--hud-safe);
 
   /* ── surfaces ──────────────────────────────────────────────────────────── */
   /* Layered: an inner top light-line (the bevel), a deep inner cast so the panel
@@ -603,14 +614,16 @@
    transform) is deliberate: a transformed ancestor would become the containing
    block for the `position: fixed` anchored variant below, whose coordinates come
    from the renderer projecting a world point. */
+/* Lifted one prompt-rail height: both the command window and the key hints are
+   bottom-right anchored, and at the same inset the window landed on top of the
+   hint row. */
 .et-hud__menus {
   position: absolute;
   right: var(--hud-gutter);
-  bottom: var(--hud-bottom);
+  bottom: calc(var(--hud-bottom) + 46px);
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
-  gap: 10px;
   pointer-events: none;
 }
 .et-hud__menus > * { pointer-events: auto; }
@@ -619,6 +632,57 @@
   right: auto;
   left: calc(var(--hud-gutter) + var(--hud-col-left) + 16px);
   justify-content: flex-start;
+}
+
+/* Backing scrim.
+   ---------------------------------------------------------------------------
+   "Panel borders are a uniform 1px gold stroke with no depth, and the panels sit
+   directly on busy scene pixels with no shadow or scrim to separate them."
+   The panels do carry a backdrop blur and a drop shadow, but a gold hairline
+   against a lit stone highlight of the same value still disappears. Each HUD
+   cluster now floats on a soft, heavily feathered pool of darkness that reaches
+   well past the panel edge — separation without a hard plate, and crucially
+   without a global vignette (docs/VISUAL_TARGET.md lists darkening the play
+   space as a fail condition, so this is anchored to the corners the chrome
+   already occupies and dies out long before the board).
+
+   `pointer-events: none` matters: the scrim is much larger than its panel and
+   would otherwise eat clicks meant for the 3D scene. */
+.et-hud__left::before,
+.et-hud__right::before,
+.et-hud__menus::before {
+  content: '';
+  position: absolute;
+  inset: -46px -54px;
+  pointer-events: none;
+  background: radial-gradient(72% 70% at 50% 50%, rgba(3, 5, 11, 0.5) 0%, rgba(3, 5, 11, 0.28) 46%, transparent 78%);
+}
+
+/* THE COMMAND WINDOW OVER THE BOARD — round 4's playability bug, and it was not
+   where the comment above claimed.
+   ---------------------------------------------------------------------------
+   The menu row was correctly docked at the right gutter, but the ability window
+   is a SIBLING in the same flex row and only hides itself with `opacity: 0`.
+   A zero-opacity flex child still takes its full width, so the closed ability
+   panel (~490px, two panels plus the gap) sat between the command window and the
+   right edge and pushed the command window 490px inboard — measured at
+   x=1140..1398 on a 1920 frame, i.e. dead over the centre-right of the board and
+   on top of whoever was standing there. That is what buried the units.
+
+   Fix: the ability window is taken out of the row entirely and hung off the
+   command window's outboard edge, which is also how the reference games open a
+   submenu — the command window keeps its docked slot and the submenu grows away
+   from the board. The row now sizes to the command window alone, so it stays
+   pinned to the gutter whether or not a submenu is open, and the opacity
+   transitions on both panels are preserved. */
+.et-hud__menus .et-abilities {
+  position: absolute;
+  bottom: 0;
+  right: calc(100% + 10px);
+}
+.et-hud__menus.is-dock-left .et-abilities {
+  right: auto;
+  left: calc(100% + 10px);
 }
 
 /* ===========================================================================
@@ -632,11 +696,15 @@
 }
 .et-command.is-open { opacity: 1; pointer-events: auto; }
 .et-command.is-dim { filter: saturate(0.55) brightness(0.8); }
+/* The anchored variant is gutter-snapped by CommandMenu.applyAnchor(), which
+   computes an absolute left from the panel's measured width — so the transform
+   here must only do the vertical centring the JS assumes. A horizontal offset
+   would silently push the window back over the board. */
 .et-command.is-anchored {
   position: fixed;
   left: var(--anchor-x, 50%);
   top: var(--anchor-y, 50%);
-  transform: translate(12px, -50%);
+  transform: translateY(-50%);
 }
 .et-command__panel { min-width: 208px; }
 .et-command__list { gap: 0; }
@@ -782,22 +850,36 @@
   position: absolute;
   top: var(--hud-top);
   left: var(--hud-gutter);
-  width: var(--hud-rail);
+  width: max-content;
+  min-width: var(--hud-rail);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
+  align-items: stretch;
+  gap: 4px;
   pointer-events: auto;
   transition: opacity var(--dur) var(--ease-soft), transform var(--dur-slow) var(--ease-out-expo);
 }
 .et-turnorder.is-hidden { opacity: 0; transform: translateX(-14px); pointer-events: none; }
+/* Round 4: the header is a titled cap ON the rail plate, not a floating caption
+   above it. "A stack of bare numbers with no label, no hierarchy and no
+   active-state affordance" was the critics' note; the rail now reads header →
+   CT column → faces, with the plate binding all three into one object. */
 .et-turnorder__label {
   position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-left: 2px;
-  width: 100%;
+  padding: 4px 8px 4px 9px;
+  background: linear-gradient(178deg, rgba(38, 51, 86, 0.82), rgba(9, 13, 26, 0.86));
+  mask-image: linear-gradient(90deg, #000 0%, #000 70%, rgba(0, 0, 0, 0.45) 100%);
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 70%, rgba(0, 0, 0, 0.45) 100%);
+  backdrop-filter: blur(5px) saturate(0.6) brightness(0.8);
+  -webkit-backdrop-filter: blur(5px) saturate(0.6) brightness(0.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 223, 0.12),
+    inset 0 -1px 0 rgba(201, 162, 39, 0.42),
+    inset 1px 0 0 rgba(201, 162, 39, 0.3),
+    0 8px 20px -12px rgba(0, 0, 0, 0.95);
 }
 .et-turnorder__label::after {
   content: '';
@@ -809,39 +891,62 @@
   font-family: var(--font-display);
   font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
   color: var(--gold-bright);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 10px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
 }
 /* A single dark plate behind the whole rail rather than a border per chip: the
-   reference timeline reads as one column of faces, not twelve separate cards. */
+   reference timeline reads as one column of faces, not twelve separate cards.
+   The plate now blurs what is behind it and feathers out to the right, so the
+   faces never sit on raw board pixels but the rail still does not read as a
+   hard-edged box glued to the frame edge. */
 .et-turnorder__track {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  /* Stretch, not flex-start: the shipped Combat Timeline is one clean column of
+     equal-width entries. Shrink-to-fit gave each chip the width of its own
+     portrait, so the rail's right edge stepped in and out by a few pixels down
+     its whole length and read as ragged. */
+  align-items: stretch;
   gap: 3px;
-  padding: 4px 4px 5px;
-  background: linear-gradient(100deg, rgba(6, 9, 18, 0.74) 0%, rgba(6, 9, 18, 0.34) 78%, transparent 100%);
-  box-shadow: inset 1px 0 0 rgba(201, 162, 39, 0.22);
+  padding: 5px 5px 6px;
 }
+/* The plate is a PSEUDO-ELEMENT, not the track itself, and that is load-bearing.
+   The plate wants a `mask-image` so its right edge feathers into the board
+   instead of ending on a hard vertical cut — but a mask clips descendants, and
+   the acting unit's name and job captions are absolutely positioned OUTSIDE the
+   track (they hang over the board to the right). Masking the track erased both.
+   Putting the blur, the fill and the mask on a backdrop layer behind the chips
+   keeps the feathered edge and lets the captions escape. */
 .et-turnorder__track::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: linear-gradient(180deg, transparent, rgba(201, 162, 39, 0.5) 12%, rgba(201, 162, 39, 0.5) 88%, transparent);
+  inset: 0;
+  z-index: 0;
+  background:
+    var(--grain),
+    linear-gradient(100deg, rgba(5, 8, 16, 0.9) 0%, rgba(5, 8, 16, 0.72) 76%, rgba(5, 8, 16, 0.36) 100%);
+  background-size: 180px 180px, auto;
+  background-blend-mode: overlay, normal;
+  backdrop-filter: blur(6px) saturate(0.55) brightness(0.74);
+  -webkit-backdrop-filter: blur(6px) saturate(0.55) brightness(0.74);
+  box-shadow:
+    inset 1px 0 0 rgba(201, 162, 39, 0.4),
+    0 16px 34px -18px rgba(0, 0, 0, 0.95);
+  mask-image: linear-gradient(90deg, #000 0%, #000 84%, rgba(0, 0, 0, 0.62) 100%);
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 84%, rgba(0, 0, 0, 0.62) 100%);
+  pointer-events: none;
 }
 
 .et-turnchip {
   --team-color: var(--team-neutral);
   position: relative;
+  z-index: 1;
   display: grid;
-  grid-template-columns: 16px auto;
+  grid-template-columns: 22px auto;
   align-items: center;
   gap: 5px;
   padding: 2px 5px 2px 2px;
@@ -874,7 +979,7 @@
 .et-turnchip--neutral { --team-color: var(--team-neutral); }
 .et-turnchip:hover { transform: translateX(4px); border-color: rgba(240, 221, 160, 0.55); }
 .et-turnchip.is-current {
-  grid-template-columns: 20px auto;
+  grid-template-columns: 26px auto;
   padding: 3px 7px 3px 3px;
   border-color: rgba(240, 221, 160, 0.75);
   background: linear-gradient(90deg, rgba(52, 68, 112, 0.94), rgba(9, 13, 26, 0.7));
@@ -927,7 +1032,7 @@
   white-space: nowrap;
   color: var(--ink-bright);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
-  background: linear-gradient(90deg, rgba(9, 13, 26, 0.92), rgba(9, 13, 26, 0.55) 78%, transparent);
+  background: linear-gradient(90deg, rgba(6, 9, 18, 0.94), rgba(6, 9, 18, 0.68) 70%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 246, 223, 0.06);
   opacity: 0;
   pointer-events: none;
@@ -935,16 +1040,58 @@
 }
 .et-turnchip.is-current .et-turnchip__name,
 .et-turnchip:hover .et-turnchip__name { opacity: 1; }
+/* Job caption under the acting unit's name — the rail's one piece of hierarchy
+   beyond "face + tick", and the thing that makes the head of the queue read as
+   a titled entry rather than as the same chip drawn slightly larger. */
+.et-turnchip__job {
+  position: absolute;
+  left: calc(100% + 5px);
+  top: calc(50% + 9px);
+  padding: 1px 7px 2px;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-style: italic;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--vellum-dim);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 0.9);
+  background: linear-gradient(90deg, rgba(6, 9, 18, 0.9), rgba(6, 9, 18, 0.62) 66%, transparent);
+  pointer-events: none;
+}
+/* Round 4: the CT numeral is the rail's second read after the face, and at 13px
+   it was neither. In the shipped Combat Timeline the tick numbers are large,
+   team-coloured, and set in the display face — roughly 1.7% of frame height. The
+   "stack of bare numbers" note was partly a hierarchy problem: the numbers were
+   small AND unlabelled, so they read as debug output. Bigger + team-tinted +
+   a CT caption on the acting chip fixes both halves. */
 .et-turnchip__delta {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 17px;
   font-weight: 700;
   line-height: 1;
-  color: color-mix(in srgb, var(--team-color) 100%, white 42%);
+  color: color-mix(in srgb, var(--team-color) 100%, white 46%);
   font-variant-numeric: lining-nums tabular-nums;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 1);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 9px rgba(0, 0, 0, 0.85);
 }
-.et-turnchip.is-current .et-turnchip__delta { font-size: 9px; letter-spacing: 0.04em; color: var(--gold-bright); }
+.et-turnchip__delta-unit {
+  display: block;
+  margin-top: 1px;
+  font-family: var(--font-display);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  color: var(--gold-dim);
+  opacity: 0.85;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 1);
+}
+.et-turnchip.is-current .et-turnchip__delta {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 12px rgba(240, 221, 160, 0.6);
+}
+.et-turnchip.is-current .et-turnchip__delta-unit { display: none; }
 .et-turnchip__note { display: none; }
 
 /* ===========================================================================
@@ -1184,7 +1331,14 @@
    =========================================================================== */
 
 .et-unitinfo { width: 100%; }
-.et-unitinfo.is-hidden { opacity: 0; pointer-events: none; transform: translateY(8px); }
+/* HIDDEN PANELS MUST LEAVE THE FLOW.
+   `opacity: 0` alone keeps a flex child's full box, so a hidden unit card was
+   still reserving ~370px at the top of the right column and pushing the target
+   preview down into the command window (measured: preview bottom y=782 against
+   a menu top of y=769 on a 1080 frame). Same defect as the closed ability window
+   pushing the command window over the board. Anything that hides itself inside a
+   HUD stack collapses. */
+.et-unitinfo.is-hidden { display: none; }
 .et-unitinfo.is-swapping .et-unitinfo__head { animation: et-swap 320ms var(--ease-out-expo); }
 @keyframes et-swap {
   from { opacity: 0; transform: translateX(-8px); }
@@ -1372,7 +1526,7 @@
    =========================================================================== */
 
 .et-target { width: 100%; }
-.et-target.is-hidden { opacity: 0; transform: translateX(16px); pointer-events: none; }
+.et-target.is-hidden { display: none; }
 .et-target__body { display: flex; flex-direction: column; gap: 6px; }
 
 .et-target__chance { display: flex; align-items: center; gap: 10px; }
@@ -1749,18 +1903,42 @@
    rail is now right-aligned like both references (so it stops cutting the
    composition in half), the caps are circular, and the plate is a soft
    feathered gradient rather than a hard band. */
+/* Round 4: the rail sits INSIDE the same safe area as everything else and carries
+   its own container. Round 3 bled it to the frame edge on a full-width scrim,
+   which is why it read as a different margin from the rest of the HUD and why the
+   critics called it a "bottom-right hint row floating on a different margin". */
 .et-hints {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  right: var(--hud-safe);
+  bottom: var(--hud-safe);
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 18px;
-  padding: 10px 26px 11px;
-  background: linear-gradient(180deg, transparent, rgba(5, 7, 13, 0.42) 55%, rgba(4, 6, 12, 0.66) 100%);
+  gap: 16px;
+  padding: 7px 15px 8px;
+  border-radius: 3px;
+  background:
+    linear-gradient(178deg, rgba(20, 28, 50, 0.62), rgba(5, 8, 16, 0.72));
+  backdrop-filter: blur(5px) saturate(0.6) brightness(0.8);
+  -webkit-backdrop-filter: blur(5px) saturate(0.6) brightness(0.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 223, 0.09),
+    inset 0 0 0 1px rgba(201, 162, 39, 0.22),
+    0 10px 26px -12px rgba(0, 0, 0, 0.95);
   transition: opacity var(--dur) var(--ease-soft), transform var(--dur) var(--ease-soft);
+}
+/* Same vellum grain the panels carry, so the prompt rail belongs to the chrome
+   family rather than reading as raw system text over the render. */
+.et-hints::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: var(--grain);
+  background-size: 180px 180px;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  pointer-events: none;
 }
 .et-hints.is-hidden { opacity: 0; transform: translateY(10px); }
 .et-hint { display: flex; align-items: center; gap: 7px; }
@@ -2222,7 +2400,7 @@
 
 @media (max-width: 1600px) {
   .et-root {
-    --hud-gutter: 16px;
+    --hud-safe: 26px;
     --hud-rail: 92px;
     --hud-col-left: 320px;
     --hud-col-right: 262px;
@@ -2233,7 +2411,7 @@
 
 @media (max-width: 1280px) {
   .et-root {
-    --hud-gutter: 12px;
+    --hud-safe: 20px;
     --hud-rail: 78px;
     --hud-col-left: 274px;
     --hud-col-right: 232px;
@@ -2254,7 +2432,7 @@
     --hud-col-right: 206px;
   }
   .et-unitinfo__name { font-size: 15px; }
-  .et-turnorder { top: 8px; }
+  .et-root { --hud-safe: 14px; }
   .et-hints { gap: 10px; }
 }
 

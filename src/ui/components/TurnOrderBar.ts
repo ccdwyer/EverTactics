@@ -108,6 +108,10 @@ export class TurnOrderBar {
     frame.appendChild(el('span', 'et-turnchip__name', entry.name));
     chip.appendChild(frame);
 
+    // CT column. Round 3 printed a bare integer, which the critics read as debug
+    // output ("a stack of bare numbers with no label, no hierarchy"). The numeral
+    // is now the rail's second read after the face and carries a CT caption, so
+    // "4" is legible as "four ticks until this unit acts" rather than as an index.
     const meta = div('et-turnchip__meta');
     add(
       meta,
@@ -117,8 +121,18 @@ export class TurnOrderBar {
         entry.current ? 'NOW' : entry.ticksUntil <= 0 ? '!' : String(entry.ticksUntil),
       ),
     );
+    if (!entry.current) meta.appendChild(el('span', 'et-turnchip__delta-unit', 'CT'));
     chip.appendChild(meta);
-    if (entry.note) chip.title = `${entry.name} — ${entry.note}`;
+    // The floating name plate is the only place the rail can carry a job, and the
+    // acting unit is the one entry where the extra line is worth the pixels.
+    if (entry.current && entry.job) {
+      frame.appendChild(el('span', 'et-turnchip__job', entry.job));
+    }
+    chip.title = entry.note
+      ? `${entry.name} — ${entry.note}`
+      : entry.job
+        ? `${entry.name} — ${entry.job}`
+        : entry.name;
 
     chip.addEventListener('mouseenter', () => this.cb.onFocus(entry.unitId));
     chip.addEventListener('click', () => this.cb.onSelect(entry.unitId));

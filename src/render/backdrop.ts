@@ -477,6 +477,7 @@ uniform float uHazeNear;
 uniform float uHazeFar;
 uniform float uHazeMax;
 uniform float uGroundY;
+uniform float uNearDepth;
 uniform float uWindowGain;
 uniform float uTone;
 uniform float uExposure;
@@ -693,6 +694,11 @@ void main() {
   float edge = pow(clamp(1.0 - abs(n.y), 0.0, 1.0), 3.0) * (0.5 + 0.5 * n.x);
   vec3 toned = lit * uTone + uSkyColor * edge * 0.10 * uTone * tex;
   vec3 col = mix(toned, uHaze, haze) * uExposure;
+  // Matches the ground plate's near falloff, so props sitting on the near strip
+  // go down with it instead of floating as bright chips on a dark field. Held a
+  // little above the plate's so they still read as silhouettes against it.
+  float nearAmt = clamp(depth / (uNearDepth * 0.85), 0.0, 1.0);
+  col *= mix(1.0, 0.34, nearAmt * nearAmt);
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }
 `;
@@ -807,10 +813,27 @@ uniform vec3  uSunColor;
 uniform vec3  uSkyColor;
 uniform vec3  uSunLocal;
 uniform vec2  uShadowOffset;
+/**
+ * Board footprint half-extents on the WORLD axes, and (cos, sin) of the camera
+ * yaw so the fragment can rotate its yaw-local position back onto those axes.
+ *
+ * Round 4 note. Everything the plate did about the board used
+ * length(vLocal.xz) against uBoardRadius — a DISC of the circumscribed
+ * radius. At the shipping 45° yaw the cloister is a diamond, so the disc misses
+ * the four facets by up to 30% of the radius: the contact darkening landed in
+ * open ground while the board's actual near-right wall terminated on untouched
+ * plate. Measured on that frame the boundary was a razor line, dark stone at
+ * luma 18 against flat plate at luma 60, over one pixel. That is the
+ * hard-silhouette fail condition, and no amount of scattered clutter fixes it
+ * because the clutter is placed by the same rectangle the shading ignored.
+ */
+uniform vec2  uFootHalf;
+uniform vec2  uYawCS;
 uniform float uBoardRadius;
 uniform float uHazeNear;
 uniform float uHorizonDepth;
 uniform float uHalfW;
+uniform float uNearDepth;
 uniform float uExposure;
 uniform float uShadowStrength;
 
@@ -818,6 +841,23 @@ varying vec3 vLocal;
 varying vec3 vNormalL;
 
 ${GLSL_NOISE}
+
+/** Yaw-local (x, z) → world-axis offset from the board centre. */
+vec2 toWorldXZ(vec2 l) {
+  return vec2(uYawCS.x * l.x + uYawCS.y * l.y, -uYawCS.y * l.x + uYawCS.x * l.y);
+}
+
+/**
+ * Signed distance to the board's footprint rectangle, world axes. Negative
+ * inside. The edge is deliberately warped by a low-frequency noise so the
+ * darkening it drives never reads as a rounded rectangle drawn on the ground.
+ */
+float footprintSdf(vec2 l) {
+  vec2 w = toWorldXZ(l);
+  vec2 q = abs(w) - uFootHalf;
+  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+  return d + (etFbm(l * 0.09 + 17.0, 3) - 0.5) * uBoardRadius * 0.34;
+}
 
 void main() {
   vec3 n = normalize(vNormalL);
@@ -882,17 +922,53 @@ void main() {
   lit += uSunColor * albedo * ndl * 0.55;
   lit += uSkyColor * albedo * 0.30;
 
-  // The diorama's own shadow on the surrounding ground. The fitted shadow map
-  // in lighting.ts stops at the board bounds, so past that edge this stands in
-  // for it — and it is what stops the board reading as a floating slab. Kept
-  // shorter and softer than the first pass, which crushed the entire visible
-  // apron to near-black.
-  vec2 rel = vLocal.xz - uShadowOffset;
-  float sd = length(rel) / (uBoardRadius * 0.92);
-  lit *= 1.0 - uShadowStrength * (1.0 - smoothstep(0.75, 1.25, sd));
-  // A tighter contact darkening hugging the base itself.
-  float contact = 1.0 - smoothstep(uBoardRadius * 0.95, uBoardRadius * 1.22, length(vLocal.xz));
-  lit *= 1.0 - 0.30 * contact;
+  // ── the board's own occlusion of the ground it stands on ─────────────────
+  //
+  // Three terms, all driven off the footprint SDF rather than a disc:
+  //
+  //   cast     the diorama's shadow, thrown along the key. The fitted shadow
+  //            map in lighting.ts stops at the board bounds, so past that edge
+  //            this stands in for it.
+  //   ambient  a wide skydome-occlusion bowl. A twelve-metre stone mass blocks
+  //            most of the hemisphere for anything standing beside it, and this
+  //            is the term that was missing: it is what makes the plate near the
+  //            board DARKER than the board's own shadow side rather than
+  //            brighter, which is the whole reason the silhouette read as a
+  //            cut-out on a pale card.
+  //   contact  the last half-metre, near-black, so the base is bedded in.
+  //
+  // The ambient bowl doubles as the largest low-frequency value gradient on the
+  // plate — a ramp across a board-radius and a half, at a spatial frequency no
+  // amount of depth-of-field can average away. Every previous attempt at
+  // breaking up this surface worked above the blur's cutoff and measured as a
+  // swatch anyway.
+  float fdShadow = footprintSdf(vLocal.xz - uShadowOffset);
+  lit *= 1.0 - uShadowStrength * (1.0 - smoothstep(0.0, uBoardRadius * 0.42, fdShadow));
+
+  float fd = footprintSdf(vLocal.xz);
+  float ambientOcc = 1.0 - smoothstep(0.0, uBoardRadius * 1.15, max(fd, 0.0));
+  lit *= mix(1.0, 0.46, ambientOcc * ambientOcc);
+
+  float contact = 1.0 - smoothstep(0.0, uBoardRadius * 0.16, max(fd, 0.0));
+  lit *= 1.0 - 0.34 * contact;
+
+  // Bounce off the diorama.
+  //
+  // The board is a lit stone mass full of practicals, so the ground beside it is
+  // not just occluded — it is also the one part of the plate receiving a real
+  // second light. Without this the occlusion above simply swapped one hard
+  // silhouette for another: dark stone against near-black plate instead of dark
+  // stone against a pale card, with the boundary just as sharp either way.
+  //
+  // What actually removes a silhouette is putting the two sides at a similar
+  // VALUE across a soft, irregular, differently-coloured transition. A warm
+  // bounce falling off over ~0.8 board radii does that, and unlike the old haze
+  // halo it is saturated and noisy, so it reads as light spilling off the walls
+  // rather than as a lighter card showing behind them.
+  float spill = 1.0 - smoothstep(0.0, uBoardRadius * 0.80, max(fd, 0.0));
+  spill *= spill;
+  spill *= 0.55 + 0.75 * etFbm(vLocal.xz * 0.30 - 5.7, 4);
+  lit += uSunColor * (0.055 + 0.10 * albedo) * spill;
 
   float depth = -vLocal.z;
   // Held back from a full mix so the ground keeps some of its own colour and
@@ -906,12 +982,24 @@ void main() {
   float haze = clamp(smoothstep(uHazeNear, uHorizonDepth, depth) * 0.62 * hazeBreak, 0.0, 0.84);
   vec3 col = mix(lit, uHaze, haze);
 
-  // Ground fog pooling against the board's base. This is what dissolves the
-  // pedestal's silhouette instead of letting it cut a hard line into the plate,
-  // and it is the single thing in this shader doing the most work.
-  float pool = 1.0 - smoothstep(uBoardRadius * 0.92, uBoardRadius * 1.55, length(vLocal.xz));
-  float poolBreak = 0.55 + 0.45 * etFbm(vLocal.xz * 0.8 + 9.3, 3);
-  col = mix(col, uHaze * 1.7, pool * poolBreak * 0.30);
+  // Ground fog pooling against the board's base.
+  //
+  // This used to mix 46% toward uHaze * 1.7 over a disc centred on the board.
+  // uHaze is a background-level colour and the plate's own albedo is under it,
+  // so that term was BRIGHTER than the surface it was laid over: it painted a
+  // pale halo in a ring around the diorama and was a large part of why the board
+  // read as a cut-out pasted onto a lighter card. Mist at night lit only by
+  // lantern spill is a low-value, low-saturation veil — it lifts blacks a
+  // little and kills contrast, it does not glow.
+  //
+  // So: shaped by the footprint, capped well under the plate's lit value, and
+  // strongest a short way OUT from the edge rather than on it (fog banks against
+  // an obstruction, it does not sit under it).
+  float poolBand = smoothstep(0.0, uBoardRadius * 0.30, max(fd, 0.0))
+                 * (1.0 - smoothstep(uBoardRadius * 0.30, uBoardRadius * 1.30, max(fd, 0.0)));
+  float poolBreak = 0.40 + 0.60 * etFbm(vLocal.xz * 0.34 + 9.3, 4);
+  vec3 mist = uHaze * 0.42 + uSunColor * 0.012;
+  col = mix(col, mist, clamp(poolBand * poolBreak * 0.62, 0.0, 0.7));
 
   // Dissolve, rather than terminate. Alpha goes out just before the haze mix
   // completes, so the plate hands off to the sky gradient invisibly. Lateral
@@ -920,6 +1008,23 @@ void main() {
   float aNear = smoothstep(-uHorizonDepth * 0.95, -uHorizonDepth * 0.62, depth);
   float aSide = 1.0 - smoothstep(uHalfW * 1.5, uHalfW * 2.05, abs(vLocal.x));
   float alpha = aDepth * aNear * aSide;
+
+  // Near-field falloff.
+  //
+  // The strip of plate between the board's near wall and the bottom frame edge
+  // sits under the largest circle of confusion in the image. Measured there it
+  // came back at sd 5/255 — every octave in this shader, at every amplitude,
+  // averaged to a single constant, so it rendered as a pale grey table for the
+  // diorama to sit on and the board's base cut a razor-sharp black-on-grey line
+  // across it. Texture cannot win that argument; VALUE can, because a gradient
+  // this large survives any blur. Both reference frames put their near
+  // foreground in deep shadow for the same reason.
+  // Floor raised from 0.24 to 0.40: the board-occlusion bowl added above is now
+  // doing the near-board darkening properly and shaped to the real footprint,
+  // and the two stacked multiplicatively to ~0.05, which took the whole bottom
+  // strip to near-black and put the board's near wall against a void again.
+  float nearAmt = clamp(depth / (uNearDepth * 0.85), 0.0, 1.0);
+  col *= mix(1.0, 0.40, nearAmt * nearAmt);
 
   gl_FragColor = vec4(max(col, 0.0) * uExposure, alpha);
 }
@@ -1111,15 +1216,55 @@ export class Backdrop extends Group {
         depthMin: -R * 1.6,
         depthMax: R * 1.6,
         lateralMax: halfW * 1.6,
-        scale: 0.78,
+        scale: 0.95,
         haze: [R * 1.2, R + run * 2.4, 0.30],
-        tone: 0.86,
+        // Raised from 0.86. Measured on the round-4 frame the skirt props were
+        // present but rendering at luma 8-14 against a plate at 15 — objects
+        // with no contrast against the surface they stand on cannot break a
+        // silhouette, which is the only reason this band exists.
+        tone: 1.06,
         windows: 0,
-        ringMax: 4.2,
+        ringMax: 5.2,
         clearance: 0.35,
         tilt: 0.16,
         sink: 0.18,
         kinds: ['rubble', 'rubble', 'bush', 'bush', 'crates', 'barrel', 'rock', 'fence', 'cart', 'lantern'],
+      },
+      {
+        // The fringe. Small debris packed into the metre and a half hard against
+        // the board's outer wall, half-buried, leaning.
+        //
+        // The skirt band above sits 0.35-5.2 units out, which at a 30° pitch
+        // projects *below* the board's base line rather than across it, so the
+        // wall/ground boundary itself stayed a continuous antialiased polygon
+        // edge — dark stone at luma 18 meeting plate at luma 15 over one pixel,
+        // still a razor even after both sides were brought to the same value.
+        // What removes a silhouette is geometry straddling it. These pieces are
+        // deliberately tiny and dense: individually they read as grit, and
+        // collectively they turn a drawn line into a chewed one.
+        name: 'verge',
+        count: 460,
+        depthMin: -R * 1.9,
+        depthMax: R * 1.9,
+        lateralMax: halfW * 1.7,
+        // NOT small. Every band's pieces are already pushed 0.28 below the plate
+        // to hide their flat undersides, `sink` adds to that, and a `rubble`
+        // cluster at scale 0.5 is 0.07-0.37 units tall — so the first version of
+        // this band was authored entirely underground and rendered nothing at
+        // all. Scale is what makes a piece survive the burial, not what makes it
+        // read as debris; the density and the tilt do that.
+        scale: 0.95,
+        haze: [R * 1.4, R + run * 2.6, 0.26],
+        tone: 1.0,
+        windows: 0,
+        ringMax: 1.7,
+        // 0.02, not 0: `footprintDistance` is unsigned, so a negative clearance
+        // would disable the rejection test entirely and let a quarter of these
+        // spawn *inside* the play space, poking up through courtyard tiles.
+        clearance: 0.02,
+        tilt: 0.42,
+        sink: 0.02,
+        kinds: ['rubble', 'rubble', 'rubble', 'bush', 'bush', 'rock', 'crates'],
       },
       {
         // Dressing spread over the whole visible ground plate.
@@ -1171,6 +1316,36 @@ export class Backdrop extends Group {
         tone: 1.15,
         windows: 1,
         kinds: ['tower', 'house', 'wall', 'tower', 'tree'],
+      },
+      {
+        // The near strip: everything between the board's near corner and the
+        // bottom edge of the frame.
+        //
+        // `fore` only covers the extreme left and right of that strip
+        // (`lateralMin` holds it out of frame centre) and `verge` stops 1.7
+        // units off the wall, so at the shipping 45° yaw the wedge under the
+        // board's near corner — about a tenth of the image — had nothing in it
+        // but plate, measured at sd 6/255. Both references fill the equivalent
+        // area: Triangle with dock stone and rigging, FFT with foreground
+        // terrain running off the bottom of the frame.
+        //
+        // Deliberately dark. This strip sits under the largest circle of
+        // confusion in the shot, so surface detail on anything here is erased —
+        // what survives is silhouette against a slightly lighter ground, which
+        // is exactly how the reference foregrounds read.
+        name: 'nearfield',
+        count: 240,
+        depthMin: layout.nearDepth * 1.15,
+        depthMax: -R * 0.12,
+        lateralMax: halfW * 1.9,
+        scale: 1.0,
+        haze: [-999, -998, 0.0],
+        tone: 0.66,
+        windows: 0,
+        clearance: 1.35,
+        tilt: 0.22,
+        sink: 0.1,
+        kinds: ['bush', 'rock', 'rubble', 'crates', 'barrel', 'fence', 'cart', 'bush', 'rock'],
       },
       {
         // Out-of-focus foreground framing, hard against the left and right
@@ -1485,6 +1660,7 @@ export class Backdrop extends Group {
         uHazeFar: { value: band.haze[1] },
         uHazeMax: { value: Math.min(0.96, band.haze[2] * this.opts.hazeStrength) },
         uGroundY: { value: groundY },
+        uNearDepth: { value: Math.min(-2, layout.nearDepth) },
         uTone: { value: band.tone },
         uWindowGain: { value: (band.windows > 0 ? 1 : 0) * this.opts.windowGain },
         uExposure: { value: this.opts.exposure },
@@ -1549,13 +1725,18 @@ export class Backdrop extends Group {
         uSkyColor: { value: new Color() },
         uSunLocal: { value: new Vector3(0, -1, 0) },
         uShadowOffset: { value: new Vector2() },
+        uFootHalf: {
+          value: new Vector2(Math.max(0.5, layout.boardHalfX), Math.max(0.5, layout.boardHalfZ)),
+        },
+        uYawCS: { value: new Vector2(Math.cos(layout.yaw), Math.sin(layout.yaw)) },
         uBoardRadius: { value: layout.boardRadius },
         uHazeNear: { value: layout.boardRadius * 0.9 },
         uHorizonDepth: { value: layout.horizonDepth },
         uHalfW: { value: layout.halfW },
+        uNearDepth: { value: Math.min(-2, layout.nearDepth) },
         uUndulate: { value: Math.min(3.2, Math.max(1.2, layout.boardRadius * 0.24)) },
         uExposure: { value: this.opts.exposure },
-        uShadowStrength: { value: 0.34 },
+        uShadowStrength: { value: 0.42 },
       },
       vertexShader: GROUND_VERT,
       fragmentShader: GROUND_FRAG,
@@ -1599,6 +1780,12 @@ export class Backdrop extends Group {
     if (this.glowMaterial) this.glowMaterial.uniforms.uTime!.value = elapsed;
     if (this.groundMaterial) {
       (this.groundMaterial.uniforms.uSunLocal!.value as Vector3).copy(this.sunLocal);
+      // Tracked from the LIVE yaw, not the layout's. `relayoutIfNeeded` only
+      // fires past a 0.05 rad threshold, and during the eased yaw snap the rig
+      // spends about a second between slots; a footprint SDF built for the old
+      // heading would swing the occlusion bowl off the board for that whole
+      // interval and pop it back.
+      (this.groundMaterial.uniforms.uYawCS!.value as Vector2).set(Math.cos(yaw), Math.sin(yaw));
       // Board shadow lands opposite the sun, length scaled by its elevation.
       const horiz = Math.hypot(this.sunLocal.x, this.sunLocal.z);
       const drop = Math.max(0.25, -this.sunLocal.y);

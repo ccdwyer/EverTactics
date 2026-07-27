@@ -78,12 +78,17 @@ const CLIFF_MIN_DROP = 0.85;
  * it was tall — a 0.5-unit ledge sitting on a 0.55-unit slab of the same brick,
  * which just moved the repeated-underside problem down one storey. A quarter of a
  * half-tile is enough to read as a cut edge and nothing more.
+ *
+ * Round 4 took it to a sixth of a half-tile. With the round-4 plan the near rim is
+ * a toe at elevation 1, so anything the base adds is pure repeated brick sitting
+ * directly under the shortest, closest, most-in-focus masonry in the frame. At
+ * 0.16 it reads as the cut edge of a slice of terrain and stops being a plinth.
  */
-const SKIRT = 0.26;
+const SKIRT = 0.16;
 /** The base never rises above the waterline, or the pool would float over its own base. */
-const WATERLINE_SKIRT = 0.3;
+const WATERLINE_SKIRT = 0.24;
 /** …nor above the lowest walkable ground, so every column keeps some thickness. */
-const GROUND_SKIRT = 0.14;
+const GROUND_SKIRT = 0.09;
 /**
  * Thickness of a deck surface (`MapDef.deckSurfaces`) — a bridge is planking on
  * trestles, not a column of masonry, so its side faces stop this far below the top

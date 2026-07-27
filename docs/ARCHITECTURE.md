@@ -112,3 +112,23 @@ pets, stances, resource bars), not reskins.
 
 When you finish, report: files created/modified, what works, what is stubbed, what you had to
 assume, and anything you changed that other agents depend on.
+
+## Verifying renders (important)
+
+`tools/shoot.mjs` and `tools/play.mjs` default to the vite DEV server. That is convenient but not
+deterministic while other agents are editing: **any file save triggers an HMR reload**, the page
+returns to the boot splash *after* the harness already saw it clear, and the capture is a black
+rectangle. Both harnesses now re-check for the splash immediately before the shutter and wait it
+out, but the reliable path for anything you intend to judge is a static build:
+
+```
+npx vite build
+npx vite preview --port 4173 --strictPort &
+node tools/shoot.mjs --scene battle-open --port 4173 --out shots/x.png
+node tools/play.mjs  --keys "j" --port 4173 --out shots/jobscreen
+```
+
+`shoot.mjs` fails the shot (non-zero exit) when the frame never converged, the splash never
+cleared, the frame is effectively blank, or **any shader failed to compile** — a failed material
+does not blank the frame, three.js falls back and renders something wrong, so `ok: true` would
+otherwise be meaningless.

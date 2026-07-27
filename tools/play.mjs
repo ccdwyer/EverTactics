@@ -92,6 +92,19 @@ await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 let booted = true;
 try {
   await page.waitForFunction(() => window.__EVERTACTICS_READY__ === true, null, { timeout: 40000 });
+  // Same trap `shoot.mjs` hit: READY fires on renderer convergence, but the
+  // opaque #boot splash is removed on a later event. Waiting only on READY
+  // captures a black rectangle and reports booted:true with zero errors.
+  await page.waitForFunction(
+    () => {
+      const boot = document.getElementById('boot');
+      if (boot === null) return true;
+      const style = window.getComputedStyle(boot);
+      return style.display === 'none' || Number(style.opacity) < 0.02;
+    },
+    null,
+    { timeout: 40000 },
+  );
 } catch {
   booted = false;
 }

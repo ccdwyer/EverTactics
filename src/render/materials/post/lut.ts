@@ -196,9 +196,23 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     // the deep-shadow family lands somewhere the rest of the frame never visits.
     hueRotate: [4, -4, -8, -6, -11, 6],
     crosstalk: 0.08,
-    crush: 0.035,
-    blackPoint: [0.026, 0.026, 0.064],
-    shoulder: 0.18,
+    // ROUND 4, three separate notes: "the blacks are lifted into a flat purple and the
+    // midtones are compressed into a narrow band", "the blacks are lifted into blue so there
+    // is no true anchor point", "let true blacks reach black (stop lifting shadows into
+    // navy)". Measured on `refs/curated/triangle/official_005_steam.jpg`, the darkest
+    // sixteenth of that frame sits at code 6-14 with a warm cast; ours sat at 17-22 blue
+    // (0.064 * 255 = 16 before the vignette painted more on top).
+    //
+    // So: crush harder, and land what survives on a black point a third as bright. The hue
+    // is kept — a neutral black is a listed fail condition — but at this level it reads as
+    // "cold black" rather than as the flat violet plate the critics measured.
+    crush: 0.055,
+    blackPoint: [0.009, 0.014, 0.036],
+    // Raised from 0.18. "The highlights near the fire clip straight to white with no filmic
+    // shoulder" — at 0.18 the curve still reached 1.0 with slope well above zero, so the
+    // brazier core hit a flat plate. 0.32 rolls the top of the range off, which is what keeps
+    // a readable flame core inside the bloom rather than a white disc.
+    shoulder: 0.32,
     highlightPoint: [1.0, 0.965, 0.86],
     highlightPull: 0.45,
   }),

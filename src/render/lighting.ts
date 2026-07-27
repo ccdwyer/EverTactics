@@ -216,6 +216,33 @@ export interface LightingPreset {
    * orange, not "green with a warm tint".
    */
   practicalGain: number;
+
+  /**
+   * Falloff exponent for every practical. 2 is physical inverse-square.
+   *
+   * ROUND-4 NOTE, and it is the difference between a fire and a flashbulb.
+   *
+   * At decay 2 a brazier's irradiance is 4× its nominal at half a tile and a
+   * ninth of it at three tiles: a 36:1 range across the pool. Drive that hard
+   * enough for the far edge to be visible and the near edge is at 36× — which
+   * is the mechanism behind "the wall beside the fire is washed to featureless
+   * cream", "a blown-out white bloom disc", and "no flame core". The critics were
+   * not describing a bloom bug. They were describing the near field of an
+   * inverse-square point light with the gain turned up until its far field
+   * showed.
+   *
+   * A real flame is not a point. It is a half-metre column of luminous gas, and
+   * the irradiance near an extended source falls off closer to 1/d than 1/d² —
+   * which is exactly why photographs of braziers show a *pool*, several tiles
+   * across, with structure in it, rather than one clipped disc. Backing the
+   * exponent off to ~1.5 buys three times the readable radius for a third of
+   * the peak, at the same total energy.
+   *
+   * Cold fills stay nearer 2: a shaft of sky through an arch really is a distant
+   * source and should behave like one. So this is authored per preset rather
+   * than being a constant.
+   */
+  practicalDecay: number;
 }
 
 /**
@@ -241,6 +268,14 @@ export interface PracticalSpec {
   rate?: number;
   /** Positional wander amplitude in world units. Keeps the pool from being a decal. */
   sway?: number;
+  /**
+   * Per-light falloff exponent, overriding the preset's `practicalDecay`.
+   *
+   * Cold fills want this near 2 even on a fire preset: a shaft of sky through an
+   * arcade is a genuinely distant source, and softening its falloff turns a
+   * directional wash into a floating blue lamp.
+   */
+  decay?: number;
 }
 
 /** Hard cap on placed lights, so material shader permutations never change. */
@@ -378,7 +413,17 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // the key rather than a third, a brazier finally *can* be the brightest thing
     // on the ground near it — but only if it is driven hard enough to reach two
     // or three tiles before inverse-square eats it.
-    practicalGain: 3.3,
+    // Cut hard for round 4, and the cut is *paid for* by `practicalDecay`.
+    //
+    // At 3.3 with inverse-square the near field of every brazier clipped: the
+    // cloister wall a tile behind the fire came out as featureless cream with no
+    // masonry left in it, which is a fail condition on its own ("any flat
+    // untextured surface") as well as being the "blown-out white disc" note.
+    // Softening the falloff to 1.5 buys most of that reach back at a third of
+    // the peak — the pool is wider now and the stone inside it still has stones
+    // in it.
+    practicalGain: 1.9,
+    practicalDecay: 1.35,
   },
 
   /**
@@ -421,6 +466,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     colorSplit: 0.34,
     contrast: 0.55,
     practicalGain: 1.8,
+    practicalDecay: 1.8,
   },
 
   /**
@@ -460,6 +506,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     colorSplit: 0.5,
     contrast: 0.9,
     practicalGain: 2.6,
+    practicalDecay: 1.5,
   },
 
   /** Cold steel key, sodium underlight from the wet ground. Reads as wet stone. */
@@ -489,6 +536,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     colorSplit: 0.36,
     contrast: 0.7,
     practicalGain: 2.2,
+    practicalDecay: 1.6,
   },
 
   /**
@@ -523,6 +571,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     colorSplit: 0.44,
     contrast: 0.95,
     practicalGain: 2.8,
+    practicalDecay: 1.45,
   },
 };
 
@@ -549,12 +598,12 @@ export const LIGHTING_PRACTICALS: Readonly<Record<LightingPresetName, readonly P
    * tone the moment the braziers light up.
    */
   dawn: [
-    { u: 0.5, v: 0.54, y: 0.55, color: 0x4d90ff, intensity: 9, distance: 7.5, flicker: 0.07, rate: 1.7, sway: 0.04 },
+    { u: 0.5, v: 0.54, y: 0.55, color: 0x4d90ff, intensity: 9, distance: 7.5, flicker: 0.07, rate: 1.7, sway: 0.04, decay: 2 },
     // Outside the colonnade, not among it. Parked at v = 0.12 these sat inside a
     // pillar and put a blown blue highlight on its shaft — a sky wash has to
     // originate beyond the architecture it is washing, or it reads as a lamp.
-    { u: 0.5, v: 0.02, y: 3.2, color: 0x6aa4ff, intensity: 11, distance: 12.0, flicker: 0.04, rate: 0.7 },
-    { u: 0.02, v: 0.62, y: 3.0, color: 0x5c96f0, intensity: 8, distance: 10.0, flicker: 0.04, rate: 0.9 },
+    { u: 0.5, v: 0.02, y: 3.2, color: 0x6aa4ff, intensity: 11, distance: 12.0, flicker: 0.04, rate: 0.7, decay: 2 },
+    { u: 0.02, v: 0.62, y: 3.0, color: 0x5c96f0, intensity: 8, distance: 10.0, flicker: 0.04, rate: 0.9, decay: 2 },
   ],
 
   overcast: [
@@ -564,7 +613,7 @@ export const LIGHTING_PRACTICALS: Readonly<Record<LightingPresetName, readonly P
   dusk: [
     { u: 0.3, v: 0.36, y: 2.0, color: 0xff8e34, intensity: 16, distance: 6.0, flicker: 0.32, rate: 8.9, sway: 0.1 },
     { u: 0.72, v: 0.66, y: 2.0, color: 0xff9c46, intensity: 16, distance: 6.0, flicker: 0.32, rate: 7.3, sway: 0.1 },
-    { u: 0.5, v: 0.16, y: 3.2, color: 0x4fbcff, intensity: 12, distance: 8.0, flicker: 0.1, rate: 1.3 },
+    { u: 0.5, v: 0.16, y: 3.2, color: 0x4fbcff, intensity: 12, distance: 8.0, flicker: 0.1, rate: 1.3, decay: 2 },
   ],
 
   storm: [
@@ -581,7 +630,7 @@ export const LIGHTING_PRACTICALS: Readonly<Record<LightingPresetName, readonly P
     { u: 0.7, v: 0.36, y: 1.9, color: 0xffa252, intensity: 18, distance: 6.2, flicker: 0.36, rate: 6.7, sway: 0.12 },
     { u: 0.3, v: 0.74, y: 1.7, color: 0xff8a30, intensity: 20, distance: 6.5, flicker: 0.4, rate: 9.9, sway: 0.13 },
     { u: 0.72, v: 0.7, y: 1.7, color: 0xffb066, intensity: 15, distance: 6.0, flicker: 0.33, rate: 7.7, sway: 0.11 },
-    { u: 0.5, v: 0.5, y: 4.2, color: 0x6a95ff, intensity: 14, distance: 10.0, flicker: 0.06, rate: 0.9 },
+    { u: 0.5, v: 0.5, y: 4.2, color: 0x6a95ff, intensity: 14, distance: 10.0, flicker: 0.06, rate: 0.9, decay: 2 },
   ],
 };
 
@@ -665,6 +714,10 @@ export class LightingRig {
   private readonly adopted: PointLight[] = [];
   private readonly adoptedBase: number[] = [];
   private readonly adoptedHome: Vector3[] = [];
+  /** Authored hue of each adopted prop light, before the flicker's colour shift. */
+  private readonly adoptedColor: Color[] = [];
+  /** The one adopted light allowed to render a cube shadow. See `promoteShadowCaster`. */
+  private shadowCaster: PointLight | null = null;
   private adoptScan = 0;
   /** Set once an owner drives `update()`, which retires the fallback ticker. */
   private externallyDriven = false;
@@ -1136,8 +1189,24 @@ export class LightingRig {
     // spends most of its area at the bottom of it. Pulling the fill to a tenth
     // of the key is what lets a brazier's own pool become the brightest thing on
     // the flagstones instead of a warm tint over an already-lit floor.
-    const targetHemi = key * 0.13;
-    const targetAmbient = key * 0.014;
+    //
+    // Round 4 pulled them again, and this time it was measured against
+    // `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` rather than argued
+    // from first principles. In that frame the four corners are *pure black* —
+    // not navy, black — and the readable image occupies warm pools two or three
+    // tiles across around each fire. Our round-4 frame at the same moment had a
+    // mean luma of 57/255 with a p05 of 8, i.e. almost nothing in it was dark;
+    // every top face across the whole diorama sat inside one gold value band.
+    // That is the difference the critics keep describing as "lit like a viewport,
+    // not like a place".
+    //
+    // Note what this does *not* do: it does not dim the frame. Every unit of
+    // irradiance taken off the flat terms below is handed back to the key a few
+    // lines down, so the lit band holds and only the unlit half falls away. The
+    // measurable effect is a wider luminance histogram, which is exactly the
+    // metric `tools/metrics.mjs` gates on.
+    const targetHemi = key * 0.1;
+    const targetAmbient = key * 0.009;
     const targetRim = key * 0.27;
     // Not lower than this. Measured on `mandalia-ford`, which authors contrast 0.9
     // over an already-dim dusk exposure: at a 0.6 cap the far bank of the river
@@ -1145,7 +1214,13 @@ export class LightingRig {
     // tiles the player has to count. The probe is *directional* irradiance, so it
     // is the cheapest term to keep — it holds hue and form in the shadow side
     // without flattening the volume the way raising the flat ambient would.
-    const targetProbe = Math.min(s.probeIntensity, 0.68);
+    // 0.56 rather than round 3's 0.68. The probe is the largest single fill term
+    // once hemi and ambient have been cut, so it is also the one still holding
+    // the shadow side up at roughly a third of the key. It stays the *last* term
+    // to be cut, though, and never to zero: it is directional irradiance, so it
+    // is what keeps a shadowed wall coloured and legible rather than merely
+    // black, and the fail list forbids obscuring tiles the player has to count.
+    const targetProbe = Math.min(s.probeIntensity, 0.56);
 
     const hemi = MathUtils.lerp(s.hemiIntensity, targetHemi, drama);
     const ambient = MathUtils.lerp(s.ambientIntensity, targetAmbient, drama);
@@ -1256,7 +1331,9 @@ export class LightingRig {
       // pure red, and fire photographs amber, never red.
       light.color.setHex(spec.color, 'srgb');
       light.distance = spec.distance;
-      light.decay = 2;
+      // Extended-source falloff by default (see `practicalDecay`), overridable
+      // per light so a cold sky shaft can stay physically distant.
+      light.decay = Math.max(0, spec.decay ?? this.live.practicalDecay);
       // The gain is the rig's, for the same reason the contrast policy is: a
       // brazier authored to look right on its own is invisible once it is one of
       // six, twenty tiles back, behind a tone mapper and a grade.
@@ -1289,6 +1366,7 @@ export class LightingRig {
     this.adopted.length = 0;
     this.adoptedBase.length = 0;
     this.adoptedHome.length = 0;
+    this.adoptedColor.length = 0;
     this.scene.traverse((o: Object3D) => {
       if (this.adopted.length >= MAX_ADOPTED) return;
       const light = o as PointLight;
@@ -1300,7 +1378,87 @@ export class LightingRig {
       this.adoptedBase.push(light.userData['baseIntensity'] as number | undefined ?? light.intensity);
       light.userData['baseIntensity'] = this.adoptedBase[this.adoptedBase.length - 1];
       this.adoptedHome.push(light.position.clone());
+      // Cached once, because the flicker rewrites `light.color` every frame and
+      // re-reading it would let the temperature shift compound into pure red
+      // over a few seconds.
+      const authored = light.userData['baseColor'] as Color | undefined;
+      if (authored) {
+        this.adoptedColor.push(authored);
+      } else {
+        const c = light.color.clone();
+        light.userData['baseColor'] = c;
+        this.adoptedColor.push(c);
+      }
+      // Falloff is the rig's, for the same reason level is. A prop author places
+      // a brazier and picks a candela that looks right standing next to it; what
+      // they cannot see from there is that at decay 2 the pool is 36:1 from its
+      // near edge to its far one, so the fire either clips the stone beside it or
+      // reaches nothing. See `practicalDecay`.
+      light.decay = Math.max(0, this.live.practicalDecay);
     });
+    this.promoteShadowCaster();
+  }
+
+  /**
+   * Give the brightest fire on the map a real shadow.
+   *
+   * A point light with `castShadow` off illuminates *through* everything: the
+   * railing standing in front of a brazier lights up on both sides, the wall
+   * behind it takes the full pool with no bar of darkness across it, and the
+   * unit standing between the fire and the stone leaves no mark. That is the
+   * mechanism behind three separate round-3 notes — "the warm pools read as
+   * emissive quads rather than as illumination", "no character casts anything
+   * onto the tile it stands on", "several courtyard blocks pick up warm light
+   * with no source in the direction the falloff implies". A directional key
+   * cannot fix any of them, because none of them are about the sun.
+   *
+   * Exactly one light is promoted, and deliberately so. A point-light shadow is
+   * a cube map: six render passes per light per frame. One is affordable at 512²
+   * over a five-tile radius (~0.02 world units per texel, finer than the
+   * directional map gets over the whole diorama); four would quadruple the
+   * scene's shadow cost for pools that mostly do not overlap anything anyway.
+   *
+   * The promotion is sticky. Toggling `castShadow` changes
+   * `NUM_POINT_LIGHT_SHADOWS`, which recompiles every material in the scene, so
+   * it must not chase the flicker — the choice is made on the *authored* base
+   * intensity, which is constant, and re-evaluated only when the adopted set
+   * itself changes (terrain rebuild).
+   */
+  private promoteShadowCaster(): void {
+    let best: PointLight | null = null;
+    let bestScore = 0;
+    for (let i = 0; i < this.adopted.length; i++) {
+      const light = this.adopted[i]!;
+      // Reach, not raw candela: a 6-candela lamp with a 12-unit radius throws its
+      // occlusion across far more of the frame than a 30-candela one clamped to 3.
+      const score = (this.adoptedBase[i] ?? 0) * Math.max(0.5, light.distance);
+      if (score > bestScore) {
+        bestScore = score;
+        best = light;
+      }
+    }
+    if (best === this.shadowCaster) return;
+
+    if (this.shadowCaster) {
+      this.shadowCaster.castShadow = false;
+      this.shadowCaster.shadow.map?.dispose();
+      this.shadowCaster.shadow.map = null;
+    }
+    this.shadowCaster = best;
+    if (!best) return;
+
+    best.castShadow = true;
+    best.shadow.mapSize.setScalar(512);
+    // Near has to clear the brazier's own bowl or the fire shadows itself and the
+    // pool comes out with a black disc punched in the middle of it.
+    best.shadow.camera.near = 0.25;
+    best.shadow.camera.far = Math.max(2, best.distance > 0 ? best.distance : 8);
+    best.shadow.camera.updateProjectionMatrix();
+    // Same policy as the key: near-zero constant bias so contact stays attached,
+    // and the work done by a normal offset sized to roughly one shadow texel.
+    best.shadow.bias = -0.0006;
+    best.shadow.normalBias = 0.045;
+    best.shadow.radius = 3;
   }
 
   /** Advance torch flicker. Split out so the fallback ticker and `update()` share it. */
@@ -1318,8 +1476,37 @@ export class LightingRig {
       const light = this.adopted[i]!;
       const base = this.adoptedBase[i]! * gain;
       const home = this.adoptedHome[i]!;
+      // Deepened for round 4, and biased low.
+      //
+      // The old curve ran 0.78–1.26 of base: a ±23% wobble, which on stone that
+      // is also carrying a directional key is under the threshold at which a
+      // still frame shows anything at all. The brief for this round is that the
+      // surrounding stone should visibly *pulse*, and both reference corpora
+      // support a far wider swing — a brazier in
+      // `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` puts its pool
+      // over roughly a two-stop range as it breathes.
+      //
+      // `pow(x, 1.35)` spends more of the cycle guttering than flaring, which is
+      // what fire does; the mean lands within a few percent of base so the map's
+      // overall exposure does not move.
       const n = flickerNoise(t * 5.6, i * 4.7);
-      light.intensity = base * (0.78 + 0.34 * (n * 0.5 + 0.5) * 1.4);
+      const x = Math.min(1, Math.max(0, n * 0.5 + 0.5));
+      const drive = 0.55 + 1.0 * Math.pow(x, 1.35);
+      light.intensity = base * drive;
+      // Temperature follows brightness, because it does in a real flame: a
+      // guttering coal is deep orange and a flare is nearly yellow-white. This is
+      // also what `vfx.ts` reads to tint the embers and the flame tongues, so the
+      // plume changes colour on the same curve as the light — one event, not two
+      // systems that happen to be flickering nearby.
+      const authored = this.adoptedColor[i];
+      if (authored) {
+        const warm = drive - 1;
+        light.color.setRGB(
+          authored.r,
+          authored.g * (1 + 0.13 * warm),
+          authored.b * (1 + 0.42 * warm),
+        );
+      }
       light.position.set(
         home.x + flickerNoise(t * 2.9, i * 2.3) * 0.05,
         home.y + flickerNoise(t * 3.7, i * 6.1) * 0.07,
@@ -1358,6 +1545,15 @@ export class LightingRig {
     if (this.rafHandle !== null && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(this.rafHandle);
       this.rafHandle = null;
+    }
+    // Hand the prop light back the way it was found. It belongs to `terrain.ts`,
+    // and leaving a disposed cube shadow attached to a live scene light outlives
+    // this rig in a way nothing else here does.
+    if (this.shadowCaster) {
+      this.shadowCaster.castShadow = false;
+      this.shadowCaster.shadow.map?.dispose();
+      this.shadowCaster.shadow.map = null;
+      this.shadowCaster = null;
     }
     this.key.shadow.map?.dispose();
     this.key.dispose();

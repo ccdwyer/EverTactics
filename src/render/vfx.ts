@@ -248,13 +248,31 @@ function buildAtlas(): HTMLCanvasElement {
   });
 
   // 3 flame wisp — teardrop, hot at the base, torn at the tip.
+  //
+  // ORIENTATION MATTERS, and it was wrong until round 4.
+  //
+  // `v` here runs 1 at the cell's top row to 0 at its bottom row, so the wide
+  // opaque base is at the TOP of the cell image. That is deliberate and it is
+  // the opposite of what reads naturally when you author the bitmap.
+  //
+  // The chain: the atlas is uploaded with `flipY = false`, so texture v = 0 is
+  // the cell's first (top) canvas row; the quad is a `PlaneGeometry` whose
+  // uv.y = 0 sits at local −Y. So the cell's top row lands at the BOTTOM of the
+  // billboard. A velocity-stretched particle (`stretch > 0`) then aligns local
+  // +Y with its direction of travel — which means for a rising flame the cell's
+  // *bottom* row is what points upward.
+  //
+  // Authored the intuitive way round, every flame tongue in the brazier plume
+  // rendered fat-end-first with the taper trailing below it: a rising blob, not
+  // a flame. Which is precisely what it looked like.
   cell(SPR.flame, (g, cx, cy) => {
     const noise = valueNoise(rng, C);
     const img = g.createImageData(C, C);
     for (let y = 0; y < C; y++) {
       for (let x = 0; x < C; x++) {
         const u = (x - H) / H;
-        const v = y / C; // 0 top, 1 bottom
+        // 1 at the cell's top row (the flame's base), 0 at the bottom (its tip).
+        const v = 1 - y / C;
         const width = 0.30 + 0.60 * Math.pow(v, 0.8);
         // Powered falloff, and the noise only *removes* density. A flame cell that
         // saturates to alpha 1 across most of its area stacks into a flat white slab
@@ -938,19 +956,31 @@ void main() {
   // gaussian halo is exactly the "uniform blur halo" the critics called out on
   // the background windows — real lamps have a hot filament and a long, faint,
   // non-gaussian glare that reaches much further than the core suggests.
+  //
+  // ROUND-4 REBALANCE. Until now this card *was* the fire — there was no flame
+  // body behind it — so it was driven hard enough to be the brightest thing in
+  // the frame on its own, and six critics wrote back "a blown-out white bloom
+  // disc with no flame core", "a bloom sprite with a light-radius multiply, not
+  // a light", "the wall beside it is washed to featureless cream". All three are
+  // what a ×5 additive disc does to a tonemapper.
+  //
+  // The flame tongues in spawnFlame() now own the core. So this reverts to what
+  // a glare card is actually for: the *air* around a fire, wide and dim and
+  // unmistakably amber, with a soft centre that lifts the plume rather than
+  // replacing it. Its job is to make the stone behind the flame glow, not to be
+  // the flame.
   vec2 d = vGlowUv * 2.0 - 1.0;
   float r = length(d);
   if (r > 1.0) discard;
-  float core = pow(max(0.0, 1.0 - r * 3.2), 2.6);
-  float skirt = pow(max(0.0, 1.0 - r), 3.4);
-  float a = core * 0.85 + skirt * 0.30;
+  float core = pow(max(0.0, 1.0 - r * 2.3), 2.1);
+  float skirt = pow(max(0.0, 1.0 - r), 2.7);
+  float a = core * 0.30 + skirt * 0.26;
   if (a <= 0.002) discard;
-  // Deliberately short of the ×3 that would make the core pure white. A flame's
-  // glare does blow out, but it blows out *amber*; driving the core so far past
-  // the tonemapper's shoulder that all three channels clip turns every fire in
-  // the frame into the same white disc and throws away the hue the light is
-  // supposed to be advertising.
-  gl_FragColor = vec4(vGlowTint * (0.45 + core * 1.55), a);
+  // Blue is held down as radius grows: the near field of a flame's glare is
+  // yellow-white and its outer reach is deep orange, and letting the skirt keep
+  // its full blue channel is what turns a halo into fog.
+  vec3 tint = vGlowTint * vec3(1.0, 0.94 - 0.1 * r, 0.72 - 0.42 * r);
+  gl_FragColor = vec4(tint * (0.52 + core * 0.62), a);
 }
 `;
 
@@ -1626,6 +1656,12 @@ export interface VfxLightOptions {
   flickerRate?: number;
   /** Eviction rank. Impacts 3, casts 2, sustained glows 1. */
   priority?: number;
+  /**
+   * Falloff exponent. Defaults to 1.55 — soft, extended-source falloff, so the
+   * pool spreads over the blast radius instead of clipping at its centre. Pass 2
+   * for something that genuinely is a point (a spark, a pinpoint of holy light).
+   */
+  decay?: number;
 }
 
 /** Live control over a spawned light, for travelling projectiles and charges. */
@@ -2065,6 +2101,23 @@ export interface AmbienceOptions {
   drift?: number;
   /** Embers per second from each practical at full intensity. */
   emberRate?: number;
+  /**
+   * Flame-tongue particles per second from each practical.
+   *
+   * ROUND-4 NOTE. This is the number that turns a light into a fire. Up to round
+   * 3 a brazier was a point light plus one additive glare card, and every critic
+   * wrote the same sentence about it: "the fire is a blown-out white bloom disc
+   * with no flame core, no particle detail" / "it is a bloom sprite with a
+   * light-radius multiply, not a light". They were describing the absence of a
+   * *body*. A real flame in the reference frames is a stack of short-lived,
+   * upward-accelerating tongues that taper and tear — the glare is what that body
+   * does to the lens, not the thing itself, and drawing only the glare is drawing
+   * only the artefact.
+   *
+   * The rate has to be high (a tongue lives ~0.4 s, so ~30/s holds a dozen alive)
+   * and the lifetime short, or the plume reads as smoke.
+   */
+  flameRate?: number;
   /** Overall opacity scale, 0..1. */
   intensity?: number;
 }
@@ -2135,6 +2188,9 @@ export class VfxSystem {
   private readonly emberSources: PointLight[] = [];
   private readonly emberBase: number[] = [];
   private readonly emberAccum: number[] = [];
+  /** Per-source fractional spawn budgets for the flame body and its heat plume. */
+  private readonly flameAccum: number[] = [];
+  private readonly hazeAccum: number[] = [];
   private emberScan = 0;
   private readonly ambColor = new Color();
   /**
@@ -2199,7 +2255,10 @@ export class VfxSystem {
     this.alpha = new ParticleBatch(Math.floor(capacity / 2), this.atlas, false, 13);
     // Behind the combat particles in render order: atmosphere is a bed, never a
     // subject, and it must not sit on top of an impact flash.
-    this.ambienceBatch = new ParticleBatch(768, this.atlas, true, 11);
+    // Raised from 768 with the round-4 flame body: a four-brazier map now holds
+    // ~460 motes, ~95 embers and ~55 flame tongues at steady state, and a ring
+    // buffer that wraps mid-plume tears a hole in the fire on the frame it wraps.
+    this.ambienceBatch = new ParticleBatch(1024, this.atlas, true, 11);
     this.ambienceBatch.material.uniforms['uIntensity']!.value = 1;
     this.glow = new GlowCards(GLOW_CAPACITY);
     this.group.add(this.additive.mesh, this.alpha.mesh, this.ambienceBatch.mesh, this.glow.mesh);
@@ -2214,6 +2273,7 @@ export class VfxSystem {
       color: (amb.color ?? new Color(1.0, 0.74, 0.42)).clone(),
       drift: amb.drift ?? 0.16,
       emberRate: amb.emberRate ?? 13,
+      flameRate: amb.flameRate ?? 34,
       intensity: amb.intensity ?? 1.7,
     };
     this.moteTint.copy(this.ambience.color);
@@ -2305,6 +2365,7 @@ export class VfxSystem {
     }
     if (options.drift !== undefined) this.ambience.drift = options.drift;
     if (options.emberRate !== undefined) this.ambience.emberRate = Math.max(0, options.emberRate);
+    if (options.flameRate !== undefined) this.ambience.flameRate = Math.max(0, options.flameRate);
     if (options.intensity !== undefined) this.ambience.intensity = Math.max(0, options.intensity);
   }
 
@@ -2391,18 +2452,30 @@ export class VfxSystem {
       // flame is burning *right now*, and both the size and the brightness of the
       // glare follow it. A constant-radius halo over a flickering light is the
       // giveaway that the two are separate systems.
-      const drive = Math.min(2.4, light.intensity / base);
+      const drive = Math.min(1.9, light.intensity / base);
       const c = this.ambColor.copy(light.color);
-      // Well above 1 so the core clips the bloom threshold on its own merit
-      // rather than needing the threshold dropped until the whole frame hazes.
-      const gain = 2.1 * drive;
+      // Wider and much dimmer than round 3. The flame tongues carry the hot core
+      // now, so this is halo only: at 2.1× it was clipping every channel over a
+      // tile and a half of stone and reading as a white disc, which is the note
+      // we got six times. Roughly halving the gain and pushing the radius out is
+      // the same total energy spread over three times the area — visible as a
+      // glow on the masonry instead of a hole burnt in it.
+      const gain = 0.78 * drive;
+      // The card is lifted a little off the light. A brazier's glare sits in the
+      // air above the coals; centred on the light it half-buries itself in the
+      // bowl and the bottom of the halo is clipped by the prop.
+      this.glowPos.y += 0.12 * this.tileSize;
       this.glow.set(
         n,
         this.glowPos,
         c.r * gain,
         c.g * gain,
         c.b * gain,
-        (0.66 + 0.34 * drive) * this.tileSize,
+        // Wide and faint, which is what the reference braziers actually do: in
+        // `press_002` each fire throws a soft warm bloom two to three tiles
+        // across with a very small hot centre. The failure mode we came from was
+        // the opposite shape — narrow, clipped, and hard-edged.
+        (1.35 + 0.5 * drive) * this.tileSize,
       );
       n++;
     }
@@ -2429,6 +2502,8 @@ export class VfxSystem {
     this.emberSources.length = 0;
     this.emberBase.length = 0;
     this.emberAccum.length = 0;
+    this.flameAccum.length = 0;
+    this.hazeAccum.length = 0;
     if (!scene) return;
 
     const box = this.v0;
@@ -2460,6 +2535,8 @@ export class VfxSystem {
         this.emberSources.push(light);
         this.emberBase.push(base);
         this.emberAccum.push(0);
+        this.flameAccum.push(0);
+        this.hazeAccum.push(0);
         return;
       }
       const mesh = o as Mesh;
@@ -2556,6 +2633,144 @@ export class VfxSystem {
     this.ambienceBatch.spawn(s, this.clock);
   }
 
+  /**
+   * Rise one flame tongue off a practical. This is the fire's *body*.
+   *
+   * Everything about the shape is chosen against the reference braziers rather
+   * than picked to look busy:
+   *
+   *  - **Short life, high rate.** 0.26–0.5 s. A tongue that lives a second
+   *    travels a tile and a half and the plume reads as smoke; the flame in
+   *    `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` is a *dense*
+   *    object, which means many particles each present for a moment.
+   *  - **Decelerating, not ballistic.** High initial rise with heavy drag, so
+   *    the tongues bunch near the bowl and thin toward the tip. That taper is
+   *    the entire silhouette of a flame; constant velocity gives a column.
+   *  - **Velocity stretch.** `stretch` aligns the quad with screen-space motion,
+   *    so a tongue elongates upward and the torn tip of the atlas cell points
+   *    the way it is going. A camera-facing round blob is the thing we already
+   *    had, and it was called a bloom disc.
+   *  - **Colour ramps down, not out.** Birth is well past 1.0 in red so the core
+   *    clips the bloom threshold on its own; death is a deep unclipped red. The
+   *    blue channel is held near zero throughout — a flame that fades to white
+   *    is a flame that has lost its hue to the tonemapper, which is exactly the
+   *    "blown-out white disc" note.
+   *
+   * The particle is born *below* the light, because `lighting.ts` and
+   * `terrain.ts` both place a brazier's point light at flame height so its pool
+   * lands correctly on the floor. Spawning at the light would start the fire in
+   * the middle of itself.
+   */
+  private spawnFlame(source: PointLight, drive: number, age: number): void {
+    const rng = this.rng;
+    const s = this.spawnScratch;
+    const tile = this.tileSize;
+    source.getWorldPosition(this.v1);
+
+    // Tight radial cluster: a flame's base is narrower than its middle.
+    const a0 = rng.next() * Math.PI * 2;
+    const r0 = 0.115 * tile * Math.sqrt(rng.next());
+    s.position.set(
+      this.v1.x + Math.cos(a0) * r0,
+      this.v1.y - 0.2 * tile + rng.range(0, 0.06) * tile,
+      this.v1.z + Math.sin(a0) * r0,
+    );
+
+    // Hotter flame = faster, taller tongues. `drive` is the light's live flicker,
+    // so the plume visibly surges on the same curve that brightens the stone.
+    const surge = 0.82 + 0.4 * drive;
+    s.velocity.set(
+      rng.jitter(0.22) * tile,
+      rng.range(1.5, 2.9) * tile * surge,
+      rng.jitter(0.22) * tile,
+    );
+    // Slight outward-and-up curl. Real flames lean; a perfectly vertical plume
+    // is the tell of a particle system with no wind term.
+    s.acceleration.set(
+      Math.cos(a0) * 0.5 * tile + 0.18 * tile,
+      rng.range(-0.9, -0.2) * tile,
+      Math.sin(a0) * 0.5 * tile,
+    );
+    s.lifetime = rng.range(0.26, 0.5);
+
+    const scale = rng.range(0.72, 1.35) * (0.86 + 0.2 * drive);
+    s.sizeStart = 0.42 * tile * scale;
+    s.sizeEnd = 0.07 * tile * scale;
+
+    // Push the source hue hot without pushing it white. Red is driven far past
+    // the shoulder, green partway, blue barely at all — a flame that fades to
+    // white has lost the only information the light was carrying.
+    //
+    // Alpha stays well under 1 for the same reason the combat flame burst does:
+    // a dozen additive cards at full opacity stack to a flat clipped slab and
+    // the plume loses every internal edge, which is the "featureless blown-out
+    // disc" failure arriving by a different route.
+    const c = this.ambColor.copy(source.color);
+    const a = rng.range(0.3, 0.58) * this.ambience.intensity;
+    s.color0 = [c.r * 2.3 + 0.75, c.g * 1.25 + 0.12, c.b * 0.34, a];
+    s.color1 = [c.r * 0.5, c.g * 0.1, c.b * 0.02, 0];
+    // Mostly teardrops; a fifth are torn wisps so the plume's edge is ragged.
+    s.sprite = rng.next() < 0.2 ? SPR.wisp : SPR.flame;
+    s.angle = 0;
+    s.spin = 0;
+    s.fadeIn = 0.12;
+    s.fadeOut = 0.34;
+    s.drag = 3.4;
+    s.stretch = 0.75;
+    s.orbit = [0, 0, 0, 0];
+    s.delay = -age;
+    this.ambienceBatch.spawn(s, this.clock);
+  }
+
+  /**
+   * One slow, wide, near-transparent warm plume above a practical.
+   *
+   * The honest version of heat shimmer is a screen-space refraction pass, which
+   * lives in `post.ts` and is not this file's to write. What *is* this file's is
+   * the thing the shimmer would be distorting: hot air above a fire is visible
+   * in both reference corpora as a soft column that swallows contrast and
+   * carries the flame's colour a good height above the flame itself. Rendered as
+   * a handful of large, spinning, barely-there additive cards it reads as rising
+   * heat rather than as smoke, and — because it is additive and unlit — it lifts
+   * the stone behind it slightly, which is the same cue refraction would give.
+   */
+  private spawnHaze(source: PointLight, drive: number, age: number): void {
+    const rng = this.rng;
+    const s = this.spawnScratch;
+    const tile = this.tileSize;
+    source.getWorldPosition(this.v1);
+    s.position.set(
+      this.v1.x + rng.jitter(0.18 * tile),
+      this.v1.y + rng.range(0.1, 0.35) * tile,
+      this.v1.z + rng.jitter(0.18 * tile),
+    );
+    s.velocity.set(rng.jitter(0.16) * tile, rng.range(0.7, 1.25) * tile, rng.jitter(0.16) * tile);
+    s.acceleration.set(rng.jitter(0.12) * tile, 0.12 * tile, rng.jitter(0.12) * tile);
+    s.lifetime = rng.range(1.1, 2.0);
+    const scale = rng.range(0.85, 1.4);
+    s.sizeStart = 0.26 * tile * scale;
+    s.sizeEnd = 0.68 * tile * scale;
+    const c = this.ambColor.copy(source.color);
+    // Kept genuinely faint. The first pass ran this three times brighter and it
+    // read as a pink smoke smear laid over the wall behind the fire rather than
+    // as hot air — additive at a visible alpha over already-lit masonry desatur-
+    // ates it toward magenta, which is the opposite of the intended cue. Heat
+    // haze is meant to be noticed only as an absence of crispness.
+    const a = rng.range(0.022, 0.055) * this.ambience.intensity * (0.7 + 0.4 * drive);
+    s.color0 = [c.r * 0.55, c.g * 0.3, c.b * 0.1, a];
+    s.color1 = [c.r * 0.2, c.g * 0.09, c.b * 0.03, 0];
+    s.sprite = SPR.smoke;
+    s.angle = rng.next() * Math.PI * 2;
+    s.spin = rng.jitter(0.55);
+    s.fadeIn = 0.3;
+    s.fadeOut = 0.25;
+    s.drag = 0.8;
+    s.stretch = 0;
+    s.orbit = [0, 0, 0, 0];
+    s.delay = -age;
+    this.ambienceBatch.spawn(s, this.clock);
+  }
+
   /** Rise one ember off a practical, tinted and rate-limited by that light. */
   private spawnEmber(source: PointLight, age: number): void {
     const rng = this.rng;
@@ -2627,6 +2842,11 @@ export class VfxSystem {
         const source = this.emberSources[i]!;
         const n = Math.round(opts.emberRate * 1.6);
         for (let k = 0; k < n; k++) this.spawnEmber(source, this.rng.next() * 1.8);
+        // Prime the flame body too, or the first ~0.4 s of any screenshot shows
+        // a brazier that is lighting the floor with nothing burning in it.
+        const f = Math.round(opts.flameRate * 0.42);
+        for (let k = 0; k < f; k++) this.spawnFlame(source, 1, this.rng.next() * 0.42);
+        for (let k = 0; k < 3; k++) this.spawnHaze(source, 1, this.rng.next() * 1.5);
       }
     }
 
@@ -2651,6 +2871,25 @@ export class VfxSystem {
         this.spawnEmber(source, 0);
       }
       if (budget <= 0) this.emberAccum[i] = 0;
+
+      // The flame body runs off the same `drive`, and that is the whole point of
+      // reading it from the light rather than from a timer: `lighting.ts` is
+      // flickering this brazier every frame, so the plume surges and gutters on
+      // exactly the curve that brightens and dims the stone around it. One
+      // event, two renderers agreeing about it.
+      this.flameAccum[i] = (this.flameAccum[i] ?? 0) + opts.flameRate * drive * dt;
+      let flameBudget = 10;
+      while ((this.flameAccum[i] ?? 0) >= 1 && flameBudget-- > 0) {
+        this.flameAccum[i] = (this.flameAccum[i] ?? 0) - 1;
+        this.spawnFlame(source, drive, 0);
+      }
+      if (flameBudget <= 0) this.flameAccum[i] = 0;
+
+      this.hazeAccum[i] = (this.hazeAccum[i] ?? 0) + 2.6 * drive * dt;
+      if ((this.hazeAccum[i] ?? 0) >= 1) {
+        this.hazeAccum[i] = 0;
+        this.spawnHaze(source, drive, 0);
+      }
     }
   }
 
@@ -2903,7 +3142,13 @@ export class VfxSystem {
     slot.light.position.copy(slot.home);
     slot.light.color.copy(o.color);
     slot.light.distance = Math.max(0.5, o.radius * this.tileSize);
-    slot.light.decay = 2;
+    // Extended-source falloff, for the same reason `lighting.ts` gives its
+    // braziers one: a fireball is a two-metre ball of luminous gas, not a point,
+    // and at decay 2 the only way to make its light reach the far edge of the
+    // blast is to clip everything within half a tile of the centre to white. The
+    // pool the eye actually reads — several tiles of warm stone with structure
+    // still in it — needs a falloff nearer 1/d.
+    slot.light.decay = o.decay ?? 1.55;
     slot.light.intensity = 0;
 
     return {

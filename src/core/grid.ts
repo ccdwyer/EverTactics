@@ -483,7 +483,50 @@ function deriveSlope(field: Battlefield, x: number, y: number): SlopeKind {
 /**
  * Orbonne Monastery's cloister garden.
  *
- * ROUND 3: THE SILHOUETTE.
+ * ROUND 4: BREAK THE BOX.
+ *
+ * Round 3 raggedised the outline but the plan was still, in mass terms, a solid
+ * rectangular prism: every one of the four ranges carried its full height right
+ * out to the map boundary, so whichever way the camera yawed it was looking at a
+ * wall of masonry that ran from a parapet down to the diorama's underside. The
+ * round-4 critics measured the consequence — the near faces were ~40% of the
+ * frame and the object's silhouette was a rectangle from every yaw.
+ *
+ * Four plan-level moves fix that, none of them a material:
+ *
+ * **The east range is gone; a single tower survives.** Column 13 is void for its
+ * whole length. What was a two-tile-deep, four-storey-tall east wall is now the
+ * one-tile-wide belfry stump at (12,6) — impassable, elevation 8 — standing on a
+ * shoulder that terraces 5 / 6 / 6 / 3 down columns 11–12. From the east the map
+ * now reads as a spur with a tower on it, not as a slab.
+ *
+ * **The whole south-east quarter has fallen away.** `x` ≥ 10 is void south of
+ * row 8 and `x` ≥ 9 is void at row 10, so the default south-east camera looks
+ * diagonally *into* the garth over a missing corner instead of over a parapet.
+ *
+ * **The north-east shoulder terraces off.** Rows 0–3 fall 5 → 4 → 3 → 2 as they
+ * run east and the corner at (11,0)–(13,3) is gone entirely, so the north
+ * elevation is a descending stair rather than a level battlement.
+ *
+ * **The near (south) rim is a toe, not a wall.** Row 12 dropped from a flat
+ * course of 3 to 2–3, and the outer course at row 13 from 4/2 merlons to 3/1, so
+ * the masonry closest to the camera is roughly half the height it was and the
+ * repeated brick underside stops owning the bottom of the frame.
+ *
+ * Inside, height is not decoration:
+ *
+ * - The **chapel footing** (4,3)–(5,4) is now a real plinth at 5, standing three
+ *   half-tiles proud of the garth at 2 with a 3-high face onto it, reached only
+ *   from the cloister floor at row 2.
+ * - A **dirt ramp at (3,3)** runs 4 → 3 → 2 north-to-south off that floor into
+ *   the garden — a fourth true derived ramp beside the three banks.
+ * - A **timber gallery** at (2,7)–(3,7) is `bridge` deck at elevation 6: a
+ *   `deckSurfaces` tile is planking on trestles, not a filled column, so it
+ *   genuinely overhangs the garth four half-tiles below it and the camera sees
+ *   daylight underneath. It is a spur off the west walk; you drop off it, you do
+ *   not cross it.
+ *
+ * ROUND 3 NOTES (still in force):
  *
  * The previous plan was still, underneath its void bites, a square ring of walls
  * of one height around a flat lawn. Critics named it every round: "a symmetric
@@ -492,35 +535,40 @@ function deriveSlope(field: Battlefield, x: number, y: number): SlopeKind {
  *
  * Two rules drive this layout.
  *
- * **1. Every exterior elevation is terraced, never a single slab.** A wall that
- * runs from its parapet straight down to the diorama's underside is a brick
- * billboard, and the near face of the map is 40% of the frame. So the ranges are
- * fronted by a low outer plinth one to three half-tiles high — `blocked`, not
- * `void`, so it is real geometry that the camera sees but pathfinding ignores.
- * From outside, the north reads plinth 2/3 → arcade 6 → pier 10; the west reads
- * shelf 1/3 → walk 6; the south reads threshold 2/3/4 → path 3 → lawn 2. Three
- * masses at three depths instead of one face.
+ * **1. Every exterior elevation is a buttress rhythm, never a single slab.** A
+ * wall that runs from its parapet straight down to the diorama's underside is a
+ * brick billboard, and the near face of the map is 40% of the frame. So the whole
+ * perimeter is fronted by an outer course — `blocked`, not `void`, so it is real
+ * geometry the camera sees and pathfinding ignores — that alternates between a
+ * height-5 pier and a height-2 plinth every tile. The result is that any near face
+ * at any yaw is a row of projecting piers with recessed panels between them, over
+ * a low toe, under an arcade at 6 and colonnade piers at 10: four depths, four
+ * heights, no flat run longer than one tile.
  *
  * **2. The footprint is ragged on all four sides, so no yaw sees a rectangle.**
  * The apse (`x` 12–13, `y` 0–3) is gone. The whole **south-east quarter** is gone
  * — `x` ≥ 11 south of row 9, and `x` ≥ 12 south of row 8 — which is what lets the
  * default south-east camera look straight into the garden instead of over a
  * parapet. The east range survives only as a tower between rows 4 and 8, dropping
- * 8 → 7 → 5 as it goes south. The north plinth is broken by gaps at `x` 4 and 9.
- * The west shelf stops entirely at rows 8–10.
+ * 8 → 8 → 7 → 5 as it goes south. The north course is broken by a gap at `x` 4,
+ * behind which (4,1) drops to 3: a breach you can see the garden through. The west
+ * course is broken at rows 6 and 9, and the walk itself falls to garden level at
+ * rows 8–9, so the west wall has a hole in it too.
  *
- * Inside, the play space has five levels, not one lawn: the reflecting pool at 0,
- * the garden at 2, the south path and the turf shoulder at 3, the west walk / east
- * bank / plank bridge at 4, and the north-east chapel terrace at 5, reached by the
- * 3 → 4 → 5 steps at (8,4)/(9,4). The fountain plinth is stepped 7/6/6/5 and the
- * colonnade piers spike to 10, so the vertical read is never uniform.
+ * Inside, the play space has six levels, not one lawn: the reflecting pool at 0,
+ * the four turf quadrants at 2, the cross of paved walks at 3 (row 8 the length of
+ * the garth, column 7 down its spine) with the fountain apron on the same course,
+ * the west spur / east bank / plank bridge at 4, the ruined chapel footing at
+ * (4,3)–(5,4) and the north-east chapel terrace at 5, and the fountain plinth
+ * stepped 7/6/6/5. The terrace is reached by the 3 → 4 → 5 steps at (8,4)/(9,4).
  *
  * The banks at column 2, column 11 and row 12 are true ramps (the height triple
  * either side satisfies `deriveSlope`), so the mesh gets sloped stone there rather
  * than a staircase of cubes.
  *
- * Elevations: pool 0, outer plinth 1–3, garden 2, south path 3, banks/ledges 4,
- * chapel terrace 5, cloister walk 6, fountain 5–7, east tower 7–8, piers 10.
+ * Elevations: pool 0, outer plinth 1–2, garden 2, walks/paths 3, banks and bridge
+ * 4, chapel footing and terrace and outer piers 5, cloister walk 6, fountain 5–7,
+ * east tower 7–8, colonnade piers 10.
  */
 export const ORBONNE_COURTYARD: MapDef = {
   id: 'orbonne-courtyard',
@@ -529,51 +577,51 @@ export const ORBONNE_COURTYARD: MapDef = {
   width: 14,
   height: 14,
   heights: [
-    '05250252412100',
-    '266a36a66a6400',
-    '56444444555400',
-    '26422223554400',
-    '56422223342460',
-    '26422233222468',
-    '06442376322468',
-    '5a443365322467',
-    '22233333333350',
-    '02220403222200',
-    '54420403222100',
-    '24422223222000',
-    '33333333321000',
-    '04242423010000',
+    '04250252412000',
+    '266a36a66a5300',
+    '56444444543200',
+    '26435523443300',
+    '56425533342330',
+    '26422233222340',
+    '06442376522480',
+    '5a663365322440',
+    '22233333333230',
+    '02220403221100',
+    '54420403211000',
+    '24422123221000',
+    '23222232210000',
+    '03131312010000',
   ],
   surfaces: [
-    '#sss#ssssddd##',
+    '#sss#sssssd###',
     'sssssssssssd##',
     'ssdssssssssd##',
-    'ssd....sssdd##',
-    'ssd....sss.ds#',
-    'ssd...ss...dss',
-    '#sds.ssss..dss',
-    'ssds.ssss..dss',
+    'ssddss.sssdd##',
+    'ssd.ss.sss.ds#',
+    'ssd...ss...ds#',
+    '#sds.ssss..ds#',
+    'ssbb.ssss..ds#',
     'dsdssssssssds#',
-    '#sd.wbwd....##',
-    'ssd.wbwd...d##',
-    'dsd....d...###',
-    'ssddddddddd###',
+    '#sd.wbwd..dd##',
+    'ssd.wbwd.ddd##',
+    'dsd....d..dd##',
+    'ssdddddddddd##',
     '#sssssss#d####',
   ],
   blocked: [
-    '.###.#######..',
+    '.###.######...',
     '#..#..#..#....',
     '#.............',
     '#.............',
     '#.............',
-    '#............#',
-    '......##.....#',
-    '##....##.....#',
     '#.............',
-    '..............',
-    '#..........#..',
+    '......##....#.',
+    '##....##......',
     '#.............',
-    '#.........#...',
+    '..........##..',
+    '#........###..',
+    '#.........##..',
+    '#.........##..',
     '.####.##.#....',
   ],
   waterLevel: 0,

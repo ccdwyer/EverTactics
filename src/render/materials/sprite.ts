@@ -371,6 +371,37 @@ export interface SpriteUniforms {
   /** Scales the Lambert accumulation before it is applied to the art. */
   uLightGain: { value: number };
   /**
+   * Diffuse **wrap** for every direct light — see {@link SPRITE_LIGHT_WRAP}.
+   *
+   * This is the single measurement that changed round 4. Rendering
+   * `reflectedLight.directDiffuse` straight to the framebuffer, the two units
+   * standing three tiles from `battle-open`'s brazier came back at luma 8/255
+   * and 28/255 while the stone beside their boots was blown to white: a
+   * camera-facing card presents a normal that is very nearly *perpendicular* to
+   * a lateral light, so `saturate(dot(N, L))` is ~0 and a hard Lambert term
+   * gives the figure nothing at all. That is precisely the critics' "units
+   * standing directly adjacent to the orange fire are lit flat cool-blue; they
+   * are receiving ambient only".
+   *
+   * A standing figure is not a card, it is roughly a cylinder, and a cylinder
+   * lit from the side is lit across a full half of its circumference. Wrapping
+   * the diffuse term — `(N·L + w) / (1 + w)` — is the standard cheap stand-in
+   * for that, and it is normalised so a light hitting the card head-on still
+   * peaks at exactly 1 and cannot out-expose the terrain.
+   */
+  uLightWrap: { value: number };
+  /**
+   * How much of the incident light's *hue* reaches the art.
+   *
+   * At 1.0 the art is fully multiplied by the light, so a unit standing in a
+   * blue hemisphere fill resolves to a blue silhouette whatever its palette
+   * says — the "clay pawn" read. Pulling a little of the shade term toward its
+   * own luma lets a red tabard stay red in blue light while still taking the
+   * light's *value*, which is what the FFT reference frames show: the units
+   * hold their chroma against a desaturated environment.
+   */
+  uShadeChroma: { value: number };
+  /**
    * Reflectance of the art, treated as a real albedo.
    *
    * FFT palettes are authored as *finished display colours* — a white mage's
@@ -393,6 +424,15 @@ export interface SpriteUniforms {
    * defect lives entirely at the top of the palette, so the correction has to
    * live there too: a Reinhard-shaped roll-off pinned so mid reflectances pass
    * through unchanged and only the near-white entries come down.
+   *
+   * **Round 4: this was set far too hard and it was the second-largest defect
+   * in the frame.** At shoulder 2.1 the map sends albedo 0.20 → 0.206 and 0.90
+   * → 0.455: a 4.5:1 range in the art is squeezed to 2.2:1, so a knight's
+   * steel, tabard, skin and boots all resolve within a few percent of each
+   * other and the unit renders as one flat silhouette. Cropped at 5x, every
+   * unit in the round-3 frame was a single-hue blob with no readable armour,
+   * face or trim. Exposure is the light's job, not the albedo's — a shoulder
+   * this aggressive destroys the only thing that makes pixel art read.
    */
   uAlbedoShoulder: { value: number };
   /** Reflectance the shoulder leaves untouched. Everything below it lifts slightly. */
@@ -531,6 +571,8 @@ export interface SpriteMaterialOptions {
   /** Defaults to 1 — the sprites live in the same light as the terrain. */
   lightInfluence?: number;
   lightGain?: number;
+  lightWrap?: number;
+  shadeChroma?: number;
   directGain?: number;
   albedoScale?: number;
   albedoShoulder?: number;
@@ -564,6 +606,8 @@ uniform vec2  uTexelStep;
 uniform float uMirror;
 uniform float uLightInfluence;
 uniform float uLightGain;
+uniform float uLightWrap;
+uniform float uShadeChroma;
 uniform float uDirectGain;
 uniform float uAlbedoScale;
 uniform float uAlbedoShoulder;
@@ -658,6 +702,41 @@ float spriteRimTerm(vec3 lightView, vec2 outward) {
   float halo = clamp(lightView.z, 0.0, 1.0) * 0.12;
   return clamp(side + halo, 0.0, 1.0);
 }
+`;
+
+/**
+ * Wrapped diffuse for **every** direct light — key, rim and every dynamic VFX
+ * point light three has already resolved into `IncidentLight`.
+ *
+ * Appended after `<lights_lambert_pars_fragment>`, which has just `#define`d
+ * `RE_Direct` to three's hard-Lambert term; re-pointing the macro is the only
+ * way to change the BRDF of a stock material without forking the whole chunk,
+ * and it leaves shadow masking, light culling and the point-light attenuation
+ * exactly as three computes them (the shadow factor is folded into
+ * `directLight.color` upstream, so a unit in the key's shadow still receives
+ * nothing from it).
+ *
+ * See {@link SpriteUniforms.uLightWrap} for why a billboard needs this at all.
+ * The `/(1 + w)` normalisation keeps a head-on light at unity, so the change
+ * cannot make a sprite brighter than the terrain facet beside it — it only
+ * stops a *lateral* light from being thrown away.
+ */
+const SPRITE_LIGHT_WRAP = /* glsl */ `
+void RE_Direct_SpriteWrap(
+  const in IncidentLight directLight,
+  const in vec3 geometryPosition,
+  const in vec3 geometryNormal,
+  const in vec3 geometryViewDir,
+  const in vec3 geometryClearcoatNormal,
+  const in LambertMaterial material,
+  inout ReflectedLight reflectedLight
+) {
+  float dotNL = dot(geometryNormal, directLight.direction);
+  float wrapped = clamp((dotNL + uLightWrap) / (1.0 + uLightWrap), 0.0, 1.0);
+  reflectedLight.directDiffuse += wrapped * directLight.color * BRDF_Lambert(material.diffuseColor);
+}
+#undef RE_Direct
+#define RE_Direct RE_Direct_SpriteWrap
 `;
 
 const SPRITE_VERTEX_TAIL = /* glsl */ `
@@ -781,6 +860,17 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
     float shoulderGain = 1.0 + uAlbedoShoulder * uAlbedoPivot;
     spriteAlbedo = spriteAlbedo / (1.0 + uAlbedoShoulder * spriteAlbedo) * shoulderGain;
     spriteAlbedo *= uAlbedoScale;
+  }
+
+  // Hold a little of the art's own chroma back from the light. A full multiply
+  // hands the sprite whatever hue the dominant term carries, and on a map whose
+  // fill is a saturated blue hemisphere that means every unit resolves to a
+  // blue silhouette regardless of palette — the "clay pawns dropped into a lit
+  // set" read. Pulling the *shade* (not the art) a little toward its own luma
+  // keeps the value response intact while letting a red tabard stay red.
+  {
+    float shadeLuma = dot(spriteShade, vec3(0.2126, 0.7152, 0.0722));
+    spriteShade = mix(vec3(shadeLuma), spriteShade, uShadeChroma);
   }
 
   vec3 spriteColor = spriteAlbedo * mix(vec3(1.0), spriteShade, uLightInfluence);
@@ -965,17 +1055,19 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
 
     uLightInfluence: { value: options.lightInfluence ?? 1 },
     uLightGain: { value: options.lightGain ?? 1 },
-    uDirectGain: { value: options.directGain ?? 0.5 },
-    uAlbedoScale: { value: options.albedoScale ?? 0.94 },
-    uAlbedoShoulder: { value: options.albedoShoulder ?? 2.1 },
-    uAlbedoPivot: { value: options.albedoPivot ?? 0.22 },
-    uShadeKnee: { value: options.shadeKnee ?? 1.45 },
-    uShadeCompress: { value: options.shadeCompress ?? 0.55 },
-    uIndirectGain: { value: options.indirectGain ?? 0.72 },
-    uSkyOcclusion: { value: options.skyOcclusion ?? 0.26 },
+    uLightWrap: { value: options.lightWrap ?? 0.6 },
+    uShadeChroma: { value: options.shadeChroma ?? 0.82 },
+    uDirectGain: { value: options.directGain ?? 0.72 },
+    uAlbedoScale: { value: options.albedoScale ?? 0.8 },
+    uAlbedoShoulder: { value: options.albedoShoulder ?? 0.5 },
+    uAlbedoPivot: { value: options.albedoPivot ?? 0.3 },
+    uShadeKnee: { value: options.shadeKnee ?? 1.15 },
+    uShadeCompress: { value: options.shadeCompress ?? 0.8 },
+    uIndirectGain: { value: options.indirectGain ?? 0.36 },
+    uSkyOcclusion: { value: options.skyOcclusion ?? 0.3 },
     uSceneTint: { value: new THREE.Color(options.sceneTint ?? 0xffffff) },
-    uGradeSaturation: { value: options.gradeSaturation ?? 0.9 },
-    uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x2e3c5c) },
+    uGradeSaturation: { value: options.gradeSaturation ?? 0.96 },
+    uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x1b2438) },
     uShadeBend: { value: options.shadeBend ?? 0.7 },
     uKeyLightDir: { value: (options.keyLightDirection ?? new THREE.Vector3(-0.5, -1, -0.35)).clone().normalize() },
     uFillLightDir: {
@@ -989,8 +1081,13 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uBounceColor: { value: new THREE.Color(options.bounceColor ?? 0x6d5b46) },
     uBounceStrength: { value: options.bounceStrength ?? 0.42 },
 
-    uFootShade: { value: 0.42 },
-    uFootShadeTexels: { value: 7 },
+    // Measured against `refs/curated/fft/press-311722-…-mediakit-03`: the
+    // squire's boots read luma ~70 against a torso at ~150, i.e. the lower
+    // eighth of the figure sits a full stop under the rest of it. That in-art
+    // fall-off is what reads as grounding at every camera angle — unlike the
+    // ground decal, none of it can ever be hidden behind the billboard.
+    uFootShade: { value: 0.55 },
+    uFootShadeTexels: { value: 10 },
     uGrounded: { value: 1 },
 
     uFlashColor: { value: new THREE.Color(0xffffff) },
@@ -1042,6 +1139,10 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
 
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${SPRITE_DECLARATIONS}`)
+      .replace(
+        '#include <lights_lambert_pars_fragment>',
+        `#include <lights_lambert_pars_fragment>\n${SPRITE_LIGHT_WRAP}`,
+      )
       .replace('#include <map_fragment>', SPRITE_MAP_FRAGMENT)
       .replace('#include <alphatest_fragment>', SPRITE_ALPHATEST_FRAGMENT)
       .replace('#include <normal_fragment_begin>', SPRITE_NORMAL_FRAGMENT)

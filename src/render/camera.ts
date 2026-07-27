@@ -161,8 +161,17 @@ export const MAX_FRAME_MARGIN_FRACTION = 0.15;
  * 14-tile board a whole zoom step, which costs far more (a character at 18% of frame height
  * against the references' 12-17%, and two thirds of the map cropped away) than the sliver of
  * background it was buying insurance against.
+ *
+ * ROUND 4 puts a small bias back, at 1.05, for a reason round 3 could not have had: the
+ * derived-from-the-offset scheme means the zoom step the shot takes is a side effect of how
+ * far off-centre it is staged, which is an accidental coupling. Measured on `battle-open`,
+ * a compose offset of 0.06 in y took the step and 0.025 did not, so the vertical placement
+ * of the board and the size of the characters were the same knob. 1.05 puts the step on the
+ * near side of the rounding at any plausible offset, which frees the offset to be chosen for
+ * where the board sits rather than for how big it is. The character-size ceiling still caps
+ * the result, so this cannot run away.
  */
-export const COVER_BLEED = 1.0;
+export const COVER_BLEED = 1.05;
 
 /** Centre of the walkable top surface of a grid cell, in world space. */
 export function gridToWorld(
@@ -224,8 +233,28 @@ export const DEFAULT_YAW_TRIM_DEGREES = 10;
  * We bias the subject up and slightly left: up because the HUD owns the bottom band and the
  * board must not sit under it, left because the turn-order rail is anchored top-centre/right
  * and an off-centre subject sets up a diagonal against it.
+ *
+ * ROUND 4 — the y term was `-0.035`, which is DOWN. The comment above said "up", the value
+ * said down, and the rendered frame agreed with the value: the board sat low, its bottom two
+ * rows disappeared behind the unit card and the command menu (a listed fail condition — "any
+ * UI panel sitting over the playable board and occluding units"), and the top sixth of the
+ * frame was given over to blurred backdrop. Flipping the sign does exactly what the comment
+ * always claimed: the board rises out of the HUD band and the deliberate negative space ends
+ * up underneath the panels that were going to cover it anyway.
+ *
+ * The x term is pulled back from -0.055 to -0.02 at the same time. Sliding the board left was
+ * what left the bottom-right quadrant as the "large dead over-blurred region" the round-3
+ * notes named and the round-4 notes named again; near-centred horizontally, with the yaw trim
+ * doing the asymmetry, the diamond's right corner reaches the frame edge instead.
+ *
+ * The y term settled at +0.025 rather than the +0.06 the first attempt used, measured on two
+ * rendered frames. A diamond footprint in a 16:9 frame always leaves a wedge of background
+ * either side of its near corner; lifting the board far enough for that corner to exit the
+ * bottom edge does not remove the wedges, it merges them into one dark band across the whole
+ * width. At +0.025 the near corner stays inside the frame and the two wedges sit under the
+ * unit card and the command menu, which were going to cover them anyway.
  */
-export const DEFAULT_COMPOSE_OFFSET: readonly [number, number] = [-0.055, -0.035];
+export const DEFAULT_COMPOSE_OFFSET: readonly [number, number] = [-0.02, 0.025];
 
 export type YawIndex = 0 | 1 | 2 | 3;
 

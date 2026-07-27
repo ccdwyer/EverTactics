@@ -43,6 +43,7 @@ import {
   type BuiltScenario,
   type Scenario,
 } from './scenarios';
+import { formationScreenVM, jobScreenVM, rosterScreenVM } from './screens';
 
 import { decideTurn } from '@core/ai';
 import { IllegalCommandError, advance, affectedTiles, applyCommand } from '@core/battle';
@@ -56,12 +57,13 @@ import {
   tilesInBurst,
 } from '@core/grid';
 import { getJob } from '@core/jobs';
-import { deriveStats, effectiveRange, isKO, jobProgress } from '@core/unit';
+import { deriveStats, effectiveRange, isKO, jobProgress, learnAbility, setJob } from '@core/unit';
 import type {
   Ability,
   BattleEvent,
   BattleState,
   Command,
+  JobId,
   Unit,
   UnitId,
   Vec3,
@@ -221,6 +223,7 @@ export class Game {
 
     this.installFrameCallbacks();
     this.installPointerHandling();
+    this.installScreenKeys();
 
     // Framing has to happen after the first resize: `frameField` picks the
     // largest zoom level that fits the drawing buffer, and before `resize()` the
@@ -874,8 +877,56 @@ export class Game {
         break;
       }
 
-      case 'result-dismiss':
+      case 'result-dismiss': {
+        this.ui.closeScreen();
+        break;
+      }
+
       case 'close-screen': {
+        this.ui.closeScreen();
+        this.screenUnit = null;
+        this.screenJob = null;
+        // A job change while the screen was open rewrote the unit's command set;
+        // rebuild the menu rather than leaving the pre-change rows on screen.
+        const active = this.activeUnit();
+        if (active && active.team === 'player' && this.mode.kind === 'command') {
+          this.enterCommandMode(active);
+        }
+        break;
+      }
+
+      case 'inspect-job': {
+        this.screenJob = intent.jobId;
+        this.pushJobScreen();
+        break;
+      }
+
+      case 'set-job': {
+        this.onSetJob(intent.unitId, intent.jobId);
+        break;
+      }
+
+      case 'learn-ability': {
+        const unit = this.state.units.get(intent.unitId);
+        if (!unit) break;
+        const result = learnAbility(unit, intent.abilityId, intent.jobId);
+        this.ui.sound(result.learned ? 'confirm' : 'error');
+        this.pushJobScreen();
+        break;
+      }
+
+      case 'assign-slot': {
+        this.onAssignSlot(intent.unitId, intent.slot, intent.abilityId);
+        break;
+      }
+
+      case 'open-job-screen': {
+        const unit = this.state.units.get(intent.unitId);
+        if (unit) this.openJobScreen(unit);
+        break;
+      }
+
+      case 'formation-confirm': {
         this.ui.closeScreen();
         break;
       }
@@ -928,6 +979,132 @@ export class Game {
     }
   }
 
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Full-screen panels
+  //
+  // The job tree, the roster and the formation slate are opened with a key
+  // rather than a command row: they are meta-screens over the squad, not turn
+  // actions. `J` / `F` / `P` open them, Escape closes (the screen itself is a
+  // modal focus layer and swallows everything else).
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** Unit the job screen is currently showing, and the tree node it is focused on. */
+  private screenUnit: UnitId | null = null;
+  private screenJob: JobId | null = null;
+
+  private installScreenKeys(): void {
+    const onKey = (ev: KeyboardEvent): void => {
+      if (this.disposed || ev.metaKey || ev.ctrlKey || ev.altKey || ev.repeat) return;
+      const target = ev.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      }
+      // While a screen is up it owns the keyboard; `UIRoot`'s own focus stack
+      // handles navigation and Escape.
+      if (this.ui.currentScreen !== null) return;
+      if (!this.scenario.layers.ui || this.battleOver) return;
+
+      switch (ev.code) {
+        case 'KeyJ': {
+          const unit = this.screenSubject();
+          if (unit) this.openJobScreen(unit);
+          break;
+        }
+        case 'KeyF':
+          this.ui.openFormationScreen(
+            formationScreenVM(this.state, { subtitle: this.scenario.name }),
+          );
+          break;
+        case 'KeyP':
+          this.ui.openRosterScreen(rosterScreenVM(this.state, { title: 'Company Roster' }));
+          break;
+        default:
+          return;
+      }
+      ev.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    this.disposers.push(() => window.removeEventListener('keydown', onKey));
+  }
+
+  /**
+   * Whose sheet `J` opens.
+   *
+   * Only while the player actually holds the turn and nothing is resolving: the
+   * screen mutates the unit (job, learned abilities, loadout) and doing that
+   * underneath a running animation or a half-chosen target would desynchronise
+   * the field from the state the reducer is about to validate against.
+   */
+  private screenSubject(): Unit | undefined {
+    if (this.busy || this.mode.kind !== 'command') return undefined;
+    const unit = this.activeUnit();
+    return unit && unit.team === 'player' ? unit : undefined;
+  }
+
+  private openJobScreen(unit: Unit): void {
+    this.screenUnit = unit.id;
+    this.screenJob = unit.currentJob;
+    this.ui.openJobScreen(jobScreenVM(this.state, unit, unit.currentJob));
+  }
+
+  /** Re-send the job screen after a mutation, keeping the tree cursor put. */
+  private pushJobScreen(): void {
+    if (this.screenUnit === null) return;
+    const unit = this.state.units.get(this.screenUnit);
+    if (!unit) return;
+    this.ui.updateJobScreen(jobScreenVM(this.state, unit, this.screenJob ?? unit.currentJob));
+  }
+
+  private onSetJob(unitId: UnitId, jobId: JobId): void {
+    const unit = this.state.units.get(unitId);
+    if (!unit || unit.currentJob === jobId) return;
+    // `core/unit.setJob` is the only correct path: it re-derives HP/MP through
+    // the new multipliers, resets Move/Jump from the job, keeps the HP ratio and
+    // rewrites `unit.sprite.sheet`.
+    setJob(unit, jobId);
+    this.screenJob = jobId;
+    void this.reloadSprite(unit);
+    this.pushJobScreen();
+    this.refreshHud();
+  }
+
+  /** Swap the unit's sprite sheet on the field after a job change. */
+  private async reloadSprite(unit: Unit): Promise<void> {
+    const existing = this.sprites.get(unit.id);
+    if (!existing || existing.sheet.key === unit.sprite.sheet) return;
+    this.sprites.remove(unit.id);
+    try {
+      const sprite = await this.sprites.add(unit);
+      markAsSprite(sprite.object);
+      this.syncSprite(unit, sprite);
+      const active = this.activeUnit();
+      const isActive = active !== undefined && active.id === unit.id;
+      sprite.setTurnMarker(isActive);
+      sprite.setSelection(isActive ? 'active' : 'none');
+    } catch (err) {
+      console.error(`[game] sprite reload for ${unit.name} (${unit.sprite.sheet}) failed:`, err);
+    }
+  }
+
+  private onAssignSlot(
+    unitId: UnitId,
+    slot: 'secondary' | 'reaction' | 'support' | 'movement',
+    abilityId: string | null,
+  ): void {
+    const unit = this.state.units.get(unitId);
+    if (!unit) return;
+    if (slot === 'secondary') {
+      if (abilityId === null) delete unit.secondaryAction;
+      else unit.secondaryAction = abilityId;
+    } else if (abilityId === null) {
+      delete unit[slot];
+    } else {
+      unit[slot] = abilityId;
+    }
+    this.pushJobScreen();
+  }
 
   private onCancel(): void {
     const unit = this.activeUnit();

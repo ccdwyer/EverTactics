@@ -163,6 +163,7 @@ uniform float uTiltRadial;      // 0..1 weight of the corner term
 uniform float uTiltRadialStart; // normalised radius (1.0 = frame corner) where it begins
 uniform vec2  uCoCAspect;       // vec2(width/height, 1.0)
 uniform float uFocusAuto;       // 1 = read the focal plane off the depth buffer at uTiltCenter
+uniform float uFarClamp;        // ceiling on POSITIVE (far-field) CoC, 0..1
 
 /**
  * View-space distance of the focal plane.
@@ -207,18 +208,31 @@ float computeCoC(vec2 uv, float d) {
     float bandSign = band < 0.0 ? -1.0 : 1.0;
     coc += uTiltMix * bandSign * mag;
 
-    if (uTiltRadial > 0.0) {
-      // Corner term. Elliptical distance from the band centre, normalised so 1.0 lands on
-      // the frame corner. Combined by magnitude so it never cancels the band, and it
-      // inherits the band's sign — the bottom corners of an isometric frame are foreground.
-      vec2 c = (uv - uTiltCenter) * uCoCAspect;
-      float rn = length(c) / max(0.5 * length(uCoCAspect), 1e-4);
-      float radial = uTiltMix * uTiltRadial * smoothstep(uTiltRadialStart, 1.0, rn);
-      float s = coc < 0.0 ? -1.0 : 1.0;
-      coc = s * max(abs(coc), radial);
-    }
   }
 
+  // Corner term. Elliptical distance from the band centre, normalised so 1.0 lands on the
+  // frame corner. Combined by magnitude so it never cancels the depth term, and it inherits
+  // that term's sign — the bottom corners of an isometric frame are foreground.
+  //
+  // ROUND 4: no longer scaled by uTiltMix. It used to be, which coupled two unrelated
+  // decisions: dropping the screen-space band (because the critics correctly read it as fake
+  // depth) also dropped the corner softening, and the corners are the one place where a
+  // screen-space term is honest — the frame edge IS a lens property, not a scene property.
+  if (uTiltRadial > 0.0) {
+    vec2 c = (uv - uTiltCenter) * uCoCAspect;
+    float rn = length(c) / max(0.5 * length(uCoCAspect), 1e-4);
+    float radial = uTiltRadial * smoothstep(uTiltRadialStart, 1.0, rn);
+    float s = coc < 0.0 ? -1.0 : 1.0;
+    coc = s * max(abs(coc), radial);
+  }
+
+  // Asymmetric ceiling. A real lens defocuses the near field harder than the far field at
+  // equal distance from the plane, and the round-4 note is explicit on both halves: "far-field
+  // blur is so heavy the town is a featureless navy mush, reading as hiding an empty scene",
+  // against "defocus BOTH the near cliff edge and the far edge — that is what sells the
+  // diorama". So the near side keeps the full radius and the far side is capped, which leaves
+  // the background legible as architecture while the near rim still goes properly soft.
+  coc = coc > 0.0 ? min(coc, uFarClamp) : max(coc, -1.0);
   return clamp(coc, -1.0, 1.0);
 }
 `;

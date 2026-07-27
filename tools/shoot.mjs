@@ -119,6 +119,44 @@ try {
 // let post-processing / TAA settle
 await page.waitForTimeout(Number(arg('settle', 1200)));
 
+/**
+ * Re-verify right before the shutter.
+ *
+ * Against the vite DEV server, any agent saving a file triggers an HMR reload —
+ * the page goes back to the boot splash AFTER we already saw it clear, and the
+ * capture is black again. This bit us with agents editing concurrently.
+ * Re-check, and if the splash is back, wait it out once more.
+ * For fully deterministic captures, build and use `vite preview` (see --port).
+ */
+const splashBack = await page
+  .evaluate(() => {
+    const boot = document.getElementById('boot');
+    if (boot === null) return false;
+    const s = window.getComputedStyle(boot);
+    return s.display !== 'none' && Number(s.opacity) > 0.02;
+  })
+  .catch(() => false);
+
+if (splashBack) {
+  console.error('WARN: boot splash reappeared (HMR reload?) — waiting again.');
+  try {
+    await page.waitForFunction(() => window.__EVERTACTICS_READY__ === true, null, { timeout: maxWait });
+    await page.waitForFunction(
+      () => {
+        const boot = document.getElementById('boot');
+        if (boot === null) return true;
+        const s = window.getComputedStyle(boot);
+        return s.display === 'none' || Number(s.opacity) < 0.02;
+      },
+      null,
+      { timeout: maxWait },
+    );
+    await page.waitForTimeout(Number(arg('settle', 1200)));
+  } catch {
+    splashGone = false;
+  }
+}
+
 mkdirSync(dirname(out), { recursive: true });
 await page.screenshot({ path: out, type: 'png' });
 

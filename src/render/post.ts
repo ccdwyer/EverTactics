@@ -147,8 +147,17 @@ export interface DofSettings {
   /**
    * Weight of the elliptical corner term, 0..1. A pure horizontal band leaves the frame
    * corners razor sharp; both reference frames soften them. See COC_CHUNK.
+   *
+   * Independent of {@link DofSettings.tiltMix} since round 4 — the corner falloff is a lens
+   * property and has to survive the depth term taking over from the screen-space band.
    */
   tiltRadial: number;
+  /**
+   * Ceiling on the FAR half of the circle of confusion, 0..1. The near half always reaches
+   * 1.0. See the tail of COC_CHUNK: the references keep readable architecture in the
+   * background while the near rim goes fully soft, and a symmetric CoC cannot do both.
+   */
+  farClamp: number;
   /** Normalised radius (1.0 = frame corner) at which the corner term starts. */
   tiltRadialStart: number;
   /**
@@ -354,8 +363,22 @@ export const REFERENCE_FLOOR = {
    * geometry. The answer was not to weaken it but to move it outward: `tiltRadialStart` now
    * begins at 0.70 of the way to the corner, so the term is confined to the corners and can
    * afford to be strong there.
+   *
+   * Round 4 raised the cap from 0.44 to 0.62 at the same time as the term stopped being
+   * multiplied by `tiltMix` — the two changes together leave the delivered corner blur where
+   * it was while `tiltMix` is free to fall toward zero.
    */
-  dofTiltRadialMax: 0.44,
+  dofTiltRadialMax: 0.62,
+  /**
+   * MAXIMUM far-field CoC — a ceiling, and the direct answer to "far-field blur is so heavy
+   * the town is a featureless navy mush, reading as 'hiding an empty scene'".
+   *
+   * Measured against `refs/curated/triangle/official_005_steam.jpg`: the soft top and bottom
+   * twelfths of that frame are unmistakably out of focus and yet individual bricks, crate
+   * lids and rubble edges are still countable in them. Ours resolved the entire backdrop to
+   * one navy smear. 0.6 of the maximum radius is where structure survives.
+   */
+  dofFarClampMax: 0.6,
   /** Fraction of light removed at the frame corner. */
   vignetteAmount: 0.34,
   /**
@@ -388,9 +411,19 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
     },
     bloom: {
       enabled: true,
-      intensity: 0.055,
-      threshold: 1.15,
-      softKnee: 0.55,
+      // ROUND 4 — "bloom is applied globally at one threshold ... which flattens the
+      // luminance hierarchy: nothing reads as brighter than anything else, it just reads as
+      // fogged", and "the fire is a blown-out white bloom disc with no flame core".
+      //
+      // Both are the same defect: at a 1.15 threshold the lit stone tops around the fire were
+      // themselves above the knee, so the glow was not coming FROM the flame, it was a haze
+      // sitting on every bright surface in the upper-left. Lifting the threshold to 1.5 puts
+      // it clear of lit diffuse stone under a 3.1-intensity key and leaves only the emissive
+      // sources above it; the intensity then goes UP, because a halo that comes from three
+      // hot pixels can afford to be brighter than one that comes from a third of the frame.
+      intensity: 0.085,
+      threshold: 1.5,
+      softKnee: 0.7,
       // Wide and soft. The references bloom torches and spell light into a halo several
       // times the size of the source; a tight radius at the same intensity reads as a
       // sharpened highlight instead of glow, which is the mobile-game tell.
@@ -414,14 +447,30 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // at the same depth as the subject stay sharp. The remaining third of screen-space
       // band is kept because it is what softens the frame corners and the sky, which have no
       // useful depth.
-      tiltMix: 0.34,
+      //
+      // ROUND 4 — halved again, to 0.16. The corner softening no longer rides on this value
+      // (see COC_CHUNK), so the only thing `tiltMix` still buys is a screen-space bias, and
+      // that bias is precisely what the round-4 critics measured: "the blur strength at the
+      // very top of the frame and at the bottom-right buildings is identical despite hugely
+      // different distances", "the sharp/blurred boundary slices straight through continuous
+      // geometry mid-block". At 0.16 the band is a faint lean on an otherwise depth-driven
+      // CoC — enough to keep the sky and the far skirt (which have degenerate depth) soft,
+      // not enough to cut across a wall.
+      tiltMix: 0.16,
       focusAuto: true,
       focusDistance: 160,
       // World units either side of the focal plane that stay sharp. Sized to the playable
       // board, not to taste: `battle-open` spans ~14 tiles, which at 32° pitch is ~17 world
       // units of view-space depth corner to corner, so ±9 keeps every countable tile inside
       // the sharp zone and puts the falloff on the skirt, the backdrop and the near rim.
-      focusRange: 5.5 * tileSize,
+      //
+      // ROUND 4: 5.5 -> 4.2. The composition change (see DEFAULT_COMPOSE_OFFSET in camera.ts)
+      // raised the zoom a step, so the same world depth now spans a third more of the frame
+      // and ±5.5 held the entire visible picture inside the sharp zone — including the near
+      // rim, which is the half of the defocus that actually sells the miniature: "defocus
+      // BOTH the near cliff edge and the far edge, which is exactly what sells the diorama
+      // read". 4.2 still covers every countable tile and puts the falloff back on the rim.
+      focusRange: 4.2 * tileSize,
       // Steeper than the old 0.55: past the sharp zone the blur has to actually arrive
       // within the couple of units of depth the scenery occupies, or the far city never
       // reaches the reference's degree of softness.
@@ -429,7 +478,13 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // Slightly above centre: the reference frames put the sharp band on the action and
       // leave the negative space above it soft. Matches the camera's composition offset,
       // which lifts the subject the same way.
-      tiltCenter: [0.5, 0.55],
+      //
+      // ROUND 4: this is also where `focusAuto` takes its single depth tap, so it is not just
+      // the band centre — it decides what the shot is focused ON. It therefore has to agree
+      // with `DEFAULT_COMPOSE_OFFSET` in camera.ts, which is [-0.02, +0.025] and puts the
+      // subject at UV (0.48, 0.525). It was left at (0.5, 0.55) when that offset changed, so
+      // the probe was landing a couple of tiles behind the composed subject.
+      tiltCenter: [0.48, 0.525],
       tiltAngle: 0,
       tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
       tiltFalloff: REFERENCE_FLOOR.dofTiltFalloffMin,
@@ -438,6 +493,7 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // corner, so it is a corner softener rather than a second vignette.
       tiltRadialStart: 0.7,
       maxCoCPixels: REFERENCE_FLOOR.dofCoCPixels,
+      farClamp: REFERENCE_FLOOR.dofFarClampMax,
       bokehBoost: 1.6,
       nearStrength: 0.9,
       nearSpread: 0.4,
@@ -456,7 +512,14 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       // Halved. The rectangular edge band is the letterbox darkening the references carry;
       // at 0.55 on top of a 0.72 radial it was the dominant tone in the outer third.
       edge: 0.3,
-      color: [0.05, 0.06, 0.11],
+      // ROUND 4 — "the blacks are lifted into a flat purple", filed twice, plus "the blacks
+      // are lifted into blue so there is no true anchor point". The grade's own black point
+      // was only half the story: the vignette multiplies the outer third of the frame toward
+      // THIS colour, and at [0.05, 0.06, 0.11] that is a code-28 blue-violet floor painted
+      // over every corner — brighter than the darkest thing in the picture, so the frame had
+      // no true black anywhere. Taken down to roughly a third of that: still tinted (a
+      // neutral vignette is its own fail condition) but now genuinely dark.
+      color: [0.016, 0.021, 0.042],
     },
     grain: { enabled: true, amount: REFERENCE_FLOOR.grainAmount, size: 1.0, shadowBias: 0.4, animate: true },
     // Halved from 0.35. That value was authored when the frame corners were empty
@@ -604,17 +667,18 @@ export class PostStack implements PostEffectsHost {
   /** Reused by {@link resolveDof} so the per-frame path allocates nothing. */
   private readonly resolvedDof: ResolvedDof = {
     enabled: true,
-    tiltMix: 0.34,
+    tiltMix: 0.16,
     focusAuto: true,
     focusDistance: 160,
-    focusRange: 5.5,
+    focusRange: 4.2,
     cocScale: 1.6,
-    tiltCenter: [0.5, 0.55],
+    tiltCenter: [0.48, 0.525],
     tiltAngle: 0,
     tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
     tiltFalloff: REFERENCE_FLOOR.dofTiltFalloffMin,
     tiltRadial: REFERENCE_FLOOR.dofTiltRadialMax,
     tiltRadialStart: 0.7,
+    farClamp: REFERENCE_FLOOR.dofFarClampMax,
     bokehBoost: 1.6,
     nearStrength: 0.9,
     nearSpread: 0.4,
@@ -737,6 +801,7 @@ export class PostStack implements PostEffectsHost {
       uTiltRadialStart: { value: this.settings.dof.tiltRadialStart },
       uCoCAspect: { value: new Vector2(1, 1) },
       uFocusAuto: { value: this.settings.dof.focusAuto ? 1 : 0 },
+      uFarClamp: { value: this.settings.dof.farClamp },
     });
 
     this.cocPass = new FullScreenPass(DOF_COC_FRAG, {
@@ -1328,6 +1393,7 @@ export class PostStack implements PostEffectsHost {
     u['uTiltFalloff']!.value = Math.max(dof.tiltFalloff, 1e-3);
     u['uTiltRadial']!.value = dof.tiltRadial;
     u['uTiltRadialStart']!.value = dof.tiltRadialStart;
+    u['uFarClamp']!.value = dof.farClamp;
     (u['uCoCAspect']!.value as Vector2).set(this.width / Math.max(this.height, 1), 1);
   }
 
@@ -1363,6 +1429,7 @@ export class PostStack implements PostEffectsHost {
     out.tiltBand = floor ? Math.max(d.tiltBand, REFERENCE_FLOOR.dofTiltBandMin) : d.tiltBand;
     out.tiltFalloff = floor ? Math.max(d.tiltFalloff, REFERENCE_FLOOR.dofTiltFalloffMin) : d.tiltFalloff;
     out.tiltRadial = floor ? Math.min(d.tiltRadial, REFERENCE_FLOOR.dofTiltRadialMax) : d.tiltRadial;
+    out.farClamp = floor ? Math.min(d.farClamp, REFERENCE_FLOOR.dofFarClampMax) : d.farClamp;
     // Sized against the frame, not the framebuffer: `maxCoCPixels` is authored at 1080p.
     out.cocPixelsThisFrame = pixels1080 * (this.height / 1080);
     return out;

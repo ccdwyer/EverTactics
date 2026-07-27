@@ -220,7 +220,10 @@ export class MoteField {
       pos[i * 3 + 2] = minZ + zt * (maxZ - minZ);
       seed[i] = rnd();
       size[i] = isEmber ? 2.6 + rnd() * 5.4 : 1.4 + rnd() * 4.2;
-      warm[i] = isEmber ? 0.7 + rnd() * 0.3 : rnd() * 0.22;
+      // Even the "dust" carries some warmth: these particles are in the air
+      // above a courtyard full of lanterns, and neutral-white specks read as
+      // dirt on the lens rather than as lit motes.
+      warm[i] = isEmber ? 0.7 + rnd() * 0.3 : 0.08 + rnd() * 0.42;
     }
 
     this.geometry.dispose();
@@ -241,7 +244,7 @@ export class MoteField {
     (this.material.uniforms.uCool!.value as Color)
       .copy(palette.haze)
       .lerp(palette.horizon, 0.6)
-      .multiplyScalar(3.4);
+      .multiplyScalar(2.3);
     // Embers are the one thing in the environment allowed to be a highlight —
     // they should be the only pixels here that cross the bloom threshold.
     (this.material.uniforms.uWarmColor!.value as Color).copy(palette.sun).multiplyScalar(0.42);
@@ -666,7 +669,10 @@ export class WorldEnvironment {
       return;
     }
     this.haveBounds = true;
+    this.footprint = buildFootprintField(target as Object3D, this.bounds);
   }
+
+  private footprint: BoardFootprint | null = null;
 
   private relayoutIfNeeded(camera: Camera): void {
     const size = this.bounds.getSize(TMP_A);
@@ -741,6 +747,7 @@ export class WorldEnvironment {
       boardHalfZ: size.z * 0.5,
       yaw,
       seed: this.options.seed,
+      footprint: this.footprint,
     };
 
     this.backdrop.layout(layout);
