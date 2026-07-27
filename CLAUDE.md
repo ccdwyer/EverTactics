@@ -52,3 +52,32 @@ literals; a backtick in a comment closes the string, and `tsc` then reports a ca
 pointing at identifiers that were never code. This has happened four separate times in
 `src/render/**`, to four different authors. `tests/shader-source.test.ts` now catches it and names
 the line. Use single quotes in shader-file comments.
+
+## Delegating work to other models
+
+Both CLIs are authenticated on this machine and verified working headlessly:
+
+```bash
+grok -p "<prompt>" --permission-mode dontAsk   # Grok 4.5 (xAI)
+codex exec "<prompt>"                          # model from ~/.codex/config.toml (gpt-5.6-sol)
+```
+
+`npm run delegate` runs the loop: **Grok 4.5 builds → repo verification runs → GPT-5.6 Sol reviews
+the real diff → Sol's objections become Grok's next brief**, until Sol returns PASS with
+verification green. Claude writes the brief and reads the verdict; the implementation cost lands on
+other providers' quota.
+
+```bash
+node tools/delegate.mjs --task "Fix X. Success is: <command> prints <number>." --rounds 3
+node tools/delegate.mjs --task-file brief.md --rounds 2 --verify "npm run verify:quick"
+```
+
+Logs land in `tools/_delegate/roundN-{grok,verify,sol}.txt`.
+
+**It refuses to run on a dirty tree**, and that guard is load-bearing: the first live test diffed
+against HEAD while another agent was editing `src/render/`, so Sol reviewed a third party's changes
+as though they were Grok's. Commit or stash first.
+
+**Write the success criterion as a command and an expected number**, not a description. Sol grades
+against evidence and will fail a plausible-looking change that never ran — which is the correct
+behaviour for this codebase.
