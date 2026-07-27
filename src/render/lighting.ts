@@ -47,6 +47,30 @@
  * so ambient can be *directional*: warm from the key side, cold from the fill
  * side, earth-bounce from below. That is the cheap irradiance term that keeps
  * shadowed faces coloured rather than merely dark.
+ *
+ * ── Two policies the rig enforces over its callers ──────────────────────────
+ *
+ * Both exist because round 2 shipped a frame that scored 2.2/10 on lighting
+ * while every individual number in this file was defensible. Correct parts,
+ * wrong system.
+ *
+ * KEY/VIEW SEPARATION (`resolveBearings`). `battle-open` authored its key at
+ * azimuth 138° and the iso camera looks from bearing 128°. Ten degrees apart is
+ * the one geometry in which a shadow map is invisible: every shadow falls
+ * directly behind the object casting it, into pixels that object already covers.
+ * We were rendering a fitted 2048² shadow map into a view that could not see a
+ * texel of it — which is why the critique said "casts no shadows anywhere" about
+ * a scene whose shadows had been on the whole time. The rig now swings the key
+ * (and the rim with it) into a band either side of the camera bearing. Authored
+ * azimuth survives wherever it is already legal.
+ *
+ * KEY/FILL RATIO (`applyContrast`). Authors set fill by eye and set it too high;
+ * the cloister arrived with hemi + ambient + probe adding up to roughly 60% of
+ * the key, which makes a cast shadow a smudge and leaves every wall plane within
+ * a few percent of every other. Fill *level* is therefore the rig's, not the
+ * author's — hue stays theirs. The redistribution is brightness-neutral: what
+ * comes off the flat fill is handed to the key and the rim, so the lit band
+ * stays where it was and only the shadows fall away.
  */
 
 import {
@@ -69,7 +93,7 @@ import {
   type WebGLRenderer,
 } from 'three';
 
-import { RIG_DISTANCE } from './camera.js';
+import { DEFAULT_YAW_TRIM_DEGREES, RIG_DISTANCE, YAW_ANGLES } from './camera.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Presets
@@ -120,7 +144,17 @@ export interface LightingPreset {
   /** Renderer tone-mapping exposure for this mood. */
   exposure: number;
 
-  /** Shadow softness (PCF kernel radius) and darkness. */
+  /**
+   * PCF kernel radius, in shadow texels.
+   *
+   * Only `PCFShadowMap` reads this — `PCFSoftShadowMap`, which is what
+   * `bindRenderer()` selects, derives its own kernel from the texel size and
+   * ignores the field. It is kept because the softness a preset *wants* is real
+   * information (a storm wants a wide diffuse penumbra, a night brazier scene
+   * wants a tight one) and because `setShadowMapSize()` is the lever that
+   * actually delivers it: penumbra under PCF-soft is a fixed number of texels,
+   * so halving the resolution doubles the blur.
+   */
   shadowRadius: number;
   /** Multiplier on the auto-computed normal bias; raise if acne appears. */
   shadowNormalBiasScale: number;
@@ -149,6 +183,39 @@ export interface LightingPreset {
    * author's, the split is the rig's.
    */
   colorSplit: number;
+
+  /**
+   * How much of the key-to-fill *ratio* the rig owns, 0..1.
+   *
+   * Measured on the round-2 frame: the cloister ran hemi 1.25 + ambient 0.42 +
+   * probe 1.35 against a key of 3.1, which puts a shadowed face at roughly 60%
+   * of a lit one. At that ratio a cast shadow is a smudge, every wall plane sits
+   * within a few percent of every other, and the box never resolves into a
+   * volume — which is exactly the note the critics wrote three different ways.
+   *
+   * Map and scenario authors *always* set fill too high, because they tune it on
+   * a bright monitor against a white editor chrome and the frame looks "correct"
+   * before the grade crushes it. So fill level is not theirs. Hue is theirs; the
+   * ratio is the rig's, and `applyContrast()` lerps their numbers toward the
+   * rig's target by this amount. Crucially it does not darken the picture — the
+   * irradiance it takes off the fill is handed to the key, so the *lit* band
+   * stays where the author put it and only the shadows fall away.
+   *
+   * 0 restores the pre-policy behaviour (author's fill verbatim).
+   */
+  contrast: number;
+
+  /**
+   * Multiplier on every placed and adopted practical light.
+   *
+   * Braziers are authored in `terrain.ts` at an intensity that reads correctly
+   * when you are looking at one brazier. Six of them across a diorama, seen from
+   * twenty tiles back through a tone mapper, need to be pushed considerably
+   * harder before a *pool* appears on the flagstones — and the pool is the whole
+   * point. See the reference village frame: the ground under each fire is
+   * orange, not "green with a warm tint".
+   */
+  practicalGain: number;
 }
 
 /**
@@ -178,6 +245,51 @@ export interface PracticalSpec {
 
 /** Hard cap on placed lights, so material shader permutations never change. */
 export const MAX_PRACTICALS = 6;
+
+/**
+ * Compass bearing the camera looks *from*, for the default iso rig.
+ *
+ * `camera.ts` describes its orientation as a yaw angle where the eye offset is
+ * `(cos p·sin yaw, sin p, cos p·cos yaw)`; this file describes light bearings as
+ * `(sin az·cos el, sin el, −cos az·cos el)`. Matching the horizontal components
+ * gives `az = 180° − yaw`, which is the only conversion between the two spaces
+ * and the reason it is written down once, here.
+ */
+function bearingFromYawDegrees(yawDegrees: number): number {
+  return 180 - yawDegrees;
+}
+
+const DEFAULT_VIEW_BEARING = bearingFromYawDegrees(
+  MathUtils.radToDeg(YAW_ANGLES[0] ?? Math.PI / 4) + DEFAULT_YAW_TRIM_DEGREES,
+);
+
+/**
+ * How far the key must sit from the camera's own bearing, in degrees.
+ *
+ * THIS IS THE ONE THAT COST US ROUND 2. `battle-open` authored a key at azimuth
+ * 138° and the iso rig looks from bearing 128° — ten degrees apart. A light over
+ * the camera's shoulder is the one direction from which its shadows are entirely
+ * invisible: every shadow falls *behind* the object that casts it, exactly into
+ * the pixels that object already covers. The rig was rendering a perfectly
+ * correct 2048² shadow map into a view that could not see a single texel of it,
+ * which is why six critics independently wrote "casts no shadows anywhere" about
+ * a scene whose shadows were switched on the whole time.
+ *
+ * The upper bound matters too: past ~130° the key is behind the subject and
+ * every face the camera can see is a shadow face, which is a backlit silhouette
+ * shot, not a lit diorama. So the key is clamped into a band either side of the
+ * view — far enough that the shadows land in open frame, near enough that the
+ * faces we look at are the faces that are lit.
+ */
+const KEY_VIEW_SEPARATION_MIN = 62;
+const KEY_VIEW_SEPARATION_MAX = 128;
+
+/** Wrap to (−180, 180]. */
+function wrapSigned(deg: number): number {
+  let d = ((deg + 180) % 360 + 360) % 360 - 180;
+  if (d <= -180) d += 360;
+  return d;
+}
 
 /**
  * Scene point lights whose name starts with this are adopted by the rig and
@@ -223,6 +335,8 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     probeIntensity: 1.35,
     chroma: 1.85,
     colorSplit: 0.42,
+    contrast: 0.85,
+    practicalGain: 2.6,
   },
 
   /**
@@ -263,6 +377,8 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     probeIntensity: 0.9,
     chroma: 1.7,
     colorSplit: 0.34,
+    contrast: 0.55,
+    practicalGain: 1.8,
   },
 
   /**
@@ -293,6 +409,8 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     probeIntensity: 1.05,
     chroma: 1.9,
     colorSplit: 0.5,
+    contrast: 0.9,
+    practicalGain: 2.6,
   },
 
   /** Cold steel key, sodium underlight from the wet ground. Reads as wet stone. */
@@ -320,6 +438,8 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     probeIntensity: 0.9,
     chroma: 1.7,
     colorSplit: 0.36,
+    contrast: 0.7,
+    practicalGain: 2.2,
   },
 
   /**
@@ -352,6 +472,8 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     probeIntensity: 0.8,
     chroma: 1.8,
     colorSplit: 0.44,
+    contrast: 0.95,
+    practicalGain: 2.8,
   },
 };
 
@@ -518,6 +640,8 @@ export class LightingRig {
   private readonly boundsSphere = new Sphere();
   private shadowMapSize: number;
   private fogReference: number;
+  /** Compass bearing the camera looks from. Drives the key-separation policy. */
+  private viewBearing = DEFAULT_VIEW_BEARING;
 
   private readonly tmpColorA = new Color();
   private readonly tmpColorB = new Color();
@@ -613,6 +737,46 @@ export class LightingRig {
   setFogReference(distance: number): void {
     this.fogReference = distance;
     this.commit();
+  }
+
+  /**
+   * Tell the rig where the camera is looking from, so the key-separation policy
+   * has something real to work against.
+   *
+   * Takes the camera's *yaw* in degrees (what `IsoCamera.yawRadians` reports),
+   * not a light bearing — callers should never have to know the two spaces
+   * differ. Call it on a yaw snap; the key swings to keep its shadows in frame,
+   * which is also what a real DoP does when the camera moves.
+   */
+  setViewYawDegrees(yawDegrees: number): void {
+    const bearing = bearingFromYawDegrees(yawDegrees);
+    if (Math.abs(wrapSigned(bearing - this.viewBearing)) < 0.25) return;
+    this.viewBearing = bearing;
+    this.commit();
+  }
+
+  /**
+   * Swing the key into the band where its shadows are actually visible, and take
+   * the rim with it so the complementary split keeps its geometry.
+   *
+   * Authored azimuth is preserved wherever it is already legal — this only moves
+   * a key that is hiding its own shadows behind the objects casting them.
+   */
+  private resolveBearings(s: LiveState): { key: number; rim: number } {
+    const delta = wrapSigned(s.keyAzimuth - this.viewBearing);
+    // A key dead-on the view axis has no "side" to be pushed to. Default to the
+    // camera's left, because that is where the reference corpus puts it: the
+    // Triangle throne room, the FFT chapel and the village square all key from
+    // high screen-left and fill cold from the right.
+    const sign = delta > 1 || (delta >= -1 && delta <= 1) ? 1 : -1;
+    const magnitude = MathUtils.clamp(
+      Math.abs(delta),
+      KEY_VIEW_SEPARATION_MIN,
+      KEY_VIEW_SEPARATION_MAX,
+    );
+    const key = this.viewBearing + sign * magnitude;
+    const shift = wrapSigned(key - s.keyAzimuth);
+    return { key, rim: s.rimAzimuth + shift };
   }
 
   get preset(): LightingPresetName {
@@ -757,10 +921,13 @@ export class LightingRig {
     const radius = this.boundsSphere.radius;
     const distance = radius * 2.6 + 4;
 
+    const rig = this.applyContrast(s);
+    const bearing = this.resolveBearings(s);
+
     // Key
     this.key.color.setHex(s.keyColor, 'srgb');
-    this.key.intensity = s.keyIntensity;
-    placeDirectional(this.key, centre, s.keyAzimuth, s.keyElevation, distance, this.tmpVec);
+    this.key.intensity = rig.key;
+    placeDirectional(this.key, centre, bearing.key, s.keyElevation, distance, this.tmpVec);
 
     const cam = this.key.shadow.camera;
     cam.left = -radius;
@@ -778,14 +945,17 @@ export class LightingRig {
     this.key.shadow.normalBias = texelWorld * 1.6 * s.shadowNormalBiasScale;
     this.key.shadow.bias = -0.00008;
 
-    // Rim
-    this.rim.intensity = s.rimIntensity;
-    placeDirectional(this.rim, centre, s.rimAzimuth, s.rimElevation, distance, this.tmpVec);
+    // Rim. Directional fill, not flat fill: it lights the faces the key misses
+    // *from a bearing*, so raising it adds colour separation without adding the
+    // uniform wash that flattens the volume. That is why the contrast policy
+    // pushes irradiance into the rim rather than simply deleting it.
+    this.rim.intensity = rig.rim;
+    placeDirectional(this.rim, centre, bearing.rim, s.rimElevation, distance, this.tmpVec);
 
     // Fill
-    this.hemisphere.intensity = s.hemiIntensity;
+    this.hemisphere.intensity = rig.hemi;
     this.hemisphere.position.set(centre.x, centre.y + radius, centre.z);
-    this.ambient.intensity = s.ambientIntensity;
+    this.ambient.intensity = rig.ambient;
 
     // ── Committed colour ──────────────────────────────────────────────────
     // Every light colour goes through `gradeLight` rather than straight onto the
@@ -809,13 +979,19 @@ export class LightingRig {
     // reference frames, dawn sunlight sits around (1.0, 0.70, 0.42) — warm, but
     // it still carries a real blue channel. Push it to (1.12, 0.67, 0.27) and
     // every white robe on the field turns salmon.
-    gradeLight(this.key.color, s.keyColor, 0.55 + chroma * 0.2, split * 0.3);
+    // …but "below the fill" is not the same as "none", and round 2 shipped a key
+    // that was effectively ungraded: at chroma 1.85 the old 0.55 + 0.2·chroma
+    // came out at 0.92, which `gradeLight` clamps up to 1.0 — an identity. The
+    // sun was whatever the map author typed, the fill was violently cold, and the
+    // frame read as one desaturated slate because the two never met in the
+    // middle. This is enough amber to see on stone without cooking white cloth.
+    gradeLight(this.key.color, s.keyColor, 0.8 + chroma * 0.3, split * 0.6);
     gradeLight(this.rim.color, s.rimColor, chroma * 1.1, -split * 1.2);
     gradeLight(this.hemisphere.color, s.skyColor, chroma * 1.15, -split * 1.15);
     gradeLight(this.hemisphere.groundColor, s.groundColor, chroma, split * 0.4);
     gradeLight(this.ambient.color, s.ambientColor, chroma * 1.2, -split * 1.2);
 
-    this.updateProbe(s);
+    this.updateProbe(s, rig, bearing);
     this.placePracticals();
 
     if (this.manageBackground) {
@@ -839,6 +1015,81 @@ export class LightingRig {
   }
 
   /**
+   * Redistribute irradiance from the flat fill into the key and the rim.
+   *
+   * This is the rig's one non-negotiable opinion about level, as opposed to hue.
+   *
+   * The measured failure: `battle-open` arrives here with hemi 1.25, ambient
+   * 0.42 and probe 1.35 against a key of 3.1. Work it out on a floor tile with
+   * the key at 54°: lit irradiance ≈ 3.1·sin 54° + 1.25 + 0.42 + probe ≈ 5.1,
+   * and the same tile inside a cast shadow still receives ≈ 2.6. A shadow that
+   * only halves the value it falls on is not a shadow, it is a slightly darker
+   * paint. Every critic note about "no consistent key", "no volume", "every wall
+   * top-face the same brightness" and "no cast shadows anywhere" is that one
+   * number. Look at the reference throne room: the shadow side is a *fifth* of
+   * the lit side, and it is a different colour as well as a different value.
+   *
+   * The fix has to be brightness-neutral or it just trades one failure (flat)
+   * for another (murk). So the flat fill is pulled down toward the rig's target
+   * ratio, and every unit of irradiance removed is handed straight to the key —
+   * lit surfaces land within a few percent of where the author put them and only
+   * the unlit ones fall away. A third of the recovered budget goes to the rim
+   * instead, because the rim is *directional* fill: it lights the faces the key
+   * misses from a committed bearing and a complementary hue, which is how the
+   * references keep their shadow side readable without flattening it.
+   */
+  private applyContrast(s: LiveState): {
+    key: number;
+    rim: number;
+    hemi: number;
+    ambient: number;
+    probe: number;
+  } {
+    const drama = MathUtils.clamp(s.contrast, 0, 1);
+    const key = Math.max(0, s.keyIntensity);
+    if (drama <= 0) {
+      return {
+        key,
+        rim: s.rimIntensity,
+        hemi: s.hemiIntensity,
+        ambient: s.ambientIntensity,
+        probe: s.probeIntensity,
+      };
+    }
+
+    // Rig targets, expressed as fractions of the key. Read off the reference
+    // frames rather than invented: a sky fill around a sixth of the sun, a
+    // near-zero flat term (crevices are meant to go black), a rim strong enough
+    // to draw a silhouette but never to compete for "which way is the light".
+    const targetHemi = key * 0.17;
+    const targetAmbient = key * 0.025;
+    const targetRim = key * 0.34;
+    const targetProbe = Math.min(s.probeIntensity, 0.85);
+
+    const hemi = MathUtils.lerp(s.hemiIntensity, targetHemi, drama);
+    const ambient = MathUtils.lerp(s.ambientIntensity, targetAmbient, drama);
+    const probe = MathUtils.lerp(s.probeIntensity, targetProbe, drama);
+
+    // What the flat terms gave up. The probe is spherical-harmonic irradiance
+    // rather than a lambert term, so its intensity is not in the same units;
+    // count it at a discount rather than pretending it is interchangeable.
+    const surrendered =
+      Math.max(0, s.hemiIntensity - hemi) +
+      Math.max(0, s.ambientIntensity - ambient) +
+      Math.max(0, s.probeIntensity - probe) * 0.55;
+
+    const rim = Math.max(s.rimIntensity, MathUtils.lerp(s.rimIntensity, targetRim, drama));
+    const rimCost = Math.max(0, rim - s.rimIntensity);
+    // The key absorbs whatever the rim did not, divided by the cosine it will be
+    // seen through — a 54° sun only delivers sin 54° of its intensity to the
+    // floor, so handing it the raw number under-compensates and the frame dims.
+    const cosine = Math.max(0.35, Math.sin(MathUtils.degToRad(s.keyElevation)));
+    const recovered = Math.max(0, surrendered - rimCost * 0.5) / cosine;
+
+    return { key: key + recovered * 0.9, rim, hemi, ambient, probe };
+  }
+
+  /**
    * Rebuild the light probe's spherical harmonics from the live mood.
    *
    * Four directional lobes are projected into SH9: warm bounce arriving from the
@@ -847,10 +1098,14 @@ export class LightingRig {
    * a wall facing the sun picks up amber even in shadow, the one facing away
    * goes blue — which is the difference between "dark" and "unlit".
    */
-  private updateProbe(s: LiveState): void {
+  private updateProbe(
+    s: LiveState,
+    rig: { key: number; rim: number; hemi: number; probe: number },
+    bearing: { key: number; rim: number },
+  ): void {
     const sh = this.probeSh;
     sh.zero();
-    if (s.probeIntensity <= 0) {
+    if (rig.probe <= 0) {
       this.probe.sh.zero();
       this.probe.intensity = 0;
       return;
@@ -873,13 +1128,16 @@ export class LightingRig {
     const split = s.colorSplit;
     // Bounce off whatever the key is hitting: same bearing, but arriving from
     // low down, because that is where the lit ground is.
-    add(s.keyColor, s.keyAzimuth, Math.max(4, s.keyElevation * 0.35), s.keyIntensity * 0.12, split * 0.55);
-    add(s.rimColor, s.rimAzimuth, s.rimElevation * 0.6, 0.35 + s.rimIntensity * 0.8, -split * 1.2);
-    add(s.skyColor, 0, 90, s.hemiIntensity * 0.62, -split * 1.15);
-    add(s.groundColor, 0, -90, s.hemiIntensity * 0.24, split * 0.45);
+    // Lobe weights read from the *post-policy* levels, not the authored ones —
+    // otherwise the probe quietly puts back the flat sky fill that `applyContrast`
+    // just took out, and the shadows stay grey.
+    add(s.keyColor, bearing.key, Math.max(4, s.keyElevation * 0.35), rig.key * 0.12, split * 0.55);
+    add(s.rimColor, bearing.rim, s.rimElevation * 0.6, 0.3 + rig.rim * 0.8, -split * 1.2);
+    add(s.skyColor, 0, 90, rig.hemi * 0.62, -split * 1.15);
+    add(s.groundColor, 0, -90, rig.hemi * 0.24, split * 0.45);
 
     this.probe.sh.copy(sh);
-    this.probe.intensity = s.probeIntensity;
+    this.probe.intensity = rig.probe;
   }
 
   /**
@@ -910,8 +1168,11 @@ export class LightingRig {
       light.color.setHex(spec.color, 'srgb');
       light.distance = spec.distance;
       light.decay = 2;
-      this.practicalBase[i] = spec.intensity;
-      light.intensity = spec.intensity;
+      // The gain is the rig's, for the same reason the contrast policy is: a
+      // brazier authored to look right on its own is invisible once it is one of
+      // six, twenty tiles back, behind a tone mapper and a grade.
+      this.practicalBase[i] = spec.intensity * Math.max(0, this.live.practicalGain);
+      light.intensity = this.practicalBase[i]!;
     }
   }
 
@@ -957,9 +1218,10 @@ export class LightingRig {
       this.adoptScan = 0.75;
       this.refreshAdoptedLights();
     }
+    const gain = Math.max(0, this.live.practicalGain);
     for (let i = 0; i < this.adopted.length; i++) {
       const light = this.adopted[i]!;
-      const base = this.adoptedBase[i]!;
+      const base = this.adoptedBase[i]! * gain;
       const home = this.adoptedHome[i]!;
       const n = flickerNoise(t * 5.6, i * 4.7);
       light.intensity = base * (0.78 + 0.34 * (n * 0.5 + 0.5) * 1.4);

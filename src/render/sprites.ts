@@ -599,9 +599,13 @@ function makeCanvas(size: number): { canvas: HTMLCanvasElement; ctx: CanvasRende
   return { canvas, ctx };
 }
 
-function canvasTexture(canvas: HTMLCanvasElement, srgb = true): THREE.CanvasTexture {
+function canvasTexture(
+  canvas: HTMLCanvasElement,
+  srgb = true,
+  magFilter: THREE.MagnificationTextureFilter = THREE.NearestFilter,
+): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
-  texture.magFilter = THREE.NearestFilter;
+  texture.magFilter = magFilter;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.generateMipmaps = true;
   texture.anisotropy = 4;
@@ -611,51 +615,141 @@ function canvasTexture(canvas: HTMLCanvasElement, srgb = true): THREE.CanvasText
 }
 
 /** How far the contact decal floats above the tile surface, in world units. */
-const CONTACT_SHADOW_LIFT = 0.01;
+const CONTACT_SHADOW_LIFT = 0.012;
 
 /**
- * Contact darkening — ambient occlusion in the crack where the feet meet the
- * tile, not a fake shadow.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE GROUNDED SHADOW — and why the shadow map alone cannot deliver it
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Measured, not assumed. With the sprites' `customDepthMaterial` in place the
+ * units *do* write their real alpha-cut silhouettes into the key's shadow map —
+ * 29 880 texels across twelve units, against 81 363 for the same quads with
+ * three's default (rectangular) depth material, i.e. the cut-out is working and
+ * roughly a third of each quad is opaque. So the map is not the problem.
  *
- * The cast shadow (real, from the shadow map, in the key light's direction) does
- * the directional work. What it cannot do is close the hairline of unoccluded
- * ground *directly under* the figure at grazing light angles, and that hairline
- * is precisely what makes a billboard look like it is hovering a texel above the
- * floor. So this stays tight and centred: a hard core inside roughly a third of
- * the tile, a fast falloff, nothing wide enough to read as an ellipse decal.
+ * The problem is geometry. `battle-open` keys at 54° elevation, and a *vertical
+ * card* under a steep key throws its shadow only `height / tan(54°)` ≈ 0.73
+ * body-heights along the ground — and the map's key azimuth puts that direction
+ * up-screen, which is exactly where the billboard itself is. Rendering the
+ * frame twice, once with `mesh.castShadow` on and once off, and differencing
+ * the two, the *entire* delta lands on the sprites themselves (self-shadowing);
+ * essentially nothing reaches the terrain, because the unit is standing on its
+ * own shadow. That is a property of billboards under a steep key, not a bug to
+ * be fixed in the shadow map, and it is why every shipped game in this lineage
+ * draws a grounding decal as well as (not instead of) a real cast shadow.
  *
- * It multiplies, and it is cooled slightly toward blue because occluded ground
- * in both reference games picks up the sky rather than going neutral grey.
+ * So this decal is authored to be the thing the map cannot give us: a shadow
+ * that *agrees with the key's azimuth*, anchored at the feet and leaning away
+ * from the light, with a tight occlusion core where the boots meet the stone.
+ *   • the **core** is the contact term — the hairline of unoccluded ground
+ *     directly under the figure that no shadow map resolves, and the single
+ *     thing that stops a billboard reading as hovering;
+ *   • the **tail** is the directional term — it stretches with `cot(elevation)`
+ *     and rotates with the azimuth, so it always points where the terrain's own
+ *     cast shadows point. A round blob under every unit regardless of the light
+ *     is the "generic dark ellipse" the visual target calls an instant fail.
+ *
+ * Authored in a canonical space with the feet at v = FOOT_V and the tail running
+ * to v = 1; `UnitSprite` does the rotate/stretch. Multiplies, and is cooled
+ * toward blue because occluded ground in both reference games picks up sky
+ * rather than going neutral grey.
  */
-let contactShadowTexture: THREE.CanvasTexture | null = null;
-function getContactShadowTexture(): THREE.CanvasTexture {
-  if (contactShadowTexture) return contactShadowTexture;
+
+/** Where the feet sit along the decal's long axis, in UV. */
+const SHADOW_FOOT_V = 0.24;
+/** Decal size in world units, before the per-frame directional stretch. */
+const SHADOW_WIDTH = TILE_SIZE * 1.05;
+const SHADOW_LENGTH = TILE_SIZE * 1.55;
+
+let groundShadowTexture: THREE.CanvasTexture | null = null;
+function getGroundShadowTexture(): THREE.CanvasTexture {
+  if (groundShadowTexture) return groundShadowTexture;
   const size = 128;
   const { canvas, ctx } = makeCanvas(size);
   const image = ctx.createImageData(size, size);
-  const half = size / 2;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      // Slightly elliptical: a standing figure's contact patch is wider than deep.
-      const dx = (x - half + 0.5) / half;
-      const dy = ((y - half + 0.5) / half) * 1.2;
-      const r = Math.min(1, Math.hypot(dx, dy));
-      // Flat core out to r≈0.34, then a quick smooth shoulder. A single pow()
-      // falloff from the centre reads as an airbrushed blob; a plateau plus a
-      // shoulder reads as occlusion.
-      const core = 1 - smoothstep(0.16, 0.92, r);
-      const occlusion = core * core;
-      const value = Math.round(255 * (1 - occlusion * 0.62));
-      const o = (y * size + x) * 4;
+
+  for (let py = 0; py < size; py++) {
+    // Canvas row 0 is v = 1 (flipY), i.e. the far end of the tail.
+    const v = 1 - (py + 0.5) / size;
+    for (let px = 0; px < size; px++) {
+      const u = (px + 0.5) / size;
+      const du = u - 0.5;
+
+      // Contact core: tight, slightly wider than deep, sat right on the feet.
+      const cu = du / 0.155;
+      const cv = (v - SHADOW_FOOT_V) / 0.115;
+      const core = Math.exp(-(cu * cu + cv * cv));
+
+      // Directional tail: fades and widens with distance, so the far end
+      // dissolves into the ground instead of ending on an edge.
+      const t = Math.min(1, Math.max(0, (v - SHADOW_FOOT_V) / (1 - SHADOW_FOOT_V)));
+      const width = 0.165 + 0.115 * t;
+      const lobe = Math.exp(-((du / width) * (du / width)));
+      const tail = lobe * Math.pow(1 - t, 2.0) * 0.85;
+
+      const occlusion = Math.min(1, Math.max(core, tail));
+      const value = Math.round(255 * (1 - occlusion * 0.66));
+      const o = (py * size + px) * 4;
       image.data[o] = value;
-      image.data[o + 1] = Math.round(value * 0.99);
-      image.data[o + 2] = Math.round(Math.min(255, value * 1.05 + 5)); // cool it
+      image.data[o + 1] = Math.round(value * 0.985);
+      image.data[o + 2] = Math.round(Math.min(255, value * 1.06 + 4)); // cool it
       image.data[o + 3] = 255;
     }
   }
   ctx.putImageData(image, 0, 0);
-  contactShadowTexture = canvasTexture(canvas);
-  return contactShadowTexture;
+  // Linear, not nearest: this is a soft gradient, and the nearest-filter rule
+  // that keeps the *art* crisp would turn a 128px falloff into visible banding
+  // the moment the decal is magnified past one screen pixel per texel.
+  groundShadowTexture = canvasTexture(canvas, true, THREE.LinearFilter);
+  return groundShadowTexture;
+}
+
+/**
+ * Multiply decal material with an explicit strength.
+ *
+ * `MeshBasicMaterial.opacity` cannot fade a multiply decal: with
+ * `premultipliedAlpha` the shader pre-multiplies RGB by alpha, so lowering
+ * opacity makes the shadow *darker*, and without it alpha is discarded by
+ * `blendFunc(ZERO, SRC_COLOR)` and opacity does nothing at all. Neither is a
+ * fade. Four lines of GLSL lerping the sampled darkening back toward white is,
+ * and it is what lets the shadow soften as a unit hops rather than flying with it.
+ */
+function createShadowDecalMaterial(map: THREE.Texture): THREE.ShaderMaterial {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uMap: { value: map },
+      uStrength: { value: 1 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUvDecal;
+      void main() {
+        vUvDecal = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uMap;
+      uniform float uStrength;
+      varying vec2 vUvDecal;
+      void main() {
+        vec3 shade = texture2D(uMap, vUvDecal).rgb;
+        gl_FragColor = vec4(mix(vec3(1.0), shade, clamp(uStrength, 0.0, 1.0)), 1.0);
+      }
+    `,
+    blending: THREE.MultiplyBlending,
+    // three insists on this pairing; the fragment writes alpha 1 and carries the
+    // darkening entirely in RGB, so it is bookkeeping rather than behaviour.
+    premultipliedAlpha: true,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    toneMapped: false,
+  });
+  material.name = 'UnitGroundShadow';
+  return material;
 }
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -1457,7 +1551,10 @@ export class UnitSprite {
   readonly mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial>;
   private readonly bundle: SpriteMaterialBundle;
 
-  private readonly contactShadow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null;
+  private readonly contactShadow: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null;
+  /** Ground heading the key light travels, and how far a body-height casts. */
+  private shadowYaw = 0;
+  private shadowStretch = 1;
   private readonly ring: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly turnMarker: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly statusStrip: THREE.Group;
@@ -1530,24 +1627,17 @@ export class UnitSprite {
     this.animator = new SpriteAnimator(sheet.animations);
 
     if (this.options.contactShadow) {
-      const size = TILE_SIZE * 0.86;
-      const geometry = new THREE.PlaneGeometry(size, size);
+      // Lay the quad flat, then slide it so the decal's foot anchor — not its
+      // centre — sits on the mesh origin. Everything after this can rotate the
+      // mesh about Y and stretch it along local −Z without the contact core
+      // ever leaving the boots.
+      const geometry = new THREE.PlaneGeometry(SHADOW_WIDTH, SHADOW_LENGTH);
       geometry.rotateX(-Math.PI / 2);
-      const material = new THREE.MeshBasicMaterial({
-        map: getContactShadowTexture(),
-        blending: THREE.MultiplyBlending,
-        // three requires premultiplied alpha for MultiplyBlending; the texture is
-        // opaque and the darkening lives in RGB, so this is purely bookkeeping.
-        premultipliedAlpha: true,
-        transparent: true,
-        depthWrite: false,
-        depthTest: true,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-        toneMapped: false,
-      });
-      this.contactShadow = new THREE.Mesh(geometry, material);
+      geometry.translate(0, 0, (SHADOW_FOOT_V - 0.5) * SHADOW_LENGTH);
+      this.contactShadow = new THREE.Mesh(
+        geometry,
+        createShadowDecalMaterial(getGroundShadowTexture()),
+      );
       this.contactShadow.renderOrder = 1;
       this.contactShadow.frustumCulled = false;
       this.object.add(this.contactShadow);
@@ -1661,6 +1751,22 @@ export class UnitSprite {
       .set(-key.x, -Math.abs(key.y) * 0.5, -key.z)
       .normalize();
     if (rimColor !== undefined) this.bundle.uniforms.uRimColor.value.set(rimColor);
+
+    // Aim the grounded shadow down the same ray. The decal's tail runs along its
+    // own local −Z, and rotating a mesh by θ about Y sends −Z to
+    // (−sin θ, −cos θ); solving that against the key's ground heading gives the
+    // yaw below. `stretch` is cot(elevation) — the ground distance one unit of
+    // height throws — clamped so a near-overhead key still leaves a readable
+    // contact patch and a raking one does not draw a shadow across four tiles.
+    const groundLength = Math.hypot(key.x, key.z);
+    if (groundLength > 1e-5) {
+      this.shadowYaw = Math.atan2(-key.x / groundLength, -key.z / groundLength);
+      const cot = groundLength / Math.max(1e-3, Math.abs(key.y));
+      this.shadowStretch = Math.min(1.85, Math.max(0.55, 0.42 + cot * 0.78));
+    } else {
+      this.shadowYaw = 0;
+      this.shadowStretch = 0.55;
+    }
   }
 
   /**
@@ -2018,13 +2124,18 @@ export class UnitSprite {
     this.bundle.uniforms.uGrounded.value = 1 / (1 + lift * 6);
 
     if (this.contactShadow) {
-      // During a hop the sprite arcs above the tile, but its contact patch has to
-      // stay on the surface and shrink — a blob that flies with the unit is the
-      // classic "sticker on the screen" giveaway.
-      const shrink = 1 / (1 + lift * 1.4);
+      // During a hop the sprite arcs above the tile, but its shadow has to stay
+      // on the surface, spread, and soften — a blob that flies with the unit is
+      // the classic "sticker on the screen" giveaway.
+      const spread = 1 + lift * 0.9;
+      const fade = 1 / (1 + lift * 2.2);
       this.contactShadow.position.set(groundX, shadowY + CONTACT_SHADOW_LIFT, groundZ);
-      this.contactShadow.scale.setScalar(shrink);
-      this.contactShadow.material.opacity = this.ko ? 0.5 : 1;
+      this.contactShadow.rotation.set(0, this.shadowYaw, 0, 'YXZ');
+      // A body on the floor no longer has a standing silhouette to throw, so the
+      // KO case collapses the directional tail and keeps only the contact patch.
+      const stretch = this.ko ? 0.55 : this.shadowStretch;
+      this.contactShadow.scale.set(spread, 1, stretch * spread);
+      this.contactShadow.material.uniforms['uStrength']!.value = fade * (this.ko ? 0.62 : 1);
       this.contactShadow.visible = this.crystalPhase < 0;
     }
 

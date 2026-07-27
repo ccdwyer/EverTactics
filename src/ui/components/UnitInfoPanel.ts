@@ -8,7 +8,7 @@
 
 import { add, div, el } from '../dom';
 import { icon } from '../icons';
-import { portrait } from '../portraits';
+import { castPortrait, portrait } from '../portraits';
 import type { StatusVM, UnitVM } from '../types';
 import { Meter } from './Meter';
 import { divider, Panel } from './Panel';
@@ -103,7 +103,10 @@ export class UnitInfoPanel {
       this.root.classList.remove('is-swapping');
       void this.root.offsetWidth;
       this.root.classList.add('is-swapping');
-      this.faceSlot.replaceChildren(portrait(unit.portrait, { size: 'lg' }));
+      // Cast on the job the unit is actually doing — a Knight must not turn up
+      // in a Time Mage's hat just because the id hashed that way.
+      const face = castPortrait(unit.id, unit.portrait, { job: unit.job, gender: unit.gender });
+      this.faceSlot.replaceChildren(portrait(face, { size: 'lg' }));
     }
     this.root.dataset['team'] = unit.team;
     this.nameNode.textContent = unit.name;

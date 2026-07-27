@@ -9,9 +9,25 @@
 
 import { add, div, el } from '../dom';
 import { icon } from '../icons';
+import { castPortrait, portraitForUnit } from '../portraits';
 import { portrait } from '../portraits';
 import type { TurnEntryVM } from '../types';
 import { isReducedMotion } from '../anim';
+
+/**
+ * The face a rail chip shows. An entry with no portrait still has to look like
+ * the unit it labels — never a monster face on a human job — and an auto-cast
+ * one is upgraded to the job-correct face when the entry names a job.
+ */
+function faceFor(entry: TurnEntryVM): string | undefined {
+  if (!entry.portrait) {
+    return portraitForUnit(`${entry.unitId}:${entry.gender ?? ''}`, {
+      job: entry.job,
+      gender: entry.gender,
+    });
+  }
+  return castPortrait(entry.unitId, entry.portrait, { job: entry.job, gender: entry.gender });
+}
 
 export interface TurnOrderCallbacks {
   onFocus(unitId: string): void;
@@ -33,10 +49,11 @@ export class TurnOrderBar {
   }
 
   setEntries(entries: readonly TurnEntryVM[]): void {
-    // FLIP: capture the current geometry keyed by unit id.
+    // FLIP: capture the current geometry keyed by unit id. The rail runs
+    // vertically, so the axis that moves when a Haste reshuffles the queue is Y.
     const before = new Map<string, number>();
     if (!isReducedMotion()) {
-      for (const [id, node] of this.chips) before.set(id, node.getBoundingClientRect().left);
+      for (const [id, node] of this.chips) before.set(id, node.getBoundingClientRect().top);
     }
 
     this.entries = entries;
@@ -58,10 +75,10 @@ export class TurnOrderBar {
           node.classList.add('is-new');
           continue;
         }
-        const delta = prev - node.getBoundingClientRect().left;
+        const delta = prev - node.getBoundingClientRect().top;
         if (Math.abs(delta) < 0.5) continue;
         node.style.transition = 'none';
-        node.style.transform = `translate3d(${delta}px,0,0)`;
+        node.style.transform = `translate3d(0,${delta}px,0)`;
         requestAnimationFrame(() => {
           node.style.transition = '';
           node.style.transform = '';
@@ -77,22 +94,31 @@ export class TurnOrderBar {
     chip.style.setProperty('--chip-index', String(index));
 
     const frame = div('et-turnchip__frame');
-    frame.appendChild(portrait(entry.portrait, { size: entry.current ? 'md' : 'sm', className: 'et-turnchip__face' }));
+    // Head crop: at rail scale the shoulders are noise and the face is the read.
+    frame.appendChild(
+      portrait(faceFor(entry), {
+        size: entry.current ? 'md' : 'sm',
+        head: true,
+        className: 'et-turnchip__face',
+      }),
+    );
     if (entry.current) frame.appendChild(icon('crown', 'et-turnchip__crown'));
+    // The name floats out of the chip and only shows for the acting unit or on
+    // hover, so twelve entries cost one narrow column instead of a text block.
+    frame.appendChild(el('span', 'et-turnchip__name', entry.name));
     chip.appendChild(frame);
 
     const meta = div('et-turnchip__meta');
     add(
       meta,
-      el('span', 'et-turnchip__name', entry.name),
       el(
         'span',
         'et-turnchip__delta',
-        entry.current ? 'NOW' : entry.ticksUntil <= 0 ? 'NEXT' : `+${entry.ticksUntil}`,
+        entry.current ? 'NOW' : entry.ticksUntil <= 0 ? '!' : String(entry.ticksUntil),
       ),
     );
-    if (entry.note) meta.appendChild(el('span', 'et-turnchip__note', entry.note));
     chip.appendChild(meta);
+    if (entry.note) chip.title = `${entry.name} — ${entry.note}`;
 
     chip.addEventListener('mouseenter', () => this.cb.onFocus(entry.unitId));
     chip.addEventListener('click', () => this.cb.onSelect(entry.unitId));

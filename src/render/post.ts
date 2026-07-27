@@ -206,6 +206,27 @@ export interface ChromaSettings {
   edge: number;
 }
 
+/**
+ * How hard the sprite layer is pulled into the scene's tonal range before grading.
+ *
+ * See the block comment in `materials/post/composite.ts`. This is the post half of the
+ * sprite-integration contract: `materials/sprite.ts` owns making units agree with the light
+ * DIRECTION, this owns making them agree with the picture's value and chroma range so the
+ * LUT lands on the whole frame from one starting point.
+ */
+export interface SpriteGradeSettings {
+  enabled: boolean;
+  /** Blend of the pull, 0..1. 0 leaves sprites exactly as the material drew them. */
+  amount: number;
+  /**
+   * Fraction of sprite chroma removed. The atlas is authored far more saturated than a
+   * graded HD-2D board; this is what stops the primaries popping off the picture.
+   */
+  desaturate: number;
+  /** Linear multiplier applied to sprite pixels. Sub-1 seats them in the board's values. */
+  tint: [number, number, number];
+}
+
 export type SpritePolicy = 'exclude' | 'silhouette' | 'none';
 
 export interface AaSettings {
@@ -224,6 +245,7 @@ export interface PostSettings {
   vignette: VignetteSettings;
   grain: GrainSettings;
   chroma: ChromaSettings;
+  spriteGrade: SpriteGradeSettings;
   aa: AaSettings;
   /** Linear exposure multiplier applied just before the tonemapper. */
   exposure: number;
@@ -261,47 +283,71 @@ const QUALITY: Record<PostQuality, QualityProfile> = {
 };
 
 /**
- * Measured floors, from `refs/curated/triangle/official_005_steam.jpg` and
+ * Measured bounds, from `refs/curated/triangle/official_005_steam.jpg` and
  * `official_019_se_screenshot.jpg`.
  *
- * These are not taste knobs. VISUAL_TARGET.md lists "weak or absent depth of field" as an
- * explicit fail condition and says the depth of field is "*the* diorama tell and we are
- * likely to under-do it out of timidity". Scenario post profiles were authored against an
- * older, much weaker DoF and now dial it down to roughly a fifth of what the references
- * show — so the stack clamps *up* to these values rather than trusting the dial.
+ * These are not taste knobs, and — round 2 — they are not all floors either. Two of them
+ * are ceilings, because "more" was the wrong instinct on the shape of the defocus.
  *
- * The dial still works in the direction that matters: `enabled: false` removes the effect
- * entirely, and anything above the floor is passed through untouched. Set
- * `respectReferenceFloor = false` on the stack to author below the floor deliberately.
+ * VISUAL_TARGET.md section 3 was rewritten after round 1 called out the earlier advice.
+ * What the references actually blur is SCENERY: foreground props, background architecture,
+ * distant terrain. The tiles a player has to count and the units standing on them are sharp
+ * in both games. So the guarantees are:
+ *
+ *   - a real blur exists where the frame IS soft (`dofCoCPixels`, a floor — this is what
+ *     stops "weak or absent depth of field", the listed fail condition);
+ *   - the sharp band is wide enough to contain the whole playable board
+ *     (`dofTiltBandMin`, a floor on SHARPNESS — a scenario may ask for more focus, never
+ *     less);
+ *   - the elliptical corner term never grows far enough to eat gameplay tiles at the left
+ *     and right of the frame (`dofTiltRadialMax`, a ceiling).
+ *
+ * Vignette obeys the same logic — it frames, it does not darken the play space. Round 2
+ * measured our own frame at mean luma 38/255 against the references' 66-80, with a 0.72
+ * vignette on top of an already-dark grade. That is the vignette compounding, not framing.
+ *
+ * Set `respectReferenceFloor = false` on the stack to author outside these deliberately.
  */
 export const REFERENCE_FLOOR = {
-  /** Blur radius at the softest part of the frame, in pixels at 1080p. Measured ~20px. */
+  /**
+   * Blur radius at the softest part of the frame, in pixels at 1080p. Measured ~20px on the
+   * reference corners. A floor: the soft parts of the frame must be genuinely soft.
+   */
   dofCoCPixels: 20,
   /**
-   * Half-height of the fully sharp band, in UV. `resolveDof` takes `min(authored, this)`,
-   * so this is a cap on sharpness, not a target: a scenario cannot ask for a wider band.
+   * Minimum half-height of the fully sharp band, in UV — a floor on sharpness.
    *
-   * Re-measured against VISUAL_TARGET.md section 3, which says the reference frame's
-   * *top ~15% and bottom ~20%* are soft — i.e. the sharp stripe is roughly two thirds of
-   * frame height, not the one third this constant used to claim. At 0.17, with the band
-   * centred on v = 0.52, everything above v = 0.35 and below v = 0.69 defocused, which on
-   * `battle-open` is the top three tile rows and the whole lower half of the board. Section
-   * 3 was refined this round precisely to say that is a defect: the blur belongs on the
-   * scenery past the board, and the focus band has to contain the playable field.
+   * At 0.28 (round 1's value, applied as a CAP) the band centred on v = 0.52 defocused
+   * everything above v = 0.24 and below v = 0.80. With the board now filling the frame
+   * rather than floating in it, that is the top three tile rows and the bottom two: exactly
+   * the "blurring pillars and gameplay-relevant tiles" defect section 3 names.
    *
-   * 0.28 keeps the board sharp and still lands the softness on the same fraction of the
-   * frame the references soften. The corner term (`dofTiltRadial`) and the CoC floor are
-   * what keep this from reading as "weak or absent depth of field".
+   * Measured on `shots/r2-c.png`, the framing `frameField` now produces puts playable tiles
+   * between v = 0.33 and v = 0.88 — centre 0.60, half-height 0.28. So the band is centred on
+   * 0.60 (see `defaultPostSettings`) and 0.30 covers the board with a little to spare, while
+   * leaving the near chapel wall and the map's skirt below it, and the sky above it, to fall
+   * off. Wider than this and the foreground scenery stays sharp too, which is the "zero
+   * depth of field" tell; narrower and it eats tiles the player has to count.
    */
-  dofTiltBand: 0.28,
-  /** Falloff past the band. Short, so the transition is visible rather than a slow smear. */
-  dofTiltFalloff: 0.22,
-  /** Corner-term weight. */
-  dofTiltRadial: 0.7,
-  /** Fraction of light removed at the frame corner. Measured ~0.8 on both references. */
-  vignetteAmount: 0.72,
-  /** Where the falloff starts, fraction of the way to the corner. */
-  vignetteRadius: 0.26,
+  dofTiltBandMin: 0.3,
+  /**
+   * Minimum falloff distance past the band. Long enough that the transition is a ramp
+   * rather than a visible seam across the board; the references have no hard focus edge.
+   */
+  dofTiltFalloffMin: 0.3,
+  /**
+   * MAXIMUM corner-term weight. This is the term that softens the frame corners so a
+   * horizontal band does not leave them razor sharp — but at 0.7 it reached inward far
+   * enough to blur the left and right walls of the cloister, which are playable geometry.
+   */
+  dofTiltRadialMax: 0.34,
+  /** Fraction of light removed at the frame corner. */
+  vignetteAmount: 0.34,
+  /**
+   * MINIMUM radius at which darkening may start, as a fraction of the way to the corner.
+   * Below this the falloff is inside the play space rather than around it.
+   */
+  vignetteRadiusMin: 0.46,
   /**
    * Grain amplitude as a fraction of full scale. Measured against the reference frames at
    * 1:1 — 0.03 was still invisible in a screenshot, which fails the "clearly visible" note
@@ -348,13 +394,16 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
       focusRange: 6 * tileSize,
       cocScale: 0.55,
       // Slightly above centre: the reference frames put the sharp band on the action and
-      // leave the negative space above it soft.
-      tiltCenter: [0.5, 0.52],
+      // leave the negative space above it soft. Matches the camera's composition offset,
+      // which lifts the subject the same way.
+      tiltCenter: [0.5, 0.6],
       tiltAngle: 0,
-      tiltBand: REFERENCE_FLOOR.dofTiltBand,
-      tiltFalloff: REFERENCE_FLOOR.dofTiltFalloff,
-      tiltRadial: REFERENCE_FLOOR.dofTiltRadial,
-      tiltRadialStart: 0.42,
+      tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
+      tiltFalloff: REFERENCE_FLOOR.dofTiltFalloffMin,
+      tiltRadial: REFERENCE_FLOOR.dofTiltRadialMax,
+      // Pushed out from 0.42: the corner term now begins two thirds of the way to the
+      // corner, so it is a corner softener rather than a second vignette.
+      tiltRadialStart: 0.66,
       maxCoCPixels: REFERENCE_FLOOR.dofCoCPixels,
       bokehBoost: 1.6,
       nearStrength: 0.9,
@@ -364,13 +413,23 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
     vignette: {
       enabled: true,
       amount: REFERENCE_FLOOR.vignetteAmount,
-      radius: REFERENCE_FLOOR.vignetteRadius,
+      radius: REFERENCE_FLOOR.vignetteRadiusMin,
       softness: 0.62,
-      edge: 0.55,
-      color: [0.04, 0.05, 0.09],
+      // Halved. The rectangular edge band is the letterbox darkening the references carry;
+      // at 0.55 on top of a 0.72 radial it was the dominant tone in the outer third.
+      edge: 0.3,
+      color: [0.05, 0.06, 0.11],
     },
     grain: { enabled: true, amount: REFERENCE_FLOOR.grainAmount, size: 1.0, shadowBias: 0.4, animate: true },
-    chroma: { enabled: true, amount: 0.35, edge: 3.4 },
+    // Halved from 0.35. That value was authored when the frame corners were empty
+    // background, where fringing costs nothing. Now the board runs off all four edges and
+    // the corners carry pixel art, where 0.35 puts a visible red/cyan halo on the sprite
+    // outlines — which is worse than no CA at all.
+    chroma: { enabled: true, amount: 0.16, edge: 3.8 },
+    // Measured against the same reference pair: in official_019 the crew sprites sit a
+    // clear step below the lit deck in value and carry the scene's cool cast; ours were
+    // rendering at full atlas albedo over a board a good 40% darker.
+    spriteGrade: { enabled: true, amount: 1.0, desaturate: 0.24, tint: [0.82, 0.85, 0.95] },
     aa: { enabled: true, subpix: 0.4, threshold: 0.125, thresholdMin: 0.0312, spritePolicy: 'exclude' },
   };
 }
@@ -511,12 +570,12 @@ export class PostStack implements PostEffectsHost {
     focusDistance: 18,
     focusRange: 6,
     cocScale: 0.55,
-    tiltCenter: [0.5, 0.52],
+    tiltCenter: [0.5, 0.6],
     tiltAngle: 0,
-    tiltBand: REFERENCE_FLOOR.dofTiltBand,
-    tiltFalloff: REFERENCE_FLOOR.dofTiltFalloff,
-    tiltRadial: REFERENCE_FLOOR.dofTiltRadial,
-    tiltRadialStart: 0.42,
+    tiltBand: REFERENCE_FLOOR.dofTiltBandMin,
+    tiltFalloff: REFERENCE_FLOOR.dofTiltFalloffMin,
+    tiltRadial: REFERENCE_FLOOR.dofTiltRadialMax,
+    tiltRadialStart: 0.66,
     bokehBoost: 1.6,
     nearStrength: 0.9,
     nearSpread: 0.4,
@@ -698,6 +757,9 @@ export class PostStack implements PostEffectsHost {
       uGrainShadowBias: { value: this.settings.grain.shadowBias },
       uChromaAmount: { value: this.settings.chroma.amount },
       uChromaEdge: { value: this.settings.chroma.edge },
+      uSpriteGradeAmount: { value: 0 },
+      uSpriteDesat: { value: this.settings.spriteGrade.desaturate },
+      uSpriteTint: { value: new Vector3(1, 1, 1) },
       uLutMix: { value: 0 },
       uLutAmount: { value: this.settings.grade.amount },
       uLutSize: { value: LUT_SIZE },
@@ -992,9 +1054,13 @@ export class PostStack implements PostEffectsHost {
     // test work but is a read/write feedback loop on the attachment three just wrote, and
     // depth-writing sprites would fail an equal-depth test anyway. The cost of the
     // approximation is a few terrain pixels behind an occluded unit keeping their jaggies.
+    const spriteGrade = this.settings.spriteGrade;
+    const spriteGradeOn = spriteGrade.enabled && spriteGrade.amount > 0.001;
     const wantMask =
       this.spriteLayer !== undefined &&
-      ((this.settings.aa.enabled && this.settings.aa.spritePolicy !== 'none') || this.settings.ao.enabled);
+      ((this.settings.aa.enabled && this.settings.aa.spritePolicy !== 'none') ||
+        this.settings.ao.enabled ||
+        spriteGradeOn);
 
     if (wantMask && this.spriteLayer !== undefined) {
       const prevMask = camera.layers.mask;
@@ -1162,7 +1228,7 @@ export class PostStack implements PostEffectsHost {
         ? Math.max(vig.amount, REFERENCE_FLOOR.vignetteAmount)
         : vig.amount
       : 0;
-    cu['uVignetteRadius']!.value = floor ? Math.min(vig.radius, REFERENCE_FLOOR.vignetteRadius) : vig.radius;
+    cu['uVignetteRadius']!.value = floor ? Math.max(vig.radius, REFERENCE_FLOOR.vignetteRadiusMin) : vig.radius;
     cu['uVignetteSoftness']!.value = vig.softness;
     cu['uVignetteEdge']!.value = vig.edge;
     (cu['uVignetteColor']!.value as Vector3).set(vig.color[0], vig.color[1], vig.color[2]);
@@ -1175,6 +1241,11 @@ export class PostStack implements PostEffectsHost {
     cu['uGrainShadowBias']!.value = this.settings.grain.shadowBias;
     cu['uChromaAmount']!.value = this.settings.chroma.enabled ? this.settings.chroma.amount : 0;
     cu['uChromaEdge']!.value = this.settings.chroma.edge;
+    // No mask means no way to tell a sprite pixel from a terrain pixel, so the pull has to
+    // be off — otherwise it would grade the entire frame a second time.
+    cu['uSpriteGradeAmount']!.value = spriteGradeOn && wantMask ? spriteGrade.amount : 0;
+    cu['uSpriteDesat']!.value = spriteGrade.desaturate;
+    (cu['uSpriteTint']!.value as Vector3).set(spriteGrade.tint[0], spriteGrade.tint[1], spriteGrade.tint[2]);
     cu['uLutMix']!.value = this.lutMix;
     cu['uLutAmount']!.value = this.settings.grade.enabled ? this.settings.grade.amount : 0;
     cu['uAspect']!.value = this.width / this.height;
@@ -1245,9 +1316,11 @@ export class PostStack implements PostEffectsHost {
     out.nearSpread = d.nearSpread;
     out.bokehBoost = d.bokehBoost;
     out.tiltRadialStart = d.tiltRadialStart;
-    out.tiltBand = floor ? Math.min(d.tiltBand, REFERENCE_FLOOR.dofTiltBand) : d.tiltBand;
-    out.tiltFalloff = floor ? Math.min(d.tiltFalloff, REFERENCE_FLOOR.dofTiltFalloff) : d.tiltFalloff;
-    out.tiltRadial = floor ? Math.max(d.tiltRadial, REFERENCE_FLOOR.dofTiltRadial) : d.tiltRadial;
+    // Band and falloff are floors on SHARPNESS: a scenario may ask for a wider sharp stripe
+    // or a gentler ramp, never for a narrower one. Radial is a ceiling — see REFERENCE_FLOOR.
+    out.tiltBand = floor ? Math.max(d.tiltBand, REFERENCE_FLOOR.dofTiltBandMin) : d.tiltBand;
+    out.tiltFalloff = floor ? Math.max(d.tiltFalloff, REFERENCE_FLOOR.dofTiltFalloffMin) : d.tiltFalloff;
+    out.tiltRadial = floor ? Math.min(d.tiltRadial, REFERENCE_FLOOR.dofTiltRadialMax) : d.tiltRadial;
     // Sized against the frame, not the framebuffer: `maxCoCPixels` is authored at 1080p.
     out.cocPixelsThisFrame = pixels1080 * (this.height / 1080);
     return out;

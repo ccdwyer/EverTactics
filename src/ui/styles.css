@@ -87,13 +87,22 @@
   --dur-slow: 460ms;
 
   /* ── HUD metrics ───────────────────────────────────────────────────────────
-     The side columns and the centred menu row derive their geometry from these,
-     so the menu always centres in the gap *between* the columns and can never
-     overlap them. Change a width here and the whole HUD re-flows together. */
-  --hud-gutter: 30px;
-  --hud-col-left: 476px;
-  --hud-col-right: 452px;
-  --hud-bottom: 72px;
+     Round-2 layout. Measured off the shipped FFT frame
+     (refs/curated/fft/press-042310-cfaa9b3e-fft-tic-mediakit-06.png): the combat
+     timeline is a narrow VERTICAL rail on the left edge, the acting-unit panel is
+     a single band in the bottom-left corner, the command window is anchored to
+     ONE side, and the centre of the frame is entirely board.
+
+     Round 1 put a 12-card roster strip across the top, two large panels across
+     the bottom corners and the command menu dead-centre over the map — a picture
+     frame with the game squeezed inside it. Everything below is sized so the
+     board keeps the middle ~62% of the width and ~78% of the height. */
+  --hud-gutter: 20px;
+  --hud-rail: 104px;       /* left turn-order rail */
+  --hud-col-left: 362px;   /* acting unit, bottom-left */
+  --hud-col-right: 292px;  /* inspected unit + target preview, top-right */
+  --hud-bottom: 30px;
+  --hud-top: 18px;
 
   /* ── surfaces ──────────────────────────────────────────────────────────── */
   --shadow-panel:
@@ -107,8 +116,10 @@
   inset: 0;
   font-family: var(--font-body);
   color: var(--ink-text);
-  font-size: 15px;
-  line-height: 1.45;
+  /* -25% from round 1's 15px. The reference HUD reads small: body copy is about
+     1.1% of frame height, not 1.4%. */
+  font-size: 11.5px;
+  line-height: 1.42;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   pointer-events: none;
@@ -147,7 +158,7 @@
   color: var(--ink-text);
   background:
     linear-gradient(178deg, rgba(43, 58, 96, 0.96) 0%, rgba(19, 27, 49, 0.97) 42%, rgba(9, 13, 26, 0.98) 100%);
-  border: 20px solid transparent;
+  border: 13px solid transparent;
   border-image-source: url('./frames/panel-frame.svg');
   border-image-slice: 34;
   border-image-repeat: stretch;
@@ -158,7 +169,7 @@
 
 .et-panel__vellum {
   position: absolute;
-  inset: -20px;
+  inset: -13px;
   background-image: var(--grain);
   background-size: 180px 180px;
   opacity: 0.055;
@@ -191,8 +202,8 @@
    panel rather than being a printed border. */
 .et-panel__corner {
   position: absolute;
-  width: 92px;
-  height: 92px;
+  width: 58px;
+  height: 58px;
   pointer-events: none;
   z-index: 0;
   background: radial-gradient(circle at 0 0, rgba(240, 221, 160, 0.14), transparent 70%);
@@ -210,9 +221,9 @@
   z-index: 1;
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  padding: 0 6px 9px;
-  margin-bottom: 9px;
+  gap: 8px;
+  padding: 0 4px 6px;
+  margin-bottom: 7px;
   border-bottom: 1px solid rgba(201, 162, 39, 0.32);
 }
 .et-panel__head::after {
@@ -227,7 +238,7 @@
 .et-panel__title {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--gold-bright);
@@ -235,20 +246,20 @@
 }
 .et-panel__badge {
   margin-left: auto;
-  font-size: 15px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   color: var(--ink-muted);
 }
 .et-panel--parchment .et-panel__badge { color: #6a5730; }
 
-.et-panel__body { position: relative; z-index: 1; padding: 0 6px 6px; }
+.et-panel__body { position: relative; z-index: 1; padding: 0 4px 4px; }
 .et-panel__foot {
   position: relative;
   z-index: 1;
   margin-top: 10px;
   padding: 9px 6px 2px;
   border-top: 1px solid rgba(201, 162, 39, 0.26);
-  font-size: 15px;
+  font-size: 11px;
   color: var(--ink-muted);
   display: flex;
   align-items: center;
@@ -303,14 +314,14 @@
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 16px;
+  font-size: 12px;
   padding: 3px 0;
   border-bottom: 1px dotted rgba(201, 162, 39, 0.18);
 }
 .et-stat__label { color: var(--ink-muted); letter-spacing: 0.04em; }
 .et-stat__value {
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink-bright);
   font-variant-numeric: lining-nums tabular-nums;
@@ -321,8 +332,8 @@
 
 .et-divider {
   position: relative;
-  height: 13px;
-  margin: 9px 0;
+  height: 10px;
+  margin: 6px 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -367,7 +378,7 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding-left: 20px;
+  padding-left: 15px;
   max-height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -478,6 +489,7 @@
 .et-hud.is-hidden { opacity: 0; pointer-events: none; }
 .et-hud.is-behind-screen { opacity: 0.18; filter: blur(2px) saturate(0.5); }
 
+/* Acting unit — bottom-left corner, tucked under the turn rail. */
 .et-hud__left {
   position: absolute;
   left: var(--hud-gutter);
@@ -485,38 +497,49 @@
   width: var(--hud-col-left);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
+/* Inspected unit + target preview — TOP-right. Keeping them off the bottom edge
+   is what lets the command window own the bottom-right corner without either of
+   them being pushed inward over the board. */
 .et-hud__right {
   position: absolute;
   right: var(--hud-gutter);
-  bottom: var(--hud-bottom);
+  top: var(--hud-top);
   width: var(--hud-col-right);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   align-items: stretch;
 }
-/* Centred with margin rather than `transform: translateX(-50%)`: a transformed
-   ancestor becomes the containing block for `position: fixed` descendants, and
-   the anchored command menu inside this row is fixed-positioned against
-   viewport coordinates the game layer computed by projecting a world point. */
+
+/* The command / ability windows.
+   ---------------------------------------------------------------------------
+   PLAYABILITY FIX: this row used to be `margin-inline: auto` between the two
+   bottom columns, which parked it over the centre of the map and buried the
+   acting unit plus whoever was standing near it. FFT anchors the command window
+   to one side and never over the unit you are commanding, so the row is now
+   right-docked and grows leftward. `position: absolute` with `right` (not a
+   transform) is deliberate: a transformed ancestor would become the containing
+   block for the `position: fixed` anchored variant below, whose coordinates come
+   from the renderer projecting a world point. */
 .et-hud__menus {
   position: absolute;
-  /* Inset past the side columns so the auto margins centre the menus in the
-     gap between them, not in the viewport — otherwise a wide command menu
-     slides underneath the unit panel and clips its numerals. */
-  left: calc(var(--hud-gutter) + var(--hud-col-left) + 18px);
-  right: calc(var(--hud-gutter) + var(--hud-col-right) + 18px);
-  bottom: calc(var(--hud-bottom) + 2px);
-  margin-inline: auto;
-  width: fit-content;
+  right: var(--hud-gutter);
+  bottom: var(--hud-bottom);
   display: flex;
   align-items: flex-end;
-  gap: 14px;
+  justify-content: flex-end;
+  gap: 10px;
   pointer-events: none;
 }
 .et-hud__menus > * { pointer-events: auto; }
+/* Flipped when the acting unit is standing under the default corner. */
+.et-hud__menus.is-dock-left {
+  right: auto;
+  left: calc(var(--hud-gutter) + var(--hud-col-left) + 16px);
+  justify-content: flex-start;
+}
 
 /* ===========================================================================
    Command menu
@@ -535,13 +558,13 @@
   top: var(--anchor-y, 50%);
   transform: translate(12px, -50%);
 }
-.et-command__panel { min-width: 292px; }
+.et-command__panel { min-width: 208px; }
 .et-command__list { gap: 0; }
 
-.et-command__row { padding: 10px 12px 10px 14px; }
+.et-command__row { padding: 6px 10px 6px 12px; }
 .et-command__icon {
-  width: 21px;
-  height: 21px;
+  width: 16px;
+  height: 16px;
   color: var(--gold);
   opacity: 0.9;
   transition: color var(--dur-fast) ease, transform 200ms var(--ease-back);
@@ -549,7 +572,7 @@
 .et-menu__row.is-active .et-command__icon { color: var(--gold-bright); transform: scale(1.12); }
 .et-command__label {
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -559,7 +582,7 @@
 }
 .et-command__detail {
   margin-left: auto;
-  font-size: 15px;
+  font-size: 11px;
   color: var(--ink-muted);
   font-family: var(--font-display);
 }
@@ -572,7 +595,7 @@
   0%, 100% { transform: translateX(0); }
   50% { transform: translateX(2px); }
 }
-.et-command__hint { font-style: italic; font-size: 15px; }
+.et-command__hint { font-style: italic; font-size: 11px; }
 
 /* ===========================================================================
    Ability menu
@@ -590,9 +613,9 @@
 .et-abilities.is-dim { filter: saturate(0.55) brightness(0.82); }
 /* Sized so command + list + detail together still clear the two side columns at
    1920 wide — see --hud-col-* in the metrics block. */
-.et-abilities__list-panel { width: 318px; }
-.et-abilities__list { max-height: 268px; }
-.et-abilities__detail-panel { width: 288px; }
+.et-abilities__list-panel { width: 244px; }
+.et-abilities__list { max-height: 214px; }
+.et-abilities__detail-panel { width: 224px; }
 
 .et-ability-row {
   display: grid;
@@ -604,7 +627,7 @@
 .et-ability-row__crest { width: 19px; height: 19px; opacity: 0.92; }
 .et-ability-row__name {
   font-family: var(--font-display);
-  font-size: 16.5px;
+  font-size: 12.5px;
   letter-spacing: 0.02em;
   white-space: nowrap;
   overflow: hidden;
@@ -635,14 +658,14 @@
 .et-abilities__detail-name {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #3a2d14;
 }
 .et-abilities__desc {
-  margin: 5px 0 9px;
-  font-size: 16px;
+  margin: 4px 0 7px;
+  font-size: 12px;
   line-height: 1.5;
   color: #40331a;
 }
@@ -671,57 +694,84 @@
    Turn order ribbon
    =========================================================================== */
 
+/* Vertical rail down the left edge, as in the shipped Combat Timeline. A
+   twelve-entry horizontal strip pinned to the top of the frame was reading as a
+   title bar and pushing the board down; vertically it costs ~5% of the width and
+   nothing at all of the centre. */
 .et-turnorder {
   position: absolute;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: var(--hud-top);
+  left: var(--hud-gutter);
+  width: var(--hud-rail);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 5px;
   pointer-events: auto;
   transition: opacity var(--dur) var(--ease-soft), transform var(--dur-slow) var(--ease-out-expo);
 }
-.et-turnorder.is-hidden { opacity: 0; transform: translate(-50%, -14px); pointer-events: none; }
+.et-turnorder.is-hidden { opacity: 0; transform: translateX(-14px); pointer-events: none; }
 .et-turnorder__label {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  padding-left: 2px;
+  width: 100%;
 }
-.et-turnorder__label::before,
 .et-turnorder__label::after {
   content: '';
-  width: 52px;
+  flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--gold-dim));
+  background: linear-gradient(90deg, var(--gold-dim), transparent);
 }
-.et-turnorder__label::after { background: linear-gradient(90deg, var(--gold-dim), transparent); }
 .et-turnorder__label-text {
   font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 0.34em;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--gold);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  color: var(--gold-bright);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 1), 0 0 10px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
 }
-.et-turnorder__track { display: flex; align-items: flex-end; gap: 8px; }
+/* A single dark plate behind the whole rail rather than a border per chip: the
+   reference timeline reads as one column of faces, not twelve separate cards. */
+.et-turnorder__track {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 4px 4px 5px;
+  background: linear-gradient(100deg, rgba(6, 9, 18, 0.74) 0%, rgba(6, 9, 18, 0.34) 78%, transparent 100%);
+  box-shadow: inset 1px 0 0 rgba(201, 162, 39, 0.22);
+}
+.et-turnorder__track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(201, 162, 39, 0.5) 12%, rgba(201, 162, 39, 0.5) 88%, transparent);
+}
 
 .et-turnchip {
   --team-color: var(--team-neutral);
   position: relative;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 16px auto;
   align-items: center;
-  gap: 4px;
-  padding: 7px 7px 6px;
+  gap: 5px;
+  padding: 2px 5px 2px 2px;
   cursor: pointer;
-  background: linear-gradient(180deg, rgba(19, 27, 49, 0.88), rgba(6, 9, 18, 0.94));
-  border: 1px solid rgba(201, 162, 39, 0.34);
-  box-shadow: 0 8px 20px -8px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 246, 223, 0.07);
+  background: linear-gradient(90deg, rgba(19, 27, 49, 0.82), rgba(6, 9, 18, 0.45));
+  border: 1px solid rgba(201, 162, 39, 0.2);
+  border-left: 2px solid var(--team-color);
+  box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.95);
   transition:
-    transform 300ms var(--ease-out-expo),
+    transform 260ms var(--ease-out-expo),
     border-color var(--dur) ease,
     box-shadow var(--dur) ease,
     opacity var(--dur) ease;
@@ -730,75 +780,80 @@
 .et-turnchip--enemy { --team-color: var(--team-enemy); }
 .et-turnchip--ally { --team-color: var(--team-ally); }
 .et-turnchip--neutral { --team-color: var(--team-neutral); }
-.et-turnchip::after {
-  content: '';
-  position: absolute;
-  left: 5px;
-  right: 5px;
-  bottom: 0;
-  height: 3px;
-  background: linear-gradient(90deg, transparent, var(--team-color) 22%, var(--team-color) 78%, transparent);
-  box-shadow: 0 0 8px -1px var(--team-color);
-  opacity: 0.85;
-}
-.et-turnchip:hover { transform: translateY(-3px); border-color: rgba(240, 221, 160, 0.6); }
+.et-turnchip:hover { transform: translateX(4px); border-color: rgba(240, 221, 160, 0.55); }
 .et-turnchip.is-current {
-  padding: 9px 11px 8px;
-  border-color: var(--gold-bright);
-  background: linear-gradient(180deg, rgba(44, 58, 98, 0.92), rgba(9, 13, 26, 0.96));
+  grid-template-columns: 20px auto;
+  padding: 3px 7px 3px 3px;
+  border-color: rgba(240, 221, 160, 0.75);
+  background: linear-gradient(90deg, rgba(52, 68, 112, 0.94), rgba(9, 13, 26, 0.7));
   box-shadow:
-    0 0 0 2px rgba(201, 162, 39, 0.4),
-    0 12px 30px -10px rgba(0, 0, 0, 0.95),
-    0 0 34px -8px rgba(240, 221, 160, 0.6);
-  transform: translateY(-6px);
+    0 6px 18px -8px rgba(0, 0, 0, 0.95),
+    0 0 20px -6px rgba(240, 221, 160, 0.5);
+  transform: translateX(3px);
 }
-.et-turnchip.is-disabled { opacity: 0.42; filter: grayscale(0.7); }
-.et-turnchip.is-new { animation: et-chip-in 380ms var(--ease-out-expo); }
+.et-turnchip.is-disabled { opacity: 0.4; filter: grayscale(0.75); }
+.et-turnchip.is-new { animation: et-chip-in 340ms var(--ease-out-expo); }
 @keyframes et-chip-in {
-  from { opacity: 0; transform: translateY(10px) scale(0.9); }
+  from { opacity: 0; transform: translateX(-10px) scale(0.94); }
   to { opacity: 1; transform: none; }
 }
-.et-turnchip__frame { position: relative; }
+.et-turnchip__frame { position: relative; grid-column: 2; }
 .et-turnchip__crown {
   position: absolute;
-  top: -14px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 20px;
-  height: 20px;
+  top: -7px;
+  right: -6px;
+  width: 13px;
+  height: 13px;
   color: var(--gold-bright);
+  z-index: 3;
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 8px rgba(240, 221, 160, 0.5));
 }
-.et-turnchip__meta { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
-.et-turnchip__name {
-  font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  max-width: 104px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink-text);
+/* Name and CT swap places in the rail: the tick delta is the left gutter column,
+   the name only appears for the unit acting now. Twelve names stacked vertically
+   was more text than the whole reference HUD carries. */
+.et-turnchip__meta {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
 }
-.et-turnchip.is-current .et-turnchip__name { font-size: 16px; font-weight: 700; color: var(--ink-bright); max-width: 118px; }
+/* The name sits outside the chip, over the board, so it carries its own plate —
+   a bare glyph on terrain is the kind of thing that reads fine in a mockup and
+   illegibly in play. */
+.et-turnchip__name {
+  position: absolute;
+  left: calc(100% + 5px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 7px 2px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+  color: var(--ink-bright);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+  background: linear-gradient(90deg, rgba(9, 13, 26, 0.92), rgba(9, 13, 26, 0.55) 78%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 246, 223, 0.06);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) ease;
+}
+.et-turnchip.is-current .et-turnchip__name,
+.et-turnchip:hover .et-turnchip__name { opacity: 1; }
 .et-turnchip__delta {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.14em;
-  color: var(--team-color);
+  line-height: 1;
+  color: color-mix(in srgb, var(--team-color) 100%, white 42%);
   font-variant-numeric: lining-nums tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 1);
 }
-.et-turnchip.is-current .et-turnchip__delta { font-size: 13px; color: var(--gold-bright); }
-.et-turnchip__note {
-  font-size: 12px;
-  font-style: italic;
-  color: var(--el-lightning);
-  max-width: 104px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.et-turnchip.is-current .et-turnchip__delta { font-size: 9px; letter-spacing: 0.04em; color: var(--gold-bright); }
+.et-turnchip__note { display: none; }
 
 /* ===========================================================================
    Portrait
@@ -818,7 +873,9 @@
     inset 0 0 26px -6px rgba(0, 0, 0, 0.95),
     0 4px 14px -6px rgba(0, 0, 0, 0.9);
 }
-/* Inner vignette — pushes the face back and stops the crop edge reading flat. */
+/* Inner vignette — pushes the face back and stops the crop edge reading flat.
+   Chip-sized crops get a much lighter one: at 46px the same falloff swallowed
+   the jaw and hair and every face in the rail turned into the same dark oval. */
 .et-portrait::after {
   content: '';
   position: absolute;
@@ -827,8 +884,33 @@
   z-index: 2;
   background: radial-gradient(115% 85% at 50% 34%, transparent 42%, rgba(4, 7, 14, 0.62) 100%);
 }
+.et-portrait--xs::after,
+.et-portrait--sm::after,
+.et-portrait--md::after {
+  background: radial-gradient(130% 100% at 50% 30%, transparent 62%, rgba(4, 7, 14, 0.34) 100%);
+}
+/* The 4px gold bevel is right at panel scale and eats a third of a rail chip. */
+.et-portrait--xs,
+.et-portrait--sm,
+.et-portrait--md {
+  box-shadow:
+    inset 0 0 0 1px rgba(6, 9, 15, 0.95),
+    inset 0 0 0 2px rgba(201, 162, 39, 0.6),
+    inset 0 0 18px -8px rgba(0, 0, 0, 0.9),
+    0 2px 8px -4px rgba(0, 0, 0, 0.9);
+}
+.et-turnchip.is-current .et-portrait {
+  box-shadow:
+    inset 0 0 0 1px rgba(6, 9, 15, 0.95),
+    inset 0 0 0 2px rgba(240, 221, 160, 0.92),
+    0 0 14px -3px rgba(240, 221, 160, 0.55);
+}
+/* Every displayed size is a DOWNSCALE of the 128px source (104 / 60 / 46 / 30),
+   and nearest-neighbour decimation on a downscale drops pixel rows — it makes
+   the faces crunchy rather than crisp. Smooth resampling is the correct call
+   here; the pixel-art register comes back via the grain overlay below. */
 .et-portrait__img {
-  image-rendering: pixelated;
+  image-rendering: auto;
   background-repeat: no-repeat;
   transform: translateZ(0);
 }
@@ -839,12 +921,26 @@
     radial-gradient(circle at 50% 34%, rgba(201, 162, 39, 0.22), transparent 62%),
     linear-gradient(180deg, #1b2542, #090d1a);
 }
+/* Gloss + grain in one node.
+   The critics' standing note is that smooth painted portraits sitting next to
+   chunky pixel sprites read as assets from two different games. The two ways out
+   are to redraw the faces or to bridge them; this is the bridge — the same film
+   grain the render carries, laid over the portrait at low opacity, plus a small
+   contrast/saturation push so the faces sit in the scene's grade rather than
+   floating above it in their own colour space. */
 .et-portrait__gloss {
   position: absolute;
   inset: 0;
-  background: linear-gradient(155deg, rgba(255, 255, 255, 0.13), transparent 42%);
+  z-index: 3;
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.13), transparent 42%),
+    var(--grain);
+  background-size: auto, 74px 74px;
+  background-blend-mode: normal, overlay;
+  opacity: 0.92;
   pointer-events: none;
 }
+.et-portrait__img { filter: saturate(0.94) contrast(1.05); }
 
 /* ===========================================================================
    Meters
@@ -868,7 +964,7 @@
 }
 .et-meter__label {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--ink-muted);
@@ -877,7 +973,7 @@
    is corroboration, the number is the read. */
 .et-meter__nums {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 19px;
   line-height: 1;
   letter-spacing: 0.01em;
   font-variant-numeric: lining-nums tabular-nums;
@@ -885,11 +981,11 @@
 .et-meter__cur { color: var(--ink-bright); font-weight: 700; text-shadow: 0 2px 3px rgba(0, 0, 0, 0.8); }
 .et-meter.is-critical .et-meter__cur { color: #ff8a72; animation: et-pulse 900ms ease-in-out infinite; }
 @keyframes et-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
-.et-meter__max { color: var(--ink-muted); font-size: 15px; margin-left: 4px; }
+.et-meter__max { color: var(--ink-muted); font-size: 11px; margin-left: 3px; }
 
 .et-meter__track {
   position: relative;
-  height: 15px;
+  height: 11px;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.5));
   box-shadow:
     inset 0 0 0 1px rgba(201, 162, 39, 0.34),
@@ -960,11 +1056,11 @@
   to { opacity: 1; transform: none; }
 }
 
-.et-unitinfo__head { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+.et-unitinfo__head { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
 .et-unitinfo__ident { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .et-unitinfo__name {
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 21px;
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: 0.01em;
@@ -976,14 +1072,14 @@
 }
 .et-unitinfo__sub { display: flex; align-items: baseline; gap: 10px; }
 .et-unitinfo__job {
-  font-size: 19px;
+  font-size: 14px;
   letter-spacing: 0.03em;
   color: var(--gold-bright);
   font-style: italic;
 }
 .et-unitinfo__level {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--ink-text);
@@ -995,13 +1091,13 @@
 .et-unitinfo[data-team='enemy'] { box-shadow: var(--shadow-panel), inset 0 0 40px -18px rgba(217, 88, 74, 0.6); }
 .et-unitinfo[data-team='player'] { box-shadow: var(--shadow-panel), inset 0 0 40px -20px rgba(110, 168, 224, 0.45); }
 
-.et-unitinfo__meters { display: flex; flex-direction: column; gap: 7px; }
+.et-unitinfo__meters { display: flex; flex-direction: column; gap: 5px; }
 .et-unitinfo__bf {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 9px;
-  padding: 5px 8px;
+  margin-top: 6px;
+  padding: 3px 7px;
   background: rgba(0, 0, 0, 0.24);
   box-shadow: inset 0 0 0 1px rgba(201, 162, 39, 0.16);
 }
@@ -1015,34 +1111,34 @@
 }
 .et-bf__value {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--gold-bright);
   font-variant-numeric: lining-nums tabular-nums;
 }
-.et-bf__sep { width: 1px; height: 22px; background: rgba(201, 162, 39, 0.3); margin: 0 auto; }
+.et-bf__sep { width: 1px; height: 16px; background: rgba(201, 162, 39, 0.3); margin: 0 auto; }
 
-.et-unitinfo__stats { display: flex; flex-wrap: wrap; gap: 6px; }
+.et-unitinfo__stats { display: flex; flex-wrap: nowrap; gap: 4px; }
 .et-statcell {
-  flex: 1 1 52px;
+  flex: 1 1 38px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  padding: 5px 4px 4px;
+  padding: 3px 3px 2px;
   background: linear-gradient(180deg, rgba(36, 48, 79, 0.6), rgba(10, 15, 29, 0.6));
   box-shadow: inset 0 0 0 1px rgba(201, 162, 39, 0.18);
 }
-.et-statcell__label { font-size: 10px; letter-spacing: 0.16em; color: var(--ink-muted); }
+.et-statcell__label { font-size: 8px; letter-spacing: 0.14em; color: var(--ink-muted); }
 .et-statcell__value {
   font-family: var(--font-display);
-  font-size: 21px;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1;
   color: var(--ink-bright);
   font-variant-numeric: lining-nums tabular-nums;
 }
-.et-statcell--jp { flex: 0 0 auto; min-width: 86px; }
+.et-statcell--jp { flex: 0 0 auto; min-width: 54px; }
 .et-statcell--jp .et-statcell__value { color: var(--gold-bright); }
 
 .et-unitinfo__statuses { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 9px; }
@@ -1050,9 +1146,9 @@
 .et-status {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px 3px 6px;
-  font-size: 13px;
+  gap: 4px;
+  padding: 2px 6px 2px 5px;
+  font-size: 10px;
   letter-spacing: 0.03em;
   background: rgba(0, 0, 0, 0.32);
   border: 1px solid rgba(201, 162, 39, 0.25);
@@ -1062,7 +1158,7 @@
   from { opacity: 0; transform: scale(0.7); }
   to { opacity: 1; transform: none; }
 }
-.et-status__icon { width: 16px; height: 16px; }
+.et-status__icon { width: 12px; height: 12px; }
 .et-status--buff { color: #d9f0c8; border-color: rgba(111, 191, 115, 0.5); }
 .et-status--buff .et-status__icon { color: var(--sap); }
 .et-status--debuff { color: #f6d3c8; border-color: rgba(200, 73, 47, 0.5); }
@@ -1090,16 +1186,16 @@
 
 .et-target { width: 100%; }
 .et-target.is-hidden { opacity: 0; transform: translateX(16px); pointer-events: none; }
-.et-target__body { display: flex; flex-direction: column; gap: 9px; }
+.et-target__body { display: flex; flex-direction: column; gap: 6px; }
 
-.et-target__chance { display: flex; align-items: center; gap: 14px; }
-.et-arc { --arc-size: 92px; position: relative; width: var(--arc-size); height: var(--arc-size); flex: none; }
+.et-target__chance { display: flex; align-items: center; gap: 10px; }
+.et-arc { --arc-size: 68px; position: relative; width: var(--arc-size); height: var(--arc-size); flex: none; }
 .et-arc svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.et-arc__bg { fill: none; stroke: rgba(0, 0, 0, 0.55); stroke-width: 7; }
+.et-arc__bg { fill: none; stroke: rgba(0, 0, 0, 0.55); stroke-width: 9; }
 .et-arc__value {
   fill: none;
   stroke: var(--gold-bright);
-  stroke-width: 7;
+  stroke-width: 9;
   stroke-linecap: round;
   transition: stroke-dashoffset 480ms var(--ease-out-expo), stroke 260ms ease;
   filter: drop-shadow(0 0 5px rgba(240, 221, 160, 0.5));
@@ -1119,7 +1215,7 @@
 }
 .et-arc__label {
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 21px;
   font-weight: 700;
   color: var(--ink-bright);
   line-height: inherit;
@@ -1128,7 +1224,7 @@
 }
 .et-arc__pct {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 10px;
   color: var(--ink-muted);
   line-height: inherit;
   margin-left: 3px;
@@ -1137,29 +1233,29 @@
 .et-target__chance-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .et-target__chance-label {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--gold);
 }
 .et-target__vs {
-  font-size: 16px;
+  font-size: 12px;
   color: var(--ink-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.et-target__crit { font-size: 14px; color: var(--el-lightning); font-style: italic; }
+.et-target__crit { font-size: 10.5px; color: var(--el-lightning); font-style: italic; }
 
 .et-rosette { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
-.et-rosette svg { width: 62px; height: 62px; }
+.et-rosette svg { width: 46px; height: 46px; }
 .et-rosette__wedge { fill: rgba(255, 246, 223, 0.09); stroke: rgba(201, 162, 39, 0.3); stroke-width: 1; }
 .et-rosette__wedge.is-lit { fill: var(--gold); stroke: var(--gold-bright); filter: drop-shadow(0 0 4px rgba(240, 221, 160, 0.6)); }
 .et-rosette.is-back .et-rosette__wedge.is-lit { fill: #e2553d; stroke: #ff9d84; }
 .et-rosette__core { fill: rgba(201, 162, 39, 0.5); }
 .et-rosette__label {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -1172,7 +1268,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 7px 11px;
+  padding: 5px 9px;
   background: linear-gradient(90deg, rgba(200, 73, 47, 0.28), rgba(200, 73, 47, 0.05));
   box-shadow: inset 0 0 0 1px rgba(200, 73, 47, 0.42);
 }
@@ -1182,7 +1278,7 @@
 }
 .et-target__amount-label {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--ink-muted);
@@ -1190,7 +1286,7 @@
 .et-target__amount-value { display: flex; align-items: center; gap: 8px; }
 .et-target__amount-num {
   font-family: var(--font-display);
-  font-size: 38px;
+  font-size: 28px;
   font-weight: 700;
   line-height: 1;
   color: #ffb9a4;
@@ -1198,26 +1294,26 @@
   font-variant-numeric: lining-nums tabular-nums;
 }
 .et-target__amount.is-heal .et-target__amount-num { color: #b7ecb9; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.85), 0 0 20px rgba(120, 220, 140, 0.3); }
-.et-target__element { width: 24px; height: 24px; }
+.et-target__element { width: 18px; height: 18px; }
 
 .et-target__hp { display: flex; flex-direction: column; gap: 3px; }
 .et-target__hp-text { display: flex; align-items: baseline; gap: 7px; }
 .et-target__hp-label {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 9px;
   letter-spacing: 0.22em;
   color: var(--ink-muted);
 }
 .et-target__hp-value {
   font-family: var(--font-display);
-  font-size: 19px;
+  font-size: 14px;
   color: var(--ink-bright);
   font-variant-numeric: lining-nums tabular-nums;
 }
 .et-target__lethal {
   margin-left: auto;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -1226,7 +1322,7 @@
 }
 .et-target__hp-track {
   position: relative;
-  height: 15px;
+  height: 11px;
   background: rgba(0, 0, 0, 0.72);
   box-shadow: inset 0 0 0 1px rgba(201, 162, 39, 0.3), inset 0 2px 4px rgba(0, 0, 0, 0.85);
   overflow: hidden;
@@ -1261,16 +1357,16 @@
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  font-size: 16px;
+  font-size: 12px;
   padding: 2px 2px;
 }
 .et-target__status-name { color: var(--ember-bright); }
 .et-target__status.is-cure .et-target__status-name { color: var(--sap); }
-.et-target__status-chance { font-family: var(--font-display); font-size: 17px; font-weight: 600; color: var(--ink-bright); }
+.et-target__status-chance { font-family: var(--font-display); font-size: 13px; font-weight: 600; color: var(--ink-bright); }
 .et-target__breakdown { display: flex; flex-direction: column; }
 .et-target__warning {
   margin: 2px 0 0;
-  font-size: 15px;
+  font-size: 11px;
   font-style: italic;
   color: #ff8a72;
 }
@@ -1462,19 +1558,19 @@
   bottom: 0;
   display: flex;
   justify-content: center;
-  gap: 20px;
-  padding: 9px 18px 11px;
-  background: linear-gradient(180deg, transparent, rgba(5, 7, 13, 0.72) 55%);
+  gap: 14px;
+  padding: 5px 14px 6px;
+  background: linear-gradient(180deg, transparent, rgba(5, 7, 13, 0.6) 60%);
   transition: opacity var(--dur) var(--ease-soft), transform var(--dur) var(--ease-soft);
 }
 .et-hints.is-hidden { opacity: 0; transform: translateY(10px); }
 .et-hint { display: flex; align-items: center; gap: 6px; }
 .et-hint__keys { display: flex; gap: 3px; }
 .et-key {
-  min-width: 26px;
-  padding: 2px 7px;
+  min-width: 19px;
+  padding: 1px 5px;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 700;
   text-align: center;
   color: var(--gold-bright);
@@ -1483,7 +1579,7 @@
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
 }
 .et-hint__label {
-  font-size: 15px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   color: var(--ink-muted);
 }
@@ -1917,37 +2013,40 @@
 
 @media (max-width: 1600px) {
   .et-root {
-    --hud-gutter: 22px;
-    --hud-col-left: 396px;
-    --hud-col-right: 380px;
+    --hud-gutter: 16px;
+    --hud-rail: 92px;
+    --hud-col-left: 320px;
+    --hud-col-right: 262px;
   }
-  .et-unitinfo__name { font-size: 25px; }
-  .et-meter__nums { font-size: 23px; }
+  .et-unitinfo__name { font-size: 19px; }
+  .et-meter__nums { font-size: 17px; }
 }
 
 @media (max-width: 1280px) {
   .et-root {
-    --hud-gutter: 16px;
-    --hud-col-left: 318px;
-    --hud-col-right: 306px;
+    --hud-gutter: 12px;
+    --hud-rail: 78px;
+    --hud-col-left: 274px;
+    --hud-col-right: 232px;
   }
-  .et-unitinfo__name { font-size: 21px; }
-  .et-meter__nums { font-size: 19px; }
-  .et-meter__track { height: 12px; }
-  .et-abilities__list-panel { width: 292px; }
-  .et-abilities__detail-panel { width: 264px; }
+  .et-unitinfo__name { font-size: 17px; }
+  .et-meter__nums { font-size: 15px; }
+  .et-meter__track { height: 9px; }
+  .et-abilities__list-panel { width: 212px; }
+  .et-abilities__detail-panel { width: 196px; }
   .et-jobscreen__right { flex-basis: 330px; }
 }
 
 @media (max-width: 1024px) {
   .et-root {
-    font-size: 14px;
-    --hud-col-left: 262px;
-    --hud-col-right: 254px;
+    font-size: 11px;
+    --hud-rail: 66px;
+    --hud-col-left: 230px;
+    --hud-col-right: 206px;
   }
-  .et-unitinfo__name { font-size: 19px; }
-  .et-turnorder { top: 10px; }
-  .et-hints { gap: 12px; }
+  .et-unitinfo__name { font-size: 15px; }
+  .et-turnorder { top: 8px; }
+  .et-hints { gap: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

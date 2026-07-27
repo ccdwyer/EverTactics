@@ -126,24 +126,37 @@ export function grade(partial: Partial<GradeParams>): GradeParams {
 export const GRADE_PRESETS: Record<string, GradeParams> = {
   neutral: grade({ contrast: 0.08, saturation: 1.02 }),
 
-  /** Open plains at midday. Warm key, cool shadows, gentle film contrast. */
+  /**
+   * Open plains and sunlit stone. Warm key against genuinely cool shadow.
+   *
+   * Round 2 note: this preset used to carry `temperature: 0.2`, a global warm white-balance
+   * shift, on top of a lighting rig that is already a warm key. Rendered, the result was a
+   * single amber wash — the critics' "no warm/cool separation, everything one temperature".
+   * A grade cannot make a split by pushing the whole image one way; it makes one by pushing
+   * the ENDS apart. So the global temperature is near neutral now and the work is done by
+   * `shadowTint` (hard toward blue-teal) against `highlightTint` / `highlightPoint` (hard
+   * toward gold), which is what both reference frames measure as.
+   */
   'ivalice-noon': grade({
-    exposure: 0.04,
-    temperature: 0.2,
+    exposure: 0.03,
+    temperature: 0.03,
     gamma: [1.2, 1.2, 1.2],
-    contrast: 0.3,
-    pivot: 0.24,
-    saturation: 1.12,
-    vibrance: 0.14,
-    shadowTint: [0.86, 0.95, 1.18],
-    midTint: [1.03, 1.0, 0.96],
-    highlightTint: [1.07, 1.02, 0.92],
-    crosstalk: 0.06,
+    contrast: 0.34,
+    pivot: 0.26,
+    saturation: 1.06,
+    // Vibrance rather than saturation: it lifts the *unsaturated* stone and grass toward
+    // colour without pushing the already-saturated sprite primaries further out.
+    vibrance: 0.22,
+    gain: [1.0, 1.0, 1.05],
+    shadowTint: [0.62, 0.8, 1.34],
+    midTint: [0.98, 0.99, 1.06],
+    highlightTint: [1.14, 1.03, 0.86],
+    crosstalk: 0.08,
     crush: 0.035,
-    blackPoint: [0.018, 0.028, 0.056],
-    shoulder: 0.16,
-    highlightPoint: [1.0, 0.98, 0.9],
-    highlightPull: 0.3,
+    blackPoint: [0.016, 0.03, 0.07],
+    shoulder: 0.18,
+    highlightPoint: [1.0, 0.965, 0.86],
+    highlightPull: 0.45,
   }),
 
   /** Late-afternoon golden hour. The FFT battlefield default look. */

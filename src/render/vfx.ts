@@ -24,6 +24,7 @@
 import {
   AdditiveBlending,
   BackSide,
+  Box3,
   BufferAttribute,
   BufferGeometry,
   CanvasTexture,
@@ -1421,6 +1422,9 @@ class RisingShapes {
  */
 const MAX_VFX_LIGHTS = 6;
 
+/** Reused target for the mote colour spread. Motes are never pure white. */
+const WHITE_TINT = /*@__PURE__*/ new Color(1, 0.97, 0.9);
+
 export interface VfxLightOptions {
   /** Linear HDR colour. Element palettes feed this directly. */
   color: Color;
@@ -1841,6 +1845,48 @@ export interface VfxSystemOptions {
    * on, and changing the count would recompile every material in the scene.
    */
   lightCount?: number;
+  /** Standing atmosphere. Omit for the default warm mote field plus brazier embers. */
+  ambience?: AmbienceOptions;
+}
+
+/**
+ * Standing atmosphere: the stuff in the air when nothing is happening.
+ *
+ * Round-2 critics wrote "no particulate VFX of any kind — no dust motes, embers,
+ * or ambient haze" and "static geometry under static light reads as a viewport,
+ * not a game". They are describing the absence of this. Both reference frames
+ * are full of it: `refs/curated/triangle/press_002_gematsu_1920x1080.jpg` has
+ * embers with visible motion trails drifting across every fire, and
+ * `official_005_steam.jpg` has fine dust hanging in the spell light. It is the
+ * cheapest cue in the whole renderer that the scene is a *place* with air in it.
+ *
+ * Two populations, because they read differently and are driven by different
+ * things:
+ *
+ *  - **Motes.** A slow, low-contrast field filling the diorama's own bounds,
+ *    which the rig discovers from the terrain rather than being told. These sell
+ *    scale: something has to be between the camera and the model for the model
+ *    to read as small.
+ *  - **Embers.** Emitted *from the practical lights themselves* — the rig finds
+ *    every brazier point light in the scene and rises embers off it, tinted by
+ *    that light's colour and rate-modulated by its live (flickering) intensity.
+ *    That is the VFX-as-light contract running backwards: the particle does not
+ *    merely glow near a lamp, it is born from the lamp's own emission, so when
+ *    the flame gutters the embers thin out with it.
+ */
+export interface AmbienceOptions {
+  /** Master switch. On by default — empty air is a defect, not a default. */
+  enabled?: boolean;
+  /** Motes alive at steady state across the whole diorama. */
+  motes?: number;
+  /** Linear HDR tint for the mote field. */
+  color?: Color;
+  /** Mote drift speed, tiles/second. Slow: this must never read as snow. */
+  drift?: number;
+  /** Embers per second from each practical at full intensity. */
+  emberRate?: number;
+  /** Overall opacity scale, 0..1. */
+  intensity?: number;
 }
 
 export interface VfxPlayOptions {
@@ -1885,6 +1931,33 @@ export class VfxSystem {
   private readonly rng: VfxRng;
   private readonly tileSize: number;
   private readonly groundHeight: ((x: number, z: number) => number) | undefined;
+
+  // ── Standing atmosphere ───────────────────────────────────────────────────
+  // Its own batch, deliberately. Sharing the combat ring buffer means a big
+  // detonation evicts every mote in the air on the frame it goes off, and the
+  // atmosphere pops back in over the following seconds — which is far more
+  // noticeable than the extra draw call costs.
+  private readonly ambienceBatch: ParticleBatch;
+  private readonly ambience: Required<AmbienceOptions>;
+  private scene: Scene | null = null;
+  private ambienceAccum = 0;
+  private ambiencePrimed = false;
+  private readonly ambienceBounds = new Box3(new Vector3(-8, 0, -8), new Vector3(8, 4, 8));
+  private ambienceBoundsKnown = false;
+  /** Practical lights the atmosphere emits embers from. Re-scanned periodically. */
+  private readonly emberSources: PointLight[] = [];
+  private readonly emberBase: number[] = [];
+  private readonly emberAccum: number[] = [];
+  private emberScan = 0;
+  private readonly ambColor = new Color();
+  /**
+   * Mote tint actually used. Defaults to `ambience.color`, but if the map has
+   * practicals it drifts toward their average hue, so the dust in a torchlit
+   * cloister is torch-coloured and the dust in a cold crypt is not. A caller who
+   * passes an explicit colour keeps it.
+   */
+  private readonly moteTint = new Color(1, 0.74, 0.42);
+  private moteTintLocked = false;
 
   private post: PostEffectsHost | null = null;
   private clock = 0;
@@ -1937,7 +2010,26 @@ export class VfxSystem {
     const capacity = opts.capacity ?? 3072;
     this.additive = new ParticleBatch(capacity, this.atlas, true, 14);
     this.alpha = new ParticleBatch(Math.floor(capacity / 2), this.atlas, false, 13);
-    this.group.add(this.additive.mesh, this.alpha.mesh);
+    // Behind the combat particles in render order: atmosphere is a bed, never a
+    // subject, and it must not sit on top of an impact flash.
+    this.ambienceBatch = new ParticleBatch(768, this.atlas, true, 11);
+    this.ambienceBatch.material.uniforms['uIntensity']!.value = 1;
+    this.group.add(this.additive.mesh, this.alpha.mesh, this.ambienceBatch.mesh);
+
+    const amb = opts.ambience ?? {};
+    this.ambience = {
+      enabled: amb.enabled ?? true,
+      motes: amb.motes ?? 460,
+      // Warm by default because in both reference corpora the airborne
+      // particulate is the *warm* half of the split — it is lit by fire, by low
+      // sun, or by the spell. Cold motes read as rain.
+      color: (amb.color ?? new Color(1.0, 0.74, 0.42)).clone(),
+      drift: amb.drift ?? 0.16,
+      emberRate: amb.emberRate ?? 13,
+      intensity: amb.intensity ?? 1.7,
+    };
+    this.moteTint.copy(this.ambience.color);
+    this.moteTintLocked = amb.color !== undefined;
 
     for (let i = 0; i < 6; i++) {
       const r = new Ribbon();
@@ -2010,7 +2102,22 @@ export class VfxSystem {
   }
 
   addTo(scene: Scene): void {
+    this.scene = scene;
     scene.add(this.group);
+  }
+
+  /** Retune the standing atmosphere (mood change, cutscene, perf dial-down). */
+  setAmbience(options: AmbienceOptions): void {
+    if (options.enabled !== undefined) this.ambience.enabled = options.enabled;
+    if (options.motes !== undefined) this.ambience.motes = Math.max(0, options.motes);
+    if (options.color) {
+      this.ambience.color.copy(options.color);
+      this.moteTint.copy(options.color);
+      this.moteTintLocked = true;
+    }
+    if (options.drift !== undefined) this.ambience.drift = options.drift;
+    if (options.emberRate !== undefined) this.ambience.emberRate = Math.max(0, options.emberRate);
+    if (options.intensity !== undefined) this.ambience.intensity = Math.max(0, options.intensity);
   }
 
   // ── Per-frame ───────────────────────────────────────────────────────────
@@ -2039,12 +2146,252 @@ export class VfxSystem {
     this.spikes.update(dt);
     this.shards.update(dt);
 
+    // Atmosphere runs on *raw* time. Hit-stop is a statement about the action;
+    // freezing the dust in mid-air along with it turns a dramatic pause into a
+    // rendering glitch, and the references keep their embers moving through the
+    // freeze frames too.
+    this.updateAmbience(rawDt);
+
     this.additive.setSoftParticles(this.softDepth, this.resolution, this.projInv, 0.6 * this.tileSize);
     this.alpha.setSoftParticles(this.softDepth, this.resolution, this.projInv, 0.6 * this.tileSize);
+    this.ambienceBatch.setSoftParticles(this.softDepth, this.resolution, this.projInv, 0.9 * this.tileSize);
     this.additive.flush(this.clock);
     this.alpha.flush(this.clock);
+    this.ambienceBatch.flush(this.clock);
 
     return dt;
+  }
+
+  // ── Standing atmosphere ─────────────────────────────────────────────────
+
+  /**
+   * Find the diorama and the fires in it.
+   *
+   * The atmosphere has to know two things nobody hands it: how big the map is,
+   * and where the practicals are. Both are already in the scene graph, so it
+   * reads them rather than requiring `game.ts` to wire another call — a mote
+   * field that only appears when someone remembers to configure it is a mote
+   * field that will be missing from the screenshot that gets judged.
+   *
+   * Terrain meshes are named `terrain-<kind>` by `terrain.ts` and practical
+   * lights `brazier-light`, the same two conventions `lighting.ts` relies on.
+   * Re-scanned on an interval because terrain can be rebuilt at any time.
+   */
+  private rescanScene(): void {
+    const scene = this.scene;
+    this.emberSources.length = 0;
+    this.emberBase.length = 0;
+    this.emberAccum.length = 0;
+    if (!scene) return;
+
+    const box = this.v0;
+    let seeded = false;
+    const min = new Vector3(Infinity, Infinity, Infinity);
+    const max = new Vector3(-Infinity, -Infinity, -Infinity);
+
+    scene.traverse((o: Object3D) => {
+      const light = o as PointLight;
+      if (light.isPointLight) {
+        if (this.emberSources.length >= 6) return;
+        if (!o.name.startsWith('brazier')) return;
+        this.emberSources.push(light);
+        // `lighting.ts` stamps the authored level here before it starts driving
+        // flicker, so this is the only honest "how bright is this fire meant to
+        // be" reading available once the rig has taken the light over.
+        this.emberBase.push((light.userData['baseIntensity'] as number | undefined) ?? light.intensity);
+        this.emberAccum.push(0);
+        return;
+      }
+      const mesh = o as Mesh;
+      if (!mesh.isMesh) return;
+      if (!o.name.startsWith('terrain-')) return;
+      const geo = mesh.geometry as BufferGeometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const bb = geo.boundingBox;
+      if (!bb) return;
+      o.updateWorldMatrix(true, false);
+      box.copy(bb.min).applyMatrix4(o.matrixWorld);
+      min.min(box);
+      max.max(box);
+      box.copy(bb.max).applyMatrix4(o.matrixWorld);
+      min.min(box);
+      max.max(box);
+      seeded = true;
+    });
+
+    if (seeded && max.x > min.x) {
+      this.ambienceBounds.set(min, max);
+      this.ambienceBoundsKnown = true;
+    }
+
+    if (!this.moteTintLocked) {
+      this.moteTint.copy(this.ambience.color);
+      if (this.emberSources.length > 0) {
+        this.ambColor.setRGB(0, 0, 0);
+        for (const l of this.emberSources) this.ambColor.add(l.color);
+        this.ambColor.multiplyScalar(1 / this.emberSources.length);
+        // Halfway, not all the way: dust picks up the practicals but is still
+        // partly lit by the key, and a mote field the exact hue of the fire it
+        // sits next to disappears into it.
+        this.moteTint.lerp(this.ambColor, 0.5);
+      }
+    }
+  }
+
+  /**
+   * Spawn one mote somewhere in the diorama's air column.
+   *
+   * `age` back-dates the birth so the field can be primed in a single frame:
+   * a screenshot taken 1.2 s after boot must show a settled atmosphere, not
+   * twelve motes that have just appeared at the floor.
+   */
+  private spawnMote(age: number): void {
+    const rng = this.rng;
+    const b = this.ambienceBounds;
+    const spanX = Math.max(2, b.max.x - b.min.x);
+    const spanZ = Math.max(2, b.max.z - b.min.z);
+    const floor = b.min.y;
+    const ceiling = Math.max(b.max.y + spanX * 0.22, floor + 4 * this.tileSize);
+
+    const s = this.spawnScratch;
+    // A little wider than the board: motes crossing the silhouette edge are what
+    // stop the diorama looking like it was cut out and pasted on the background.
+    s.position.set(
+      b.min.x - spanX * 0.08 + rng.next() * spanX * 1.16,
+      floor + Math.pow(rng.next(), 0.7) * (ceiling - floor),
+      b.min.z - spanZ * 0.08 + rng.next() * spanZ * 1.16,
+    );
+
+    const drift = this.ambience.drift * this.tileSize;
+    s.velocity.set(rng.jitter(drift), drift * rng.range(0.12, 0.75), rng.jitter(drift));
+    s.acceleration.set(0, drift * 0.05, 0);
+    s.lifetime = rng.range(5.5, 11);
+    const scale = rng.range(0.6, 1.55);
+    s.sizeStart = 0.062 * this.tileSize * scale;
+    s.sizeEnd = 0.042 * this.tileSize * scale;
+
+    // Half the field is a hair cooler than the other half. A single tint across
+    // every mote reads as a lens artefact; a spread reads as dust.
+    const c = this.ambColor.copy(this.moteTint);
+    if (rng.next() < 0.35) c.lerp(WHITE_TINT, 0.45);
+    const a = rng.range(0.16, 0.52) * this.ambience.intensity;
+    s.color0 = [c.r, c.g, c.b, a];
+    s.color1 = [c.r, c.g, c.b, a * 0.15];
+    s.sprite = rng.next() < 0.25 ? SPR.spark : SPR.dust;
+    s.angle = rng.next() * Math.PI * 2;
+    s.spin = rng.jitter(0.5);
+    s.fadeIn = 0.22;
+    s.fadeOut = 0.45;
+    s.drag = 0.25;
+    s.stretch = 0;
+    // A very slow orbit about the board centre gives the field a coherent swirl
+    // instead of every mote wandering independently, which is what air does.
+    s.orbit = [
+      (b.min.x + b.max.x) * 0.5,
+      (b.min.z + b.max.z) * 0.5,
+      rng.jitter(0.045),
+      0,
+    ];
+    s.delay = -age;
+    this.ambienceBatch.spawn(s, this.clock);
+  }
+
+  /** Rise one ember off a practical, tinted and rate-limited by that light. */
+  private spawnEmber(source: PointLight, age: number): void {
+    const rng = this.rng;
+    const s = this.spawnScratch;
+    source.getWorldPosition(this.v1);
+    s.position.set(
+      this.v1.x + rng.jitter(0.16 * this.tileSize),
+      this.v1.y + rng.range(-0.05, 0.12) * this.tileSize,
+      this.v1.z + rng.jitter(0.16 * this.tileSize),
+    );
+    const rise = this.tileSize;
+    s.velocity.set(rng.jitter(0.28) * rise, rng.range(0.55, 1.5) * rise, rng.jitter(0.28) * rise);
+    s.acceleration.set(rng.jitter(0.1) * rise, rng.range(0.15, 0.5) * rise, rng.jitter(0.1) * rise);
+    s.lifetime = rng.range(1.1, 2.6);
+    const scale = rng.range(0.7, 1.4);
+    s.sizeStart = 0.085 * this.tileSize * scale;
+    s.sizeEnd = 0.012 * this.tileSize * scale;
+    // The ember carries the flame's own colour, pushed hot at birth so it clips
+    // into the bloom threshold and cools on the way up.
+    const c = this.ambColor.copy(source.color);
+    const a = rng.range(0.55, 1.0) * this.ambience.intensity;
+    s.color0 = [c.r * 1.5 + 0.35, c.g * 1.5 + 0.16, c.b * 1.5, a];
+    s.color1 = [c.r * 0.7, c.g * 0.32, c.b * 0.12, 0];
+    s.sprite = rng.next() < 0.3 ? SPR.spark : SPR.ember;
+    s.angle = rng.next() * Math.PI * 2;
+    s.spin = rng.jitter(1.6);
+    s.fadeIn = 0.1;
+    s.fadeOut = 0.35;
+    s.drag = 0.55;
+    s.stretch = 0.5;
+    s.orbit = [0, 0, 0, 0];
+    s.delay = -age;
+    this.ambienceBatch.spawn(s, this.clock);
+  }
+
+  /**
+   * Keep the air populated.
+   *
+   * Spawn rate is derived from the target population and the mean lifetime, so
+   * `motes` is a *standing* count rather than a rate anyone has to convert by
+   * hand — halve it for a perf dial and the field thins to half, it does not
+   * take eight seconds to get there.
+   */
+  private updateAmbience(dt: number): void {
+    this.emberScan -= dt;
+    if (this.emberScan <= 0) {
+      this.emberScan = 1.5;
+      this.rescanScene();
+    }
+
+    const opts = this.ambience;
+    if (!opts.enabled || opts.intensity <= 0) return;
+    // Waiting for the terrain to exist means the primed field lands on the real
+    // map bounds; priming against the placeholder box would put every mote in a
+    // 16-unit cube at the origin regardless of where the diorama actually is.
+    if (!this.ambienceBoundsKnown) return;
+
+    const meanLife = 8.25;
+    const rate = opts.motes / meanLife;
+
+    if (!this.ambiencePrimed) {
+      this.ambiencePrimed = true;
+      for (let i = 0; i < opts.motes; i++) {
+        // Ages spread across a lifetime so the primed field already has motes at
+        // every point of their fade envelope.
+        this.spawnMote(this.rng.next() * meanLife);
+      }
+      for (let i = 0; i < this.emberSources.length; i++) {
+        const source = this.emberSources[i]!;
+        const n = Math.round(opts.emberRate * 1.6);
+        for (let k = 0; k < n; k++) this.spawnEmber(source, this.rng.next() * 1.8);
+      }
+    }
+
+    this.ambienceAccum += rate * dt;
+    while (this.ambienceAccum >= 1) {
+      this.ambienceAccum -= 1;
+      this.spawnMote(0);
+    }
+
+    for (let i = 0; i < this.emberSources.length; i++) {
+      const source = this.emberSources[i]!;
+      const base = this.emberBase[i]!;
+      if (base <= 0) continue;
+      // Rate follows the live intensity, so a guttering flame throws fewer
+      // embers and a flare throws a handful. This is the whole reason the ember
+      // emitter reads from the light instead of from a position.
+      const drive = Math.min(2.2, source.intensity / base);
+      this.emberAccum[i] = (this.emberAccum[i] ?? 0) + opts.emberRate * drive * dt;
+      let budget = 4;
+      while ((this.emberAccum[i] ?? 0) >= 1 && budget-- > 0) {
+        this.emberAccum[i] = (this.emberAccum[i] ?? 0) - 1;
+        this.spawnEmber(source, 0);
+      }
+      if (budget <= 0) this.emberAccum[i] = 0;
+    }
   }
 
   // ── Emission ────────────────────────────────────────────────────────────
@@ -2937,6 +3284,7 @@ export class VfxSystem {
     this.lights.dispose();
     this.additive.dispose();
     this.alpha.dispose();
+    this.ambienceBatch.dispose();
     for (const r of this.ribbons) r.dispose();
     for (const c of this.circles) c.dispose();
     for (const p of this.pillars) p.dispose();

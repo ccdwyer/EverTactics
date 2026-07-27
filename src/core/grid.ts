@@ -481,68 +481,88 @@ function deriveSlope(field: Battlefield, x: number, y: number): SlopeKind {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Orbonne Monastery's cloister garden. A raised stone walkway rings a sunken
- * garden on three sides; a pillared colonnade along the north and west arcades
- * breaks line of sight; a fountain plinth squats in the middle of the garden so
- * you cannot shoot straight across it, and a reflecting pool bites into the
- * south-west corner. The garden banks (columns 2 and 11, and row 12) are true
- * ramps, so the mesh gets sloped stone rather than staircases.
+ * Orbonne Monastery's cloister garden.
  *
- * Elevations: garden floor 2, banks 4, cloister 6, chapel wall 8, pillars 10.
+ * The plan is deliberately **not** a square ring. Read it as a building that has
+ * been added to and then partly lost:
+ *
+ * - The **north** is a chapel foundation that terraces *down* west→east, from the
+ *   height-8 footing at the west corner to a height-3 landing at the east, so the
+ *   north elevation is a staircase of masses rather than one parapet.
+ * - The **north-east corner is gone** — a 2x4 bite of `void` where the chapel
+ *   apse collapsed. The east range restarts a course lower (height 4) and only
+ *   climbs back to the height-8 chapel wall halfway down the map.
+ * - The **west range** is two levels: an outer ledge at height 4 with the
+ *   colonnade walk at 6 behind it, and a broken span at rows 8–9 where the outer
+ *   ledge has fallen away entirely.
+ * - The **south-east** terraces down 6 → 5 → 4 and then stops; the south wall is
+ *   **breached** at (8,13)/(9,13), open to garden level, which is the gap the
+ *   camera looks through.
+ * - Inside, a **raised stone terrace** at height 5 occupies the north-east of the
+ *   garden with steps down at (8,4)/(9,4) and (10,2)/(10,3), and a **plank bridge
+ *   at height 4** crosses the reflecting pool, so the play space has three real
+ *   levels instead of one lawn.
+ * - The fountain plinth is stepped (7 / 6 / 5) rather than a flat block.
+ *
+ * The garden banks (columns 2 and 11, and row 12) are true ramps, so the mesh
+ * gets sloped stone rather than staircases.
+ *
+ * Elevations: pool 0, garden 2, banks/ledges 3-4, terrace 5, cloister 6,
+ * fountain 5-7, chapel wall 8, colonnade pillars 10.
  */
 export const ORBONNE_COURTYARD: MapDef = {
   id: 'orbonne-courtyard',
   name: 'Orbonne Monastery — Cloister Garden',
-  blurb: 'A sunken garden ringed by a pillared stone cloister.',
+  blurb: 'A terraced garden under a half-fallen cloister; the apse corner is gone.',
   width: 14,
   height: 14,
   heights: [
-    '66666666666666',
-    '666a66a66a6688',
-    '66422222222468',
-    '66422222222468',
-    '6a422222222468',
-    '66422222222468',
-    '66422266222468',
-    '6a422266222468',
-    '66422222222468',
-    '66420022222468',
-    '6a420022222468',
-    '66422222222468',
-    '66433333333468',
-    '66444444444468',
+    '88866776443333',
+    '666a66a66a6433',
+    '46422422553444',
+    '46422222553444',
+    '4a422222332468',
+    '46422222222468',
+    '56442276222468',
+    '4a443265222468',
+    '46422222222356',
+    '46420402222244',
+    '4a420402222233',
+    '46422222222222',
+    '34433333333222',
+    '33444444333333',
   ],
   surfaces: [
-    'ssssssssssssss',
-    'ssssssssssssss',
-    'ssd...ss...dss',
-    'ssd...ss...dss',
-    'ssd...ss...dss',
-    'ssd..ssss..dss',
-    'ssdssssssssdss',
-    'ssdssssssssdss',
-    'ssd..ssss..dss',
-    'ssd.ww.s...dss',
-    'ssd.ww.s...dss',
-    'ssd...ss...dss',
-    'ssdssssssssdss',
-    'ssssssssssssss',
+    'sss##ss#ssss##',
+    'ssssssssssss##',
+    '#sd..s..ssdds#',
+    '#sd.....ssdds#',
+    'ssd.....ss.dss',
+    'ssd........dss',
+    'ssss..ss...dss',
+    'sssd..ss...dss',
+    '#sd........ds#',
+    '#sd.wbw.....s#',
+    'ssd.wbw.....d#',
+    'ssd.........##',
+    'ssddddddddd.##',
+    'ssdsssss######',
   ],
   blocked: [
-    '.............#',
-    '...#..#..#...#',
-    '.............#',
-    '.............#',
+    '..............',
+    '...#..#..#....',
+    '..............',
+    '..............',
     '.#...........#',
     '.............#',
     '......##.....#',
     '.#....##.....#',
-    '.............#',
-    '.............#',
-    '.#...........#',
-    '.............#',
-    '.............#',
-    '.............#',
+    '..............',
+    '..............',
+    '.#............',
+    '..............',
+    '..............',
+    '..............',
   ],
   waterLevel: 0,
   deckSurfaces: ['bridge'],
@@ -559,8 +579,8 @@ export const ORBONNE_COURTYARD: MapDef = {
     { x: 5, y: 2 },
     { x: 8, y: 2 },
     { x: 9, y: 2 },
+    { x: 5, y: 0 },
     { x: 6, y: 0 },
-    { x: 7, y: 0 },
   ],
   lighting: {
     // Late afternoon through the arcade: warm key, cool stone bounce.

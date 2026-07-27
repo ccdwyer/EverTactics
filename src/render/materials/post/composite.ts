@@ -56,6 +56,10 @@ uniform float uGrainShadowBias;
 uniform float uChromaAmount;
 uniform float uChromaEdge;
 
+uniform float uSpriteGradeAmount;
+uniform float uSpriteDesat;
+uniform vec3  uSpriteTint;
+
 uniform float uLutMix;
 uniform float uLutAmount;
 uniform float uLutSize;
@@ -129,6 +133,35 @@ void main() {
     color.b = beauty(uv + dir / vec2(uAspect, 1.0)).b;
   } else {
     color = beauty(uv);
+  }
+
+  // Sprite integration.
+  //
+  // VISUAL_TARGET.md's fail list has "sprites at full saturation over a graded, desaturated
+  // map — they must share one grade", and round-2 critics named it in every pair: the atlas
+  // ships bright primaries authored against a white background, and the board is graded
+  // toward a cool, lower-saturation range. The composite already runs the LUT over the whole
+  // frame, so sprites are *technically* graded — what they are not is inside the scene's
+  // value and chroma range, so the LUT lands on them from a different starting point and
+  // they still read as pasted.
+  //
+  // This is the post-side half of the contract with the sprite material: the material owns
+  // taking the key and ambient (so the light DIRECTION agrees), this owns pulling the whole
+  // sprite layer into the picture's tonal range before either the grade or the tonemapper
+  // sees it. Applied in linear light, before bloom, so an over-bright sprite pixel does not
+  // get to bloom on brightness it should not have had.
+  //
+  // The mask is drawn without depth-testing against terrain, so a unit hidden behind a wall
+  // still marks its pixels. That costs a slight, uniform tint on the few terrain pixels in
+  // front of a fully occluded sprite, which is invisible at these amounts and much cheaper
+  // than a second depth-correct mask pass.
+  if (uSpriteGradeAmount > 0.0) {
+    float m = texture2D(uSpriteMask, uv).a * uSpriteGradeAmount;
+    if (m > 0.002) {
+      float sl = luma(color);
+      vec3 pulled = mix(color, vec3(sl), uSpriteDesat) * uSpriteTint;
+      color = mix(color, pulled, m);
+    }
   }
 
   color += texture2D(uBloom, uv).rgb * uBloomIntensity * uBloomTint;

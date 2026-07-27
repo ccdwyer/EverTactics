@@ -373,6 +373,14 @@ export class Game {
         if (this.disposed) return;
         // Hit-stop scales everything downstream, so take the VFX system's dt.
         const scaled = this.vfx.update(dt, this.camera.camera);
+        // Keep the key light out of the camera's own bearing. When the two come
+        // within ~10 degrees every shadow falls directly behind the object
+        // casting it, into pixels that object already covers — the map renders a
+        // correct 2048² shadow map that the view cannot see a texel of, and the
+        // scene reads as having no shadows at all. Syncing per frame (rather
+        // than on the rotate handler) tracks the eased yaw through the whole
+        // snap; the rig ignores sub-quarter-degree changes, so this is cheap.
+        this.lighting.setViewYawDegrees(THREE.MathUtils.radToDeg(this.camera.yawRadians));
         // The rig drives preset cross-fades and its flickering practicals; with
         // nothing calling it, torches render as static blobs and a mood change
         // never completes.

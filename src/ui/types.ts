@@ -29,6 +29,12 @@ export interface UnitVM {
   /** Display name of the current job, e.g. "Black Mage". */
   job: string;
   jobId: string;
+  /**
+   * Optional. When present the HUD casts the portrait on job + gender instead of
+   * inferring gender from the auto-cast face — see `castPortrait` in
+   * `portraits.ts`.
+   */
+  gender?: 'male' | 'female' | 'monster';
   level: number;
   hp: number;
   maxHp: number;
@@ -58,6 +64,14 @@ export interface TurnEntryVM {
   name: string;
   team: Team;
   portrait?: string;
+  /**
+   * Job and gender of the unit. Only used when `portrait` is absent, to cast a
+   * face that matches the unit instead of hashing across the whole catalogue —
+   * see the casting note in `portraits.ts`. Producers are encouraged to pass
+   * these (or a correct `portrait`) so the rail never disagrees with the field.
+   */
+  job?: string;
+  gender?: 'male' | 'female' | 'monster';
   /** True for the unit taking its turn right now. */
   current: boolean;
   /** Predicted ticks until this turn begins. Used for the delta labels. */

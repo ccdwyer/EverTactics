@@ -54,15 +54,59 @@ const TOP_SUBDIV = 3;
  * read as a cube if it is left flat, so the threshold sits just under it.
  */
 const CLIFF_MIN_DROP = 0.85;
-/** How far the outermost side faces extend below the lowest tile. */
-const SKIRT = 1.35;
+/**
+ * How far the diorama's underside hangs below the **lowest point on its own rim**.
+ *
+ * This used to be measured from the deepest thing on the map — which meant one
+ * ornamental pool sank the whole pedestal, and the repeated brick underside ended
+ * up carrying about 40% of the object's mass. A diorama is a slice of a place, not
+ * a plinth: the base sits just under the lowest edge you can actually see.
+ */
+const SKIRT = 0.55;
+/** The base never rises above the waterline, or the pool would float over its own base. */
+const WATERLINE_SKIRT = 0.3;
+/** …nor above the lowest walkable ground, so every column keeps some thickness. */
+const GROUND_SKIRT = 0.2;
 /** Water column depth (in half-tiles) carved beneath each water surface. */
 const WATER_BED_DEPTH = 3;
 const DEEPWATER_BED_DEPTH = 7;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Ground relief
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Natural ground is not a lid on a box. Grass, dirt, sand, swamp and snow tops get a
+ * low-amplitude world-space undulation so an embankment rolls instead of stepping.
+ *
+ * The offset is a pure function of world XZ, so two neighbouring tiles agree exactly
+ * along their shared edge: the lawn becomes one continuous surface (and the chamfer
+ * logic, which compares tops across an edge, correctly decides not to groove it)
+ * rather than a field of independently-wobbled lids.
+ */
+const RELIEF_SURFACES: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
+  'grass',
+  'dirt',
+  'sand',
+  'snow',
+  'swamp',
+]);
+const RELIEF_AMPLITUDE = 0.075;
+
+/** World-Y offset applied to natural ground tops at world (wx, wz). */
+function groundRelief(surface: SurfaceKind, wx: number, wz: number): number {
+  if (!RELIEF_SURFACES.has(surface)) return 0;
+  // Two octaves at different world scales: a slow swell across the whole lawn plus a
+  // finer hummock, biased downward so a unit's feet sink into the turf rather than
+  // hovering over it.
+  const broad = fbm3(wx * 0.29, 0, wz * 0.29, 913, 2) - 0.5;
+  const fine = fbm3(wx * 1.15, 0, wz * 1.15, 2287, 2) - 0.5;
+  return (broad * 1.35 + fine * 0.55) * RELIEF_AMPLITUDE - RELIEF_AMPLITUDE * 0.28;
+}
+
 /** Height of the walkable surface of a tile, in world units. */
 export function tileSurfaceY(tile: Tile): number {
-  return tile.height * HEIGHT_UNIT;
+  return tile.height * HEIGHT_UNIT + groundRelief(tile.surface, tile.x, tile.y);
 }
 
 /**
@@ -72,7 +116,8 @@ export function tileSurfaceY(tile: Tile): number {
 export function tileWorldPosition(field: Battlefield, x: number, y: number): THREE.Vector3 {
   const tile = field.tileAt(x, y);
   const h = tile ? tile.height + slopeOffsetHalf(tile.slope, 0.5, 0.5) : 0;
-  return new THREE.Vector3(x * TILE_SIZE, h * HEIGHT_UNIT, y * TILE_SIZE);
+  const relief = tile ? groundRelief(tile.surface, x * TILE_SIZE, y * TILE_SIZE) : 0;
+  return new THREE.Vector3(x * TILE_SIZE, h * HEIGHT_UNIT + relief, y * TILE_SIZE);
 }
 
 /** Convenience for a `Vec3` grid coordinate (uses `z` as the authority on height). */
@@ -299,6 +344,7 @@ function aoFalloff(r: number): number {
 class ColumnField {
   private readonly solid: Uint8Array;
   private readonly heights: Float32Array;
+  private readonly bottoms: Float32Array;
   private readonly slopes: SlopeKind[];
   readonly baseY: number;
 
@@ -309,17 +355,51 @@ class ColumnField {
   ) {
     this.solid = new Uint8Array(width * height);
     this.heights = new Float32Array(width * height);
+    this.bottoms = new Float32Array(width * height);
     this.slopes = new Array<SlopeKind>(width * height).fill('flat');
-    let minTop = Infinity;
-    for (let i = 0; i < tiles.length; i++) {
-      const t = tiles[i];
-      if (!t || t.surface === 'void') continue;
-      this.solid[i] = 1;
-      this.heights[i] = solidTopHalf(t);
-      this.slopes[i] = isWaterSurface(t.surface) ? 'flat' : t.slope;
-      minTop = Math.min(minTop, this.heights[i]! * HEIGHT_UNIT);
+
+    const at = (x: number, y: number): Tile | undefined => {
+      if (x < 0 || y < 0 || x >= width || y >= height) return undefined;
+      const t = tiles[y * width + x];
+      return t && t.surface !== 'void' ? t : undefined;
+    };
+
+    // The underside is measured from the diorama's own rim, not from the deepest
+    // silt bed on the map: whatever is exposed to open air on at least one side is
+    // what the viewer can see the bottom of.
+    let minRim = Infinity;
+    let minWater = Infinity;
+    let minGround = Infinity;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        const t = at(x, y);
+        if (!t) continue;
+        this.solid[i] = 1;
+        this.heights[i] = solidTopHalf(t);
+        this.slopes[i] = isWaterSurface(t.surface) ? 'flat' : t.slope;
+
+        const surfaceY = t.height * HEIGHT_UNIT;
+        if (isWaterSurface(t.surface)) minWater = Math.min(minWater, surfaceY);
+        else minGround = Math.min(minGround, surfaceY);
+        const exposed =
+          !at(x - 1, y) || !at(x + 1, y) || !at(x, y - 1) || !at(x, y + 1);
+        if (exposed) minRim = Math.min(minRim, surfaceY);
+      }
     }
-    this.baseY = (Number.isFinite(minTop) ? minTop : 0) - SKIRT;
+
+    let base = Number.isFinite(minRim) ? minRim - SKIRT : -SKIRT;
+    if (Number.isFinite(minWater)) base = Math.min(base, minWater - WATERLINE_SKIRT);
+    if (Number.isFinite(minGround)) base = Math.min(base, minGround - GROUND_SKIRT);
+    this.baseY = base;
+
+    // A silt bed may still hang below the base (a river trench cuts deeper than the
+    // island is thick). Each column remembers its own floor so occlusion and the
+    // exposed side faces both stay watertight.
+    for (let i = 0; i < this.solid.length; i++) {
+      if (this.solid[i] === 0) continue;
+      this.bottoms[i] = Math.min(base, this.heights[i]! * HEIGHT_UNIT);
+    }
   }
 
   /** Top of the *solid* part of a column in world Y (the bed, for water tiles). */
@@ -328,6 +408,14 @@ class ColumnField {
     const i = ty * this.width + tx;
     if (this.solid[i] === 0) return -Infinity;
     return (this.heights[i]! + slopeOffsetHalf(this.slopes[i]!, u, v)) * HEIGHT_UNIT;
+  }
+
+  /** Underside of a column: the diorama base, or lower where a bed cuts past it. */
+  bottomAt(tx: number, ty: number): number {
+    if (tx < 0 || ty < 0 || tx >= this.width || ty >= this.height) return this.baseY;
+    const i = ty * this.width + tx;
+    if (this.solid[i] === 0) return this.baseY;
+    return this.bottoms[i]!;
   }
 
   solidAtWorld(wx: number, wy: number, wz: number): boolean {
@@ -339,7 +427,7 @@ class ColumnField {
     const u = wx / TILE_SIZE - tx + 0.5;
     const vv = wz / TILE_SIZE - ty + 0.5;
     const top = (this.heights[i]! + slopeOffsetHalf(this.slopes[i]!, u, vv)) * HEIGHT_UNIT;
-    return wy <= top - 1e-4 && wy >= this.baseY;
+    return wy <= top - 1e-4 && wy >= this.bottoms[i]!;
   }
 }
 
@@ -1785,9 +1873,12 @@ const ORTHO: ReadonlyArray<readonly [number, number]> = [
   [-1, 0],
 ];
 
-/** Surface Y at the centre of a tile. */
+/** Surface Y at the centre of a tile, including the natural-ground relief. */
 function centreY(t: Tile): number {
-  return (t.height + slopeOffsetHalf(t.slope, 0.5, 0.5)) * HEIGHT_UNIT;
+  return (
+    (t.height + slopeOffsetHalf(t.slope, 0.5, 0.5)) * HEIGHT_UNIT +
+    groundRelief(t.surface, t.x * TILE_SIZE, t.y * TILE_SIZE)
+  );
 }
 
 /**
@@ -2131,10 +2222,21 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
   const S = TOP_SUBDIV;
   const C = CHAMFER;
 
-  /** Solid top surface Y of tile (tx, ty) at local (u, v). */
-  const solidTopY = (t: Tile, u: number, vv: number): number =>
-    (solidTopHalf(t) + slopeOffsetHalf(isWaterSurface(t.surface) ? 'flat' : t.slope, u, vv)) *
-    HEIGHT_UNIT;
+  /**
+   * Solid top surface Y of a tile at local (u, v).
+   *
+   * `tx`/`ty` are needed because natural ground carries a world-space relief term —
+   * two neighbouring lawn tiles must agree exactly along their shared edge, so the
+   * offset has to be evaluated at the world position, not per tile.
+   */
+  const solidTopY = (t: Tile, tx: number, ty: number, u: number, vv: number): number => {
+    const half =
+      solidTopHalf(t) + slopeOffsetHalf(isWaterSurface(t.surface) ? 'flat' : t.slope, u, vv);
+    const relief = isWaterSurface(t.surface)
+      ? 0
+      : groundRelief(t.surface, (tx + u - 0.5) * TILE_SIZE, (ty + vv - 0.5) * TILE_SIZE);
+    return half * HEIGHT_UNIT + relief;
+  };
 
   /**
    * How much of a chamfer an edge gets, 0..1.
@@ -2179,7 +2281,10 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
           const vv = spec.v0 + (spec.v1 - spec.v0) * p;
           const mu = spec.mu0 + (spec.mu1 - spec.mu0) * p;
           const mv = spec.mv0 + (spec.mv1 - spec.mv0) * p;
-          maxDiff = Math.max(maxDiff, Math.abs(solidTopY(t, u, vv) - solidTopY(nb, mu, mv)));
+          maxDiff = Math.max(
+            maxDiff,
+            Math.abs(solidTopY(t, tx, ty, u, vv) - solidTopY(nb, nx2, ny2, mu, mv)),
+          );
         }
         if (maxDiff > 0.02) {
           edgeChamfer[base + e] = 1;
@@ -2211,7 +2316,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
 
   /** Outer chamfer-ring Y at a tile's perimeter param. */
   const ringY = (t: Tile, tx: number, ty: number, u: number, vv: number): number =>
-    solidTopY(t, u, vv) - CHAMFER_DROP * chamferAtPerim(tx, ty, u, vv);
+    solidTopY(t, tx, ty, u, vv) - CHAMFER_DROP * chamferAtPerim(tx, ty, u, vv);
 
   /** Ring Y along one specific edge, used by the side-face stitcher. */
   const ringYEdge = (
@@ -2221,7 +2326,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
     e: number,
     u: number,
     vv: number,
-  ): number => solidTopY(t, u, vv) - CHAMFER_DROP * chamferAt(tx, ty, e);
+  ): number => solidTopY(t, tx, ty, u, vv) - CHAMFER_DROP * chamferAt(tx, ty, e);
 
   const normalAt = (t: Tile, u: number, vv: number): [number, number, number] => {
     const slope = isWaterSurface(t.surface) ? 'flat' : t.slope;
@@ -2256,7 +2361,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
           row.push(
             v(
               ox + (u - 0.5) * TILE_SIZE,
-              solidTopY(tile, u, vv),
+              solidTopY(tile, tx, ty, u, vv),
               oz + (vv - 0.5) * TILE_SIZE,
               n[0],
               n[1],
@@ -2311,7 +2416,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
 
         const a = v(
           ox + (iu0 - 0.5) * TILE_SIZE,
-          solidTopY(tile, iu0, iv0),
+          solidTopY(tile, tx, ty, iu0, iv0),
           oz + (iv0 - 0.5) * TILE_SIZE,
           bnx / bl,
           bny / bl,
@@ -2319,7 +2424,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
         );
         const b = v(
           ox + (iu1 - 0.5) * TILE_SIZE,
-          solidTopY(tile, iu1, iv1),
+          solidTopY(tile, tx, ty, iu1, iv1),
           oz + (iv1 - 0.5) * TILE_SIZE,
           bnx / bl,
           bny / bl,
@@ -2372,7 +2477,9 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
             const mv = e.mv0 + (e.mv1 - e.mv0) * p;
             bottoms.push(ringYEdge(nb, tx + e.dx, ty + e.dy, (ei + 2) % 4, mu, mv));
           } else {
-            bottoms.push(column.baseY);
+            // Down to the diorama's underside — or past it, where this column's own
+            // silt bed cuts deeper than the base, so the section never opens a hole.
+            bottoms.push(column.bottomAt(tx, ty));
           }
         }
         let maxDrop = 0;
@@ -2550,7 +2657,9 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
             wPos.push(wx, surfaceY, wz);
             wNrm.push(0, 1, 0);
             wUv.push(wx, wz);
-            wDepth.push(Math.max(0, surfaceY - smoothSolidTop(tiles, width, height, wx, wz)));
+            wDepth.push(
+              Math.max(0, surfaceY - smoothSolidTop(tiles, width, height, wx, wz, column.baseY)),
+            );
             wShore.push(shoreDistance(tiles, width, height, wx, wz));
           }
         }
@@ -2689,6 +2798,7 @@ function smoothSolidTop(
   height: number,
   wx: number,
   wz: number,
+  openY: number,
 ): number {
   const fx = wx / TILE_SIZE;
   const fz = wz / TILE_SIZE;
@@ -2697,9 +2807,9 @@ function smoothSolidTop(
   const tu = fx - x0;
   const tv = fz - z0;
   const sample = (x: number, z: number): number => {
-    if (x < 0 || z < 0 || x >= width || z >= height) return -SKIRT;
+    if (x < 0 || z < 0 || x >= width || z >= height) return openY;
     const t = tiles[z * width + x];
-    if (!t || t.surface === 'void') return -SKIRT;
+    if (!t || t.surface === 'void') return openY;
     return solidTopHalf(t) * HEIGHT_UNIT;
   };
   const a = sample(x0, z0);

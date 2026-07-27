@@ -15,12 +15,17 @@ export { UIRoot } from './UIRoot';
 export type { BannerTone, HintDef } from './components/Banner';
 export { play as playUISound, setSoundEnabled, setVolume } from './audio';
 export {
+  castPortrait,
+  humanPortraitFiles,
+  monsterPortraitFiles,
   portrait,
   portraitFiles,
   portraitForId,
+  portraitForUnit,
   portraitUrl,
   setPortraitBase,
 } from './portraits';
+export type { PortraitGender, PortraitSize } from './portraits';
 export { PORTRAIT_ATLAS, PORTRAIT_FILES } from './portraitCatalog';
 export { icon, hasIcon, statusTone, elementColor } from './icons';
 export type * from './types';

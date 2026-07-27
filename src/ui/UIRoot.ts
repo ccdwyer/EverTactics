@@ -57,6 +57,8 @@ export class UIRoot {
   private readonly input = new InputRouter();
 
   private readonly hud: HTMLDivElement;
+  private readonly menus: HTMLDivElement;
+  private menuDock: 'left' | 'right' = 'right';
   private readonly turnOrder: TurnOrderBar;
   private readonly activeInfo: UnitInfoPanel;
   private readonly inspectInfo: UnitInfoPanel;
@@ -124,6 +126,7 @@ export class UIRoot {
     const left = div('et-hud__left');
     const right = div('et-hud__right');
     const menus = div('et-hud__menus');
+    this.menus = menus;
     this.activeInfo.mount(left);
     this.inspectInfo.mount(right);
     this.targetPreview.mount(right);
@@ -222,7 +225,8 @@ export class UIRoot {
     this.commandMenu.setItems(items);
     if (anchor) this.commandMenu.placeAt(anchor.x, anchor.y);
     else this.commandMenu.clearAnchor();
-    this.commandMenu.show(this.hud.querySelector('.et-hud__menus') ?? this.hud);
+    this.dockMenusAwayFrom(anchor);
+    this.commandMenu.show(this.menus);
     this.input.push(this.commandMenu);
     this.hints.set([
       { keys: ['↑', '↓'], label: 'Select' },
@@ -242,7 +246,7 @@ export class UIRoot {
     opts: { title?: string; mp?: number; maxMp?: number } = {},
   ): void {
     this.abilityMenu.setItems(items, opts);
-    this.abilityMenu.show(this.hud.querySelector('.et-hud__menus') ?? this.hud);
+    this.abilityMenu.show(this.menus);
     this.input.push(this.abilityMenu);
     this.hints.set([
       { keys: ['↑', '↓'], label: 'Select' },
@@ -367,6 +371,38 @@ export class UIRoot {
   }
 
   // ── housekeeping ──────────────────────────────────────────────────────────
+
+  /**
+   * Which corner the command / ability windows dock to.
+   *
+   * They live in the bottom-RIGHT by default. The one thing that must never
+   * happen is the window covering the unit the player is commanding, so if the
+   * renderer tells us where that unit is on screen and it falls under the docked
+   * corner, the whole menu row flips to the bottom-left instead.
+   */
+  setMenuDock(side: 'left' | 'right'): void {
+    if (this.menuDock === side) return;
+    this.menuDock = side;
+    this.menus.classList.toggle('is-dock-left', side === 'left');
+  }
+
+  /** Which corner the battle menus are currently docked to. */
+  get menuDockSide(): 'left' | 'right' {
+    return this.menuDock;
+  }
+
+  private dockMenusAwayFrom(anchor?: { x: number; y: number }): void {
+    if (!anchor) {
+      this.setMenuDock('right');
+      return;
+    }
+    const w = window.innerWidth || 1920;
+    const h = window.innerHeight || 1080;
+    // The docked stack occupies roughly the right 34% and bottom 38% of the
+    // frame; anything inside that box would be hidden behind it.
+    const overlaps = anchor.x > w * 0.62 && anchor.y > h * 0.58;
+    this.setMenuDock(overlaps ? 'left' : 'right');
+  }
 
   /** Re-measure anything that depends on layout (menu carets, tree tracery). */
   refreshLayout(): void {

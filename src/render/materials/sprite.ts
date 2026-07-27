@@ -371,6 +371,35 @@ export interface SpriteUniforms {
   /** Scales the Lambert accumulation before it is applied to the art. */
   uLightGain: { value: number };
   /**
+   * Reflectance of the art, treated as a real albedo.
+   *
+   * FFT palettes are authored as *finished display colours* — a white mage's
+   * robe is 0.95 because that is how bright it should look on a CRT, not
+   * because linen reflects 95% of the light hitting it. Feeding that straight
+   * into a lighting model whose key runs at 6 candela produces a figure two
+   * stops above the stone it stands on, which is precisely the "pasted GIF"
+   * read. Scaling the palette down to a plausible reflectance puts the unit
+   * back in the terrain's value range without touching a single texel of art.
+   */
+  uAlbedoScale: { value: number };
+  /**
+   * Highlight shoulder on the accumulated light. Above `uShadeKnee` the shade
+   * term compresses instead of climbing, so a billboard that catches the key
+   * dead-on cannot out-expose a terrain surface at the same orientation. This
+   * is the sprite's half of the exposure match; `uAlbedoScale` is the other.
+   */
+  uShadeKnee: { value: number };
+  uShadeCompress: { value: number };
+  /**
+   * Chroma pull toward the scene. Shipped HD-2D never leaves a sprite at 100%
+   * palette saturation over a graded map — the FFT night frames desaturate and
+   * cool every unit until it belongs to the light. `uSceneTint` is multiplied
+   * in and `uGradeSaturation` pulls the art toward its own luma; both are
+   * subtle by design, because overdoing it turns pixel art to mud.
+   */
+  uSceneTint: { value: THREE.Color };
+  uGradeSaturation: { value: number };
+  /**
    * Extra weight on the *direct* term only. A billboard always turns to face the
    * camera, so it presents a near-perfect normal to any key light on the camera's
    * side and soaks up more of it than any terrain surface ever does — which is
@@ -461,6 +490,11 @@ export interface SpriteMaterialOptions {
   lightInfluence?: number;
   lightGain?: number;
   directGain?: number;
+  albedoScale?: number;
+  shadeKnee?: number;
+  shadeCompress?: number;
+  sceneTint?: THREE.ColorRepresentation;
+  gradeSaturation?: number;
   ambientFloor?: THREE.ColorRepresentation;
   shadeBend?: number;
   rimColor?: THREE.ColorRepresentation;
@@ -485,6 +519,11 @@ uniform float uMirror;
 uniform float uLightInfluence;
 uniform float uLightGain;
 uniform float uDirectGain;
+uniform float uAlbedoScale;
+uniform float uShadeKnee;
+uniform float uShadeCompress;
+uniform vec3  uSceneTint;
+uniform float uGradeSaturation;
 uniform vec3  uAmbientFloor;
 uniform float uShadeBend;
 uniform vec3  uKeyLightDir;
@@ -633,6 +672,17 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
   vec3 spriteLight = reflectedLight.directDiffuse * uDirectGain + reflectedLight.indirectDiffuse;
   vec3 spriteShade = uAmbientFloor + spriteLight * uLightGain;
 
+  // Highlight shoulder. A billboard turns to face the camera, so it presents a
+  // near-perfect normal to the key and collects more of it than any terrain
+  // surface ever does; uDirectGain discounts that, but on a 6-candela key the
+  // remainder still climbs past 1.5 and the art clips white. Everything above
+  // the knee is compressed rather than clamped, which keeps a lit unit reading
+  // brighter than a shadowed one without letting it leave the frame's range.
+  {
+    vec3 over = max(spriteShade - vec3(uShadeKnee), vec3(0.0));
+    spriteShade = min(spriteShade, vec3(uShadeKnee)) + over / (1.0 + over * uShadeCompress);
+  }
+
   // Ground bounce: terrain-coloured light rising into the lower body. Grounding
   // is mostly this plus the contact darkening below — a figure whose legs are as
   // bright as its shoulders always reads as a sticker.
@@ -644,6 +694,14 @@ const SPRITE_OUTPUT_FRAGMENT = /* glsl */ `
   // Lifts away with the unit during a hop so it never detaches from the tile.
   float footRamp = 1.0 - smoothstep(0.0, max(uFootShadeTexels, 1.0) / max(uFrameTexels.y, 1.0), spriteUp);
   spriteShade *= 1.0 - uFootShade * footRamp * uGrounded;
+
+  // Grade the art into the scene *before* it is lit: pull chroma toward the
+  // palette's own luma and multiply the map's tone through it, so a unit shares
+  // the frame's colour identity instead of importing the sheet's.
+  {
+    float gradeLuma = dot(spriteAlbedo, vec3(0.2126, 0.7152, 0.0722));
+    spriteAlbedo = mix(vec3(gradeLuma), spriteAlbedo, uGradeSaturation) * uSceneTint * uAlbedoScale;
+  }
 
   vec3 spriteColor = spriteAlbedo * mix(vec3(1.0), spriteShade, uLightInfluence);
 
@@ -784,7 +842,12 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
 
     uLightInfluence: { value: options.lightInfluence ?? 1 },
     uLightGain: { value: options.lightGain ?? 1 },
-    uDirectGain: { value: options.directGain ?? 0.62 },
+    uDirectGain: { value: options.directGain ?? 0.5 },
+    uAlbedoScale: { value: options.albedoScale ?? 0.82 },
+    uShadeKnee: { value: options.shadeKnee ?? 0.85 },
+    uShadeCompress: { value: options.shadeCompress ?? 1.6 },
+    uSceneTint: { value: new THREE.Color(options.sceneTint ?? 0xffffff) },
+    uGradeSaturation: { value: options.gradeSaturation ?? 0.9 },
     uAmbientFloor: { value: new THREE.Color(options.ambientFloor ?? 0x24304a) },
     uShadeBend: { value: options.shadeBend ?? 0.7 },
     uKeyLightDir: { value: (options.keyLightDirection ?? new THREE.Vector3(-0.5, -1, -0.35)).clone().normalize() },
@@ -792,7 +855,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
       value: (options.fillLightDirection ?? new THREE.Vector3(0.5, -0.6, 0.35)).clone().normalize(),
     },
     uRimColor: { value: new THREE.Color(options.rimColor ?? 0xffe6b8) },
-    uRimStrength: { value: options.rimStrength ?? 0.4 },
+    uRimStrength: { value: options.rimStrength ?? 0.34 },
     uBackRimColor: { value: new THREE.Color(options.backRimColor ?? 0x8fb0d8) },
     uBackRimStrength: { value: options.backRimStrength ?? 0.16 },
 
@@ -816,7 +879,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uOpacity: { value: 1 },
     uAlphaCut: { value: 0.5 },
 
-    uShadowPush: { value: 0.16 },
+    uShadowPush: { value: 0.1 },
   };
 
   const material = new THREE.MeshLambertMaterial({

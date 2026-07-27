@@ -447,13 +447,34 @@ const BATTLE_OPEN: Scenario = {
   },
   grade: 'ivalice-noon',
   layers: { terrain: true, sprites: true, ui: true, post: true, highlights: true },
-  // 40 degrees rather than the 30-degree default: a walled cloister seen from
-  // 30 shows mostly its own outer wall. This looks down into the garden.
-  camera: { yawIndex: 0, frameField: true, fitWholeField: true, pitchDegrees: 40 },
-  // The reference games are clean. A tactics board has to stay readable across
-  // the whole frame, so the tilt-shift band is a hint of miniature depth rather
-  // than the wall of blur the stack defaults to.
-  post: { exposure: 1.0, dof: 0.35, vignette: 0.8 },
+  // Composition, round 2.
+  //
+  // `fitWholeField` is GONE. It forced the zoom floor down to `zoomLevels[0]`, which put the
+  // whole cloister on screen as a small diamond with roughly half the frame left as flat
+  // background — the single defect the critics scored hardest. Neither reference game shows
+  // the whole playfield: `refs/curated/triangle/official_005_steam.jpg` runs its board off
+  // all four edges. Dropping the flag lets `frameField`'s cover bias take over and the map
+  // bleeds past the frame.
+  //
+  // 32° rather than 40°. A walled cloister does need to be looked *into*, but 40 flattens
+  // the elevation bands this map exists to express — at 40 the vertical wall faces are half
+  // the screen height they get at 32, and height is both the art and the mechanic here.
+  // VISUAL_TARGET.md measures the references at "roughly 30° pitch".
+  //
+  // `focusTile` is authored rather than left to the acting unit. Aldric holds the south
+  // steps, so focusing him puts the frame centre three tiles south of the garden and the
+  // near chapel wall — a single flat masonry face — owns the bottom-right third of the
+  // picture. Centring the fountain plinth instead keeps the sunken garden, both colonnades
+  // and three elevation bands in shot, and the camera's composition offset then takes it
+  // off dead centre.
+  camera: { yawIndex: 0, frameField: true, pitchDegrees: 32, focusTile: { x: 6, y: 6, z: 2 } },
+  // Post is authored in `post.ts` against the measured reference rubric; the scenario no
+  // longer dials it down. `dof: 0.35` was fighting a floor that clamped it straight back up,
+  // so the number was a lie, and `vignette: 0.8` was compounding an already-dark frame.
+  // Both now sit at 1.0 and the shape lives in `REFERENCE_FLOOR`.
+  // Exposure measured, not guessed: `tools/shoot.mjs` reports mean frame luma, the reference
+  // frames sit at 66-80/255, and at 1.05 this scene came back at 39.
+  post: { exposure: 1.3, dof: 1.0, vignette: 1.0 },
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,

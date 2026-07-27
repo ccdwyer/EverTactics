@@ -72,6 +72,8 @@ import {
 } from 'three';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
+import { WorldEnvironment, type WorldEnvironmentOptions } from './atmosphere.js';
+
 declare global {
   interface Window {
     __EVERTACTICS_READY__?: boolean;
@@ -170,6 +172,12 @@ export interface StageOptions {
   autoStart?: boolean;
   /** Expose the stage on `window.__EVERTACTICS_STAGE__` for tooling. */
   exposeGlobal?: boolean;
+  /**
+   * Sky / backdrop / atmosphere. Pass `{ enabled: false }` for diagnostic
+   * scenes that want to look at geometry against a flat colour.
+   * See `src/render/atmosphere.ts`.
+   */
+  environment?: WorldEnvironmentOptions | false;
 }
 
 type TickCallback = (dt: number, tick: number) => void;
@@ -188,6 +196,19 @@ export class Stage {
 
   /** Linear HDR colour+depth target the scene is composed into. */
   readonly sceneTarget: WebGLRenderTarget;
+
+  /**
+   * The world the diorama sits in: graded sky, distance haze, the surrounding
+   * architecture layer, the ground plate and the airborne particulate.
+   *
+   * Stage owns it because Stage owns the scene and the frame loop, and because
+   * the alternative — making every caller remember to install it — is exactly
+   * how the board ended up floating in `clearColor` for two rounds. It
+   * self-configures by reading `scene.background`, `scene.fog`, the key
+   * `DirectionalLight` and the `terrain:*` group, so nothing else has to call
+   * anything. See `src/render/atmosphere.ts` for the escape hatches.
+   */
+  readonly environment: WorldEnvironment | null;
 
   private cameraRig: StageCamera | null = null;
   private post: PostPipeline | null = null;
@@ -289,6 +310,11 @@ export class Stage {
     });
     this.sceneTarget.texture.name = 'Stage.sceneColor';
     depthTexture.name = 'Stage.sceneDepth';
+
+    // The environment must exist before the first resize so it gets a viewport.
+    this.environment =
+      options.environment === false ? null : new WorldEnvironment(options.environment ?? {});
+    this.environment?.addTo(this.scene);
 
     this.installResizeHandling();
     this.resize();
@@ -479,6 +505,7 @@ export class Stage {
     this.heightPx = Math.max(1, Math.round(buffer.y));
 
     this.sceneTarget.setSize(this.widthPx, this.heightPx);
+    this.environment?.setViewport(this.widthPx, this.heightPx, this.pixelRatio);
     this.post?.setSize(this.widthPx, this.heightPx, this.pixelRatio);
     this.outputPass.setSize(this.widthPx, this.heightPx);
     this.cameraRig?.setViewport(this.widthPx, this.heightPx, this.pixelRatio);
@@ -559,6 +586,10 @@ export class Stage {
 
     const alpha = this.accumulator / this.fixedStep;
     for (const cb of this.renderCallbacks) cb(dt, alpha);
+
+    // After the render callbacks: terrain and lighting may have just been
+    // rebuilt this frame, and the environment measures both.
+    this.environment?.update(rig.camera, this.elapsed);
 
     const postOwnsScene = this.post !== null && this.post.rendersScene === true;
 
@@ -652,6 +683,7 @@ export class Stage {
     this.resizeCallbacks.clear();
     this.convergedCallbacks.clear();
 
+    this.environment?.dispose();
     this.post?.dispose();
     this.post = null;
     this.outputPass.dispose();
