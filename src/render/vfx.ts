@@ -252,12 +252,15 @@ function buildAtlas(): HTMLCanvasElement {
       for (let x = 0; x < C; x++) {
         const u = (x - H) / H;
         const v = y / C; // 0 top, 1 bottom
-        const width = 0.32 + 0.62 * Math.pow(v, 0.8);
-        let a = Math.max(0, 1 - Math.abs(u) / width);
-        a *= Math.pow(v, 0.55) * (1.15 - v * 0.15);
+        const width = 0.30 + 0.60 * Math.pow(v, 0.8);
+        // Powered falloff, and the noise only *removes* density. A flame cell that
+        // saturates to alpha 1 across most of its area stacks into a flat white slab
+        // the moment a dozen of them overlap.
+        let a = Math.pow(Math.max(0, 1 - Math.abs(u) / width), 1.7);
+        a *= Math.pow(v, 0.7) * (1.0 - v * 0.12);
         const n = noise[y * C + x] ?? 0.5;
-        a *= 0.55 + n * 0.95;
-        a = Math.max(0, Math.min(1, a * 1.25));
+        a *= 0.30 + n * 0.85;
+        a = Math.max(0, Math.min(1, a));
         const i = (y * C + x) * 4;
         img.data[i] = 255;
         img.data[i + 1] = 255;
@@ -713,6 +716,8 @@ interface ParticleSpawn {
   drag: number;
   stretch: number;
   orbit: [number, number, number, number];
+  /** Seconds to postpone the birth by — staggers a burst so it does not pop as one slab. */
+  delay: number;
 }
 
 class ParticleBatch {
@@ -809,7 +814,7 @@ class ParticleBatch {
     set('aOrigin', s.position.x, s.position.y, s.position.z);
     set('aVel', s.velocity.x, s.velocity.y, s.velocity.z);
     set('aAcc', s.acceleration.x, s.acceleration.y, s.acceleration.z);
-    set('aLife', now, Math.max(s.lifetime, 1e-3), 0, s.sprite);
+    set('aLife', now + s.delay, Math.max(s.lifetime, 1e-3), 0, s.sprite);
     set('aSize', s.sizeStart, s.sizeEnd);
     set('aColor0', s.color0[0], s.color0[1], s.color0[2], s.color0[3]);
     set('aColor1', s.color1[0], s.color1[1], s.color1[2], s.color1[3]);
@@ -1310,6 +1315,7 @@ class RisingShapes {
   private readonly scl = new Vector3();
   private readonly axis = new Vector3();
   private elapsed = 0;
+  private duration = 0;
   active = false;
 
   constructor(geometry: BufferGeometry, material: MeshStandardMaterial, capacity: number) {
@@ -1325,6 +1331,8 @@ class RisingShapes {
     this.instances.length = 0;
     for (const i of instances) this.instances.push(i);
     this.mesh.count = Math.min(instances.length, this.mesh.instanceMatrix.count);
+    this.duration = 0;
+    for (const i of instances) this.duration = Math.max(this.duration, i.delay + i.rise + i.hold + i.fall);
     this.elapsed = 0;
     this.active = true;
     this.mesh.visible = true;
@@ -1335,7 +1343,6 @@ class RisingShapes {
   update(dt: number): boolean {
     if (!this.active) return false;
     this.elapsed += dt;
-    let anyAlive = false;
 
     for (let i = 0; i < this.mesh.count; i++) {
       const inst = this.instances[i]!;
@@ -1348,20 +1355,19 @@ class RisingShapes {
         const x = t / inst.rise;
         progress = 1 - Math.pow(1 - x, 3);
         progress *= 1 + 0.14 * Math.sin(x * Math.PI * 2) * (1 - x);
-        anyAlive = true;
       } else if (t < inst.rise + inst.hold) {
         progress = 1;
-        anyAlive = true;
       } else if (t < inst.rise + inst.hold + inst.fall) {
         const x = (t - inst.rise - inst.hold) / inst.fall;
         progress = 1 - x * x;
-        anyAlive = true;
       } else {
         progress = 0;
       }
 
+      // The shape's origin is its base (geometry is translated so it spans y in [0,1]),
+      // and it slides up out of the ground rather than scaling in place.
       const h = inst.height * progress;
-      this.pos.set(inst.base.x, inst.base.y + h * 0.5 - inst.height * 0.5 * (1 - progress), inst.base.z);
+      this.pos.set(inst.base.x, inst.base.y - inst.height * (1 - progress) * 0.35, inst.base.z);
       this.axis.set(Math.sin(inst.tilt), 0, Math.cos(inst.tilt));
       this.quat.setFromAxisAngle(this.axis, inst.tilt * 0.35);
       this.scl.set(inst.scale * (0.7 + 0.3 * progress), Math.max(h, 1e-4), inst.scale * (0.7 + 0.3 * progress));
@@ -1370,12 +1376,13 @@ class RisingShapes {
     }
 
     this.mesh.instanceMatrix.needsUpdate = true;
-    if (!anyAlive) {
+    if (this.elapsed >= this.duration) {
       this.active = false;
       this.mesh.visible = false;
       this.mesh.count = 0;
+      return false;
     }
-    return anyAlive;
+    return true;
   }
 
   dispose(): void {
@@ -1616,6 +1623,8 @@ export interface BurstSpec {
   fadeOut?: number;
   /** Rotational motion about the vertical axis through `position`. */
   orbit?: { omega: number; radial?: number };
+  /** Random birth delay range in seconds. Staggering a burst is what gives it a shape. */
+  delay?: [number, number];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1709,6 +1718,9 @@ export class VfxSystem {
   private readonly v0 = new Vector3();
   private readonly v1 = new Vector3();
   private readonly v2 = new Vector3();
+  /** Holds the burst origin for the whole of `emit` — callers may legitimately pass one of
+   *  the other scratch vectors in, and the per-particle maths would clobber it. */
+  private readonly vBase = new Vector3();
   private readonly spawnScratch: ParticleSpawn = {
     position: new Vector3(),
     velocity: new Vector3(),
@@ -1726,6 +1738,7 @@ export class VfxSystem {
     drag: 0,
     stretch: 0,
     orbit: [0, 0, 0, 0],
+    delay: 0,
   };
 
   constructor(opts: VfxSystemOptions = {}) {
@@ -1866,10 +1879,11 @@ export class VfxSystem {
     const gravity = (spec.gravity ?? 0) * this.tileSize;
     const jitterC = spec.colorJitter ?? 0.06;
     const s = this.spawnScratch;
+    const base = this.vBase.copy(spec.position);
 
     for (let i = 0; i < spec.count; i++) {
       // ── position ──
-      s.position.copy(spec.position);
+      s.position.copy(base);
       switch (shape) {
         case 'sphere': {
           rng.unitSphere(this.v0).multiplyScalar(radius * Math.cbrt(rng.next()));
@@ -1899,9 +1913,9 @@ export class VfxSystem {
           break;
         }
         case 'line': {
-          const to = spec.positionTo ?? spec.position;
+          const to = spec.positionTo ?? base;
           const t = rng.next();
-          s.position.lerpVectors(spec.position, to, t);
+          s.position.lerpVectors(base, to, t);
           rng.unitSphere(this.v0).multiplyScalar(radius);
           s.position.add(this.v0);
           break;
@@ -1932,7 +1946,7 @@ export class VfxSystem {
           const q = new Quaternion().setFromUnitVectors(this.v1, dir);
           this.v0.applyQuaternion(q);
         } else if (shape === 'ring' || shape === 'disc') {
-          this.v0.set(s.position.x - spec.position.x, 0, s.position.z - spec.position.z);
+          this.v0.set(s.position.x - base.x, 0, s.position.z - base.z);
           if (this.v0.lengthSq() < 1e-8) this.v0.set(1, 0, 0);
           this.v0.normalize();
         } else {
@@ -1968,8 +1982,9 @@ export class VfxSystem {
       s.fadeOut = spec.fadeOut ?? 0.55;
       s.drag = spec.drag ?? 0;
       s.stretch = spec.stretch ?? 0;
+      s.delay = spec.delay ? rng.range(spec.delay[0], spec.delay[1]) : 0;
       if (spec.orbit) {
-        s.orbit = [spec.position.x, spec.position.z, spec.orbit.omega, spec.orbit.radial ?? 0];
+        s.orbit = [base.x, base.z, spec.orbit.omega, spec.orbit.radial ?? 0];
       } else {
         s.orbit = [0, 0, 0, 0];
       }
@@ -2066,6 +2081,7 @@ export class VfxSystem {
       (r.material.uniforms['uCoreColor']!.value as Color).copy(core);
       (r.material.uniforms['uEdgeColor']!.value as Color).copy(edge);
       r.material.uniforms['uCoreWidth']!.value = 0.3;
+      r.material.uniforms['uTail']!.value = 0; // ribbons are pooled; clear the slash's tail
     }
 
     const segments = 18;
@@ -2100,7 +2116,7 @@ export class VfxSystem {
       const path = buildPath(from, to, jag * 4, flickerIndex * 3.77);
       main.mesh.visible = true;
       main.setPath(path, width * (1.0 + 0.5 * (1 - t)), this.cameraDir);
-      main.material.uniforms['uHead']!.value = Math.min(1, t * 3.2);
+      main.material.uniforms['uHead']!.value = Math.min(1, t * 9.0); // a strike is instantaneous
       main.material.uniforms['uOpacity']!.value = t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.4);
 
       for (let i = 0; i < branches.length; i++) {
@@ -2153,17 +2169,26 @@ export class VfxSystem {
     (ribbon.material.uniforms['uEdgeColor']!.value as Color).copy(new Color(0.9, 1.0, 1.5));
     ribbon.material.uniforms['uCoreWidth']!.value = 0.22;
 
+    // The arc is swept in the plane that faces the camera, rotated by `tilt`. A slash
+    // authored in world space foreshortens into an unreadable squiggle at 45 degrees of
+    // yaw; one authored in the view plane always reads as a blade stroke.
+    const right = new Vector3().crossVectors(new Vector3(0, 1, 0), this.cameraDir);
+    if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+    right.normalize();
+    const up = new Vector3().crossVectors(this.cameraDir, right).normalize();
+    const ct = Math.cos(tilt);
+    const st = Math.sin(tilt);
+    const axisA = right.clone().multiplyScalar(ct).addScaledVector(up, st);
+    const axisB = up.clone().multiplyScalar(ct).addScaledVector(right, -st);
+
     const pts: Vector3[] = [];
     const N = 26;
     for (let i = 0; i <= N; i++) {
       const a = -arc * 0.5 + arc * (i / N);
-      pts.push(
-        new Vector3(
-          centre.x + Math.cos(a) * radius,
-          centre.y + Math.sin(a) * radius * Math.sin(tilt),
-          centre.z + Math.sin(a) * radius * Math.cos(tilt),
-        ),
-      );
+      const p = centre.clone();
+      p.addScaledVector(axisA, Math.cos(a) * radius);
+      p.addScaledVector(axisB, Math.sin(a) * radius * 0.72);
+      pts.push(p);
     }
 
     tl.span(at, at + duration, (t) => {
@@ -2397,23 +2422,26 @@ export class VfxSystem {
 
   /** Immediate one-shot helpers the renderer can call outside the ability system. */
   playLandingDust(position: Vector3, power = 0.5): void {
+    // Alpha-blended particles live in the same linear space as the lit scene, so dust has
+    // to be brighter than the ground it kicks up from or it blends into invisibility.
     this.emit({
-      count: Math.round(10 + 14 * power),
+      count: Math.round(14 + 18 * power),
       position,
       shape: 'disc',
-      radius: 0.25,
-      speed: [0.7, 1.9],
-      drag: 3.4,
-      gravity: -0.4,
-      size: [0.32, 1.0],
-      life: [0.5, 0.9],
-      color0: [0.42, 0.36, 0.29, 0.55],
-      color1: [0.3, 0.27, 0.23, 0],
+      radius: 0.3,
+      speed: [0.9, 2.4],
+      drag: 3.2,
+      gravity: -0.35,
+      size: [0.42, 1.7],
+      life: [0.55, 1.0],
+      color0: [0.86, 0.79, 0.66, 0.55],
+      color1: [0.5, 0.46, 0.4, 0],
       sprite: [SPR.dust, SPR.smoke],
       additive: false,
       spin: [-0.8, 0.8],
-      fadeIn: 0.12,
-      fadeOut: 0.35,
+      delay: [0, 0.06],
+      fadeIn: 0.1,
+      fadeOut: 0.3,
     });
   }
 
@@ -2614,7 +2642,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
           position: pt,
           size: [0.4, 4.4],
           life: [0.26, 0.26],
-          color0: [p.core[0], p.core[1], p.core[2], 1],
+          color0: [p.core[0], p.core[1], p.core[2], 0.85],
           color1: [p.mid[0], p.mid[1], p.mid[2], 0],
           sprite: SPR.halo,
           fadeIn: 0.05,
@@ -2622,23 +2650,41 @@ const EFFECTS: Record<string, EffectBuilder> = {
         });
         // Rolling flame body — few, large, silhouetted.
         sys.emit({
-          count: 18,
+          count: 20,
           position: pt,
           shape: 'sphere',
-          radius: 0.28,
-          speed: [1.6, 3.6],
+          radius: 0.34,
+          speed: [1.5, 3.4],
           direction: new Vector3(0, 1, 0),
-          spread: 1.1,
+          spread: 1.15,
           drag: 2.4,
-          gravity: 2.2,
-          size: [0.85, 0.24],
+          gravity: 2.4,
+          size: [0.8, 0.22],
           life: [0.42, 0.72],
-          color0: p.core,
+          // Alpha well below 1: twenty additive flame cards stacked at full opacity
+          // clip to white and the effect loses all of its internal shape.
+          color0: [p.core[0], p.core[1], p.core[2], 0.6],
           color1: [p.mid[0] * 0.35, p.mid[1] * 0.2, p.mid[2] * 0.1, 0],
           sprite: SPR.flame,
           spin: [-1.4, 1.4],
-          fadeIn: 0.07,
-          fadeOut: 0.45,
+          delay: [0, 0.13],
+          fadeIn: 0.1,
+          fadeOut: 0.4,
+        });
+        // Ground-hugging ring: gives the burst a readable footprint on the tile.
+        sys.emit({
+          count: 3,
+          position: pt,
+          shape: 'ring',
+          radius: 0.1,
+          speed: [2.4, 3.2],
+          size: [0.9, 3.4],
+          life: [0.34, 0.48],
+          color0: [p.core[0] * 0.5, p.core[1] * 0.5, p.core[2] * 0.5, 0.7],
+          color1: fadeOf(p),
+          sprite: SPR.ring,
+          fadeIn: 0.08,
+          fadeOut: 0.3,
         });
         // Embers, velocity-stretched so they read as motion, not dots.
         sys.emit({
@@ -2668,10 +2714,10 @@ const EFFECTS: Record<string, EffectBuilder> = {
           spread: 0.8,
           drag: 1.5,
           gravity: 0.5,
-          size: [0.6, 1.9],
+          size: [0.8, 2.6],
           life: [0.9, 1.6],
-          color0: [0.16, 0.13, 0.11, 0.5],
-          color1: [0.12, 0.1, 0.09, 0],
+          color0: [0.24, 0.19, 0.16, 0.55],
+          color1: [0.1, 0.08, 0.07, 0],
           sprite: SPR.smoke,
           additive: false,
           spin: [-0.5, 0.5],
@@ -3190,9 +3236,9 @@ const EFFECTS: Record<string, EffectBuilder> = {
         sys.spawnBolt(from, to, tl, {
           at: 0.42 + i * 0.05,
           duration: 0.55,
-          width: 0.34,
+          width: 0.62,
           branches: 1,
-          jag: 0.9,
+          jag: 0.55,
           core: new Color(p.mid[0] * 1.6, p.mid[1] * 1.2, p.mid[2] * 1.6),
           edge: new Color(0.18, 0.02, 0.3),
         });
@@ -3375,35 +3421,53 @@ const EFFECTS: Record<string, EffectBuilder> = {
     const pts = impactPoints(o);
     tl.at(0.0, () => {
       for (const pt of pts) {
+        // A ring of sickly light collapsing down over the unit, so the debuff is legible
+        // even on a dark tile; the drips alone are far too low-contrast to read.
         sys.emit({
-          count: 22,
-          position: pt.clone().setY(pt.y + 1.6 * sys.scale),
+          count: 4,
+          position: pt.clone().setY(pt.y + 1.9 * sys.scale),
+          shape: 'ring',
+          radius: 0.05,
+          speed: [0.9, 1.2],
+          gravity: -2.2,
+          size: [1.9, 1.1],
+          life: [0.7, 0.9],
+          color0: [1.4, 0.4, 1.9, 0.7],
+          color1: [0.3, 0.06, 0.45, 0],
+          sprite: SPR.ring,
+          delay: [0, 0.22],
+          fadeIn: 0.12,
+          fadeOut: 0.35,
+        });
+        sys.emit({
+          count: 26,
+          position: pt.clone().setY(pt.y + 1.7 * sys.scale),
           shape: 'disc',
           radius: 0.5,
           speed: [0.1, 0.5],
           direction: new Vector3(0, -1, 0),
           spread: 0.4,
           gravity: -3.2,
-          size: [0.18, 0.1],
+          size: [0.24, 0.13],
           life: [0.8, 1.3],
-          color0: [0.5, 0.18, 0.7, 0.9],
-          color1: [0.18, 0.05, 0.28, 0],
+          color0: [1.1, 0.35, 1.6, 1],
+          color1: [0.22, 0.05, 0.36, 0],
           sprite: SPR.droplet,
-          additive: false,
-          stretch: 1.1,
-          fadeIn: 0.15,
-          fadeOut: 0.55,
+          stretch: 1.2,
+          delay: [0, 0.3],
+          fadeIn: 0.12,
+          fadeOut: 0.5,
         });
         sys.emit({
           count: 16,
           position: pt,
           shape: 'disc',
-          radius: 0.7,
+          radius: 0.8,
           speed: [0.2, 0.6],
-          size: [0.5, 1.1],
+          size: [0.7, 1.6],
           life: [0.9, 1.5],
-          color0: [0.24, 0.08, 0.32, 0.55],
-          color1: [0.12, 0.03, 0.18, 0],
+          color0: [0.2, 0.06, 0.28, 0.6],
+          color1: [0.1, 0.02, 0.15, 0],
           sprite: SPR.smoke,
           additive: false,
           spin: [-0.6, 0.6],
@@ -3422,7 +3486,7 @@ const EFFECTS: Record<string, EffectBuilder> = {
     const pts = impactPoints(o);
     const mid = o.target.clone().lerp(o.origin, 0.25).setY(o.target.y + 0.9 * sys.scale);
 
-    sys.spawnSlashArc(mid, tl, { at: 0.0, duration: 0.22, radius: 1.25, arc: Math.PI * 1.2, tilt: -0.5 });
+    sys.spawnSlashArc(mid, tl, { at: 0.0, duration: 0.24, radius: 1.35, arc: Math.PI * 0.78, tilt: -0.7, width: 0.55 });
 
     tl.at(0.1, () => {
       for (const pt of pts) {

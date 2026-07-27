@@ -131,6 +131,14 @@ export interface PostPipeline {
   render(ctx: PostRenderContext): void;
   /** False while temporal accumulation is still settling. Gates convergence. */
   readonly converged: boolean;
+  /**
+   * Set by a pipeline that composes the scene itself (it needs its own colour
+   * target plus a sprite-only mask pass, which cannot be reconstructed from a
+   * flattened buffer). Stage then skips its own scene→`sceneTarget` render and
+   * hands `ctx.source` over purely as a spare target. `src/render/post.ts`'s
+   * `PostStack` works this way; see `createPostPipeline` in `src/state/render.ts`.
+   */
+  readonly rendersScene?: boolean;
   dispose(): void;
 }
 
@@ -552,12 +560,16 @@ export class Stage {
     const alpha = this.accumulator / this.fixedStep;
     for (const cb of this.renderCallbacks) cb(dt, alpha);
 
-    // Scene → linear HDR target. three skips tone mapping / output encoding
-    // whenever the destination is a render target, which is what we want.
-    this.renderer.setRenderTarget(this.sceneTarget);
-    this.renderer.clear();
-    this.renderer.render(this.scene, rig.camera);
-    this.renderer.setRenderTarget(null);
+    const postOwnsScene = this.post !== null && this.post.rendersScene === true;
+
+    if (!postOwnsScene) {
+      // Scene → linear HDR target. three skips tone mapping / output encoding
+      // whenever the destination is a render target, which is what we want.
+      this.renderer.setRenderTarget(this.sceneTarget);
+      this.renderer.clear();
+      this.renderer.render(this.scene, rig.camera);
+      this.renderer.setRenderTarget(null);
+    }
 
     const depth = this.sceneTarget.depthTexture;
     if (this.post && depth) {

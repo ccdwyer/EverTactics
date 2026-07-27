@@ -65,13 +65,7 @@ import type {
   Vec3,
 } from '@core/types';
 
-import {
-  HEIGHT_UNIT,
-  TEXELS_PER_UNIT,
-  TILE_SIZE,
-  gridToWorld,
-  texelsToWorld,
-} from '@render/camera';
+import { HEIGHT_UNIT, TILE_SIZE, texelsToWorld } from '@render/camera';
 
 import {
   DEFAULT_VIEW_CELL,
@@ -1737,7 +1731,6 @@ export class UnitSprite {
       (this.cell.y + 0.5) * TILE_SIZE,
     );
 
-    const groundWorldY = world.y;
     const viewPos = this.scratchView.copy(world).applyMatrix4(camera.matrixWorldInverse);
 
     // Art-space offsets act in the screen plane; view x/y *are* screen right/up.
@@ -1758,16 +1751,21 @@ export class UnitSprite {
     this.mesh.rotation.set(0, view.yawRadians, pose.rotation, 'YXZ');
     this.mesh.scale.set(pose.scaleX, pose.scaleY, 1);
 
-    // 6 — ground decals live in world space at the tile surface.
-    this.object.position.set(0, 0, 0);
+    // 6 — ground decals live in world space at the tile surface. `object` is a
+    //     plain world-space container: everything under it is positioned in world
+    //     coordinates, so the layer group must stay at the origin.
     const groundX = (this.cell.x + 0.5) * TILE_SIZE;
     const groundZ = (this.cell.y + 0.5) * TILE_SIZE;
 
     if (this.contactShadow) {
-      const airborne = this.walker?.current.airborne ?? false;
-      const lift = Math.max(0, this.cell.z * HEIGHT_UNIT - groundWorldY);
-      const shrink = airborne ? 0.7 : 1;
-      this.contactShadow.position.set(groundX, groundWorldY + 0.012 - lift, groundZ);
+      // During a hop the sprite arcs above the tile, but its contact patch has to
+      // stay on the surface and shrink — a blob that flies with the unit is the
+      // classic "sticker on the screen" giveaway.
+      const walk = this.walker?.current;
+      const shadowY = (walk?.groundZ ?? this.cell.z) * HEIGHT_UNIT;
+      const lift = Math.max(0, this.cell.z * HEIGHT_UNIT - shadowY);
+      const shrink = 1 / (1 + lift * 1.4);
+      this.contactShadow.position.set(groundX, shadowY + 0.012, groundZ);
       this.contactShadow.scale.setScalar(shrink);
       this.contactShadow.material.opacity = this.ko ? 0.5 : 1;
       this.contactShadow.visible = this.crystalPhase < 0;
@@ -1776,7 +1774,8 @@ export class UnitSprite {
     if (this.ring.visible) {
       this.ringPulse += dt;
       const pulse = 1 + Math.sin(this.ringPulse * 3.4) * 0.04;
-      this.ring.position.set(groundX, groundWorldY + 0.02, groundZ);
+      const ringY = (this.walker?.current.groundZ ?? this.cell.z) * HEIGHT_UNIT;
+      this.ring.position.set(groundX, ringY + 0.02, groundZ);
       this.ring.rotation.y = this.ringPulse * (this.selection === 'active' ? 0.6 : 0.25);
       this.ring.scale.setScalar(pulse);
       this.ring.material.opacity = 0.75 + Math.sin(this.ringPulse * 3.4) * 0.15;
@@ -1841,7 +1840,6 @@ export class UnitSprite {
       label.mesh.position.copy(viewPos);
       label.mesh.rotation.set(0, view.yawRadians, 0, 'YXZ');
       label.mesh.material.opacity = t > 0.75 ? 1 - (t - 0.75) / 0.25 : 1;
-      label.mesh.material.transparent = true;
     }
   }
 

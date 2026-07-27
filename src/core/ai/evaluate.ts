@@ -1243,8 +1243,12 @@ export function enumerateCandidates(ctx: AiContext): Candidate[] {
     candidates.push(moveOnly);
 
     for (const ability of abilities) {
-      const epicentres = epicentresByAbility.get(ability.id);
-      if (epicentres === undefined) continue;
+      const base = epicentresByAbility.get(ability.id);
+      if (base === undefined) continue;
+      // After a move the actor's own aim point is the destination, not the tile
+      // it is standing on now — otherwise it can never buff itself and then walk.
+      const epicentres =
+        !isOrigin && isBeneficialFormula(ability) ? [destination.pos, ...base] : base;
       let used = 0;
       for (const epicentre of epicentres) {
         if (used >= ctx.budget.maxEpicentres) break;
@@ -1253,7 +1257,7 @@ export function enumerateCandidates(ctx: AiContext): Candidate[] {
 
         const covered = tilesInAoe(field, ability, destination.pos, epicentre);
         if (covered.length === 0) continue;
-        const affected = unitsOnTiles(ctx, covered);
+        const affected = unitsOnTiles(ctx, covered, destination.pos);
         if (affected.length === 0 && ability.targetsTiles !== true) continue;
 
         const primary = pickPrimaryTarget(ctx, ability, epicentre, affected);
@@ -1349,10 +1353,32 @@ function filterAbilities(ctx: AiContext, abilities: readonly Ability[]): Ability
   return out;
 }
 
-function unitsOnTiles(ctx: AiContext, tiles: readonly Vec3[]): Unit[] {
+/**
+ * Units standing on `tiles`.
+ *
+ * `actorPos` is where the actor will be standing when the ability lands, which is
+ * not where it is standing now whenever the plan moves first. Without this the
+ * evaluator will happily aim a self-buff at the tile the actor is about to
+ * vacate: the occupancy snapshot still shows it there, the candidate scores as a
+ * valid self-target, and the reducer then rejects the command because nothing is
+ * on the aim tile by the time it arrives.
+ */
+function unitsOnTiles(ctx: AiContext, tiles: readonly Vec3[], actorPos?: Vec3): Unit[] {
   const out: Unit[] = [];
+  const fromKey = tileKey(ctx.actor.pos.x, ctx.actor.pos.y);
+  const toKey = actorPos === undefined ? fromKey : tileKey(actorPos.x, actorPos.y);
+  const moving = toKey !== fromKey;
+
   for (const tile of tiles) {
-    const unit = ctx.occupied.get(tileKey(tile.x, tile.y));
+    const key = tileKey(tile.x, tile.y);
+    if (moving) {
+      if (key === fromKey) continue; // the actor will have left this tile
+      if (key === toKey) {
+        out.push(ctx.actor);
+        continue;
+      }
+    }
+    const unit = ctx.occupied.get(key);
     if (unit === undefined || unit.removed) continue;
     out.push(unit);
   }

@@ -18,8 +18,8 @@
  *   7. FXAA with the sprite mask excluded, straight to the canvas
  *
  * Restraint is enforced by the defaults, not by hope: bloom threshold sits above diffuse
- * white, AO radius is just over half a tile, chromatic aberration is zero for the middle
- * 70% of the frame, and grain is a fraction of a code value.
+ * white, AO falls off inside one tile, chromatic aberration is zero for the middle 70%
+ * of the frame, and grain is a fraction of a code value.
  *
  * Usage from stage.ts:
  *
@@ -62,7 +62,7 @@ import {
   type WebGLRenderer,
 } from 'three';
 
-import { AA_FRAG, BLIT_FRAG } from './materials/post/aa';
+import { AA_FRAG } from './materials/post/aa';
 import { AO_APPLY_FRAG, AO_BLUR_FRAG, AO_FRAG } from './materials/post/ao';
 import { BLOOM_DOWN_FRAG, BLOOM_PREFILTER_FRAG, BLOOM_UP_FRAG } from './materials/post/bloom';
 import { COMPOSITE_FRAG, MAX_SHOCKWAVES } from './materials/post/composite';
@@ -85,7 +85,7 @@ export interface AoSettings {
   enabled: boolean;
   /** Master dial the A/B harness moves. Scales `strength`. */
   intensity: number;
-  /** World-space radius. Tiles are 1 unit by default, so 0.55 stays inside crevices. */
+  /** World-space radius. Sized so occlusion dies out within about one tile. */
   radius: number;
   /** Tangent-plane bias, in sine units. Removes self-occlusion banding on flat ground. */
   bias: number;
@@ -402,7 +402,6 @@ export class PostStack implements PostEffectsHost {
   private readonly fillPass: FullScreenPass;
   private readonly compositePass: FullScreenPass;
   private readonly aaPass: FullScreenPass;
-  private readonly blitPass: FullScreenPass;
 
   // Grade
   private readonly lutCache = new Map<string, Data3DTexture>();
@@ -606,8 +605,6 @@ export class PostStack implements PostEffectsHost {
       },
       { AA_SEARCH_STEPS: profile.aaSearchSteps },
     );
-
-    this.blitPass = new FullScreenPass(BLIT_FRAG, { uColor: { value: null } });
 
     const size = new Vector2();
     renderer.getSize(size);
@@ -867,6 +864,12 @@ export class PostStack implements PostEffectsHost {
     renderer.render(scene, camera);
 
     // 2 ── sprite mask ------------------------------------------------------
+    // Half-res, sprite layer only, into its own depth buffer. It therefore does NOT depth
+    // test against terrain: a sprite fully hidden behind a wall still marks those pixels,
+    // which over-excludes them from AA. Sharing the scene's depth texture would let the
+    // test work but is a read/write feedback loop on the attachment three just wrote, and
+    // depth-writing sprites would fail an equal-depth test anyway. The cost of the
+    // approximation is a few terrain pixels behind an occluded unit keeping their jaggies.
     const wantMask =
       this.spriteLayer !== undefined &&
       ((this.settings.aa.enabled && this.settings.aa.spritePolicy !== 'none') || this.settings.ao.enabled);
@@ -1139,7 +1142,7 @@ export class PostStack implements PostEffectsHost {
       this.aoPass, this.aoBlurPass, this.aoApplyPass,
       this.bloomPrefilterPass, this.bloomDownPass, this.bloomUpPass,
       this.cocPass, this.gatherPass, this.fillPass,
-      this.compositePass, this.aaPass, this.blitPass,
+      this.compositePass, this.aaPass,
     ]) p.dispose();
     for (const lut of this.lutCache.values()) lut.dispose();
     this.lutCache.clear();

@@ -183,11 +183,3 @@ void main() {
   gl_FragColor = vec4(mix(centre.rgb, aa, allow), centre.a);
 }
 `;
-
-/** Trivial blit — used when AA is disabled so the pipeline shape never changes. */
-export const BLIT_FRAG = /* glsl */ `
-precision highp float;
-varying vec2 vUv;
-uniform sampler2D uColor;
-void main() { gl_FragColor = texture2D(uColor, vUv); }
-`;

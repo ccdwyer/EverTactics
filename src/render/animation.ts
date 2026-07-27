@@ -580,7 +580,6 @@ export class SpriteAnimator {
 
   /** Set while a distance-driven clip is being pushed by a path walk. */
   private cyclePhase: number | null = null;
-  private lastCyclePhase = 0;
 
   private readonly poseOut: ProceduralPose = identityPose();
 
@@ -635,7 +634,6 @@ export class SpriteAnimator {
     this.frameIndex = 0;
     this.finished = false;
     this.impactFired = false;
-    this.lastCyclePhase = 0;
     this.onComplete = options.onComplete ?? null;
     this.onImpact = options.onImpact ?? null;
     this.onFootfall = options.onFootfall ?? null;
@@ -671,7 +669,6 @@ export class SpriteAnimator {
         }
       }
     }
-    this.lastCyclePhase = wrapped;
   }
 
   update(deltaSeconds: number): void {
@@ -797,6 +794,11 @@ export interface PathWalkSample {
   cycle: number;
   /** True while the unit is off the ground in a hop. */
   airborne: boolean;
+  /**
+   * Height of the tile the unit's *shadow* belongs on, in half-tile units. During
+   * a hop `z` arcs above this; the contact shadow stays down here.
+   */
+  groundZ: number;
   /** Progress along the whole path, 0..1. */
   progress: number;
 }
@@ -852,6 +854,7 @@ export class PathWalker {
       facing: (next && facingFromDelta(next.x - start.x, next.y - start.y)) ?? 'S',
       cycle: 0,
       airborne: false,
+      groundZ: start.z,
       progress: 0,
     };
   }
@@ -901,6 +904,7 @@ export class PathWalker {
           this.sample.x = end.x;
           this.sample.y = end.y;
           this.sample.z = end.z;
+          this.sample.groundZ = end.z;
           this.sample.airborne = false;
           this.sample.progress = 1;
           return false;
@@ -924,15 +928,19 @@ export class PathWalker {
     const magnitude = Math.abs(drop);
     if (magnitude >= this.hopThreshold) {
       // Real hop: clear the taller tile, land flat on the far side.
+      // Parabola through (0, a.z) and (1, b.z) whose apex at t = 0.5 clears the
+      // taller of the two tiles by `hopHeight`.
       const apex = Math.max(a.z, b.z) + this.hopHeight;
       const rise = 4 * apex - 2 * (a.z + b.z);
-      this.sample.z = a.z + drop * t + rise * t * (1 - t) * 0.5;
+      this.sample.z = a.z + drop * t + rise * t * (1 - t);
       this.sample.airborne = t > 0.08 && t < 0.94;
+      this.sample.groundZ = t < 0.5 ? a.z : b.z;
     } else {
       // Step up / down: ease the height so the feet meet the new surface.
       const eased = t * t * (3 - 2 * t);
       this.sample.z = a.z + drop * eased + magnitude * hump(t) * 0.12;
       this.sample.airborne = false;
+      this.sample.groundZ = t < 0.5 ? a.z : b.z;
     }
 
     const facing = facingFromDelta(b.x - a.x, b.y - a.y);

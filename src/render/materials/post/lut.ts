@@ -97,7 +97,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     midTint: [1.02, 1.0, 0.98],
     highlightTint: [1.04, 1.01, 0.95],
     crosstalk: 0.05,
-    toe: 0.008,
+    toe: 0.005,
     shoulder: 0.12,
   }),
 
@@ -115,7 +115,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     midTint: [1.04, 1.0, 0.95],
     highlightTint: [1.09, 1.02, 0.9],
     crosstalk: 0.08,
-    toe: 0.012,
+    toe: 0.007,
     shoulder: 0.18,
   }),
 
@@ -127,12 +127,12 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     pivot: 0.36,
     saturation: 0.95,
     vibrance: 0.16,
-    lift: [0.008, 0.01, 0.018],
+    lift: [0.004, 0.005, 0.010],
     shadowTint: [0.86, 0.92, 1.16],
     midTint: [0.98, 0.99, 1.04],
     highlightTint: [1.08, 1.03, 0.94],
     crosstalk: 0.1,
-    toe: 0.016,
+    toe: 0.008,
     shoulder: 0.16,
   }),
 
@@ -149,7 +149,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     midTint: [0.95, 0.98, 1.08],
     highlightTint: [1.0, 1.01, 1.04],
     crosstalk: 0.12,
-    toe: 0.02,
+    toe: 0.009,
     shoulder: 0.26,
   }),
 
@@ -166,7 +166,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     midTint: [1.06, 0.98, 0.92],
     highlightTint: [1.12, 1.0, 0.86],
     crosstalk: 0.09,
-    toe: 0.01,
+    toe: 0.006,
     shoulder: 0.3,
   }),
 
@@ -178,12 +178,12 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     contrast: 0.12,
     pivot: 0.42,
     saturation: 0.88,
-    lift: [0.012, 0.018, 0.012],
+    lift: [0.006, 0.010, 0.006],
     shadowTint: [0.9, 1.02, 0.94],
     midTint: [0.96, 1.04, 0.94],
     highlightTint: [1.0, 1.02, 0.97],
     crosstalk: 0.14,
-    toe: 0.024,
+    toe: 0.010,
     shoulder: 0.2,
   }),
 
@@ -200,7 +200,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     midTint: [0.94, 0.97, 1.1],
     highlightTint: [1.06, 1.0, 0.95],
     crosstalk: 0.12,
-    toe: 0.014,
+    toe: 0.007,
     shoulder: 0.14,
   }),
 
@@ -217,7 +217,7 @@ export const GRADE_PRESETS: Record<string, GradeParams> = {
     midTint: [1.03, 0.99, 0.93],
     highlightTint: [1.1, 1.0, 0.85],
     crosstalk: 0.16,
-    toe: 0.018,
+    toe: 0.008,
     shoulder: 0.1,
   }),
 };
