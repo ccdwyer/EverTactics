@@ -1731,12 +1731,27 @@ function easeInOutSine(t: number): number {
  * this scene actually casting" — a claim six critics have now made about this
  * project in both directions — from pixels rather than from source reading.
  *
+ * It is a BITMASK, not a boolean, and that matters: the first version was a
+ * boolean and the all-on/all-off delta it produced was read as "the key casts",
+ * when in fact almost all of that delta was the three steep cavity lobes acting
+ * as an occlusion term. Isolating one light is the only way to attribute a
+ * shadow to it.
+ *
+ *   1  key    2  rim    4  cavity        0 = none, 7 (the default) = all
+ *
+ * So '?lightdebug=shadows:6' renders the frame with everything except the key's
+ * shadow, and differencing it against the default frame is the key's cast
+ * shadow and nothing else.
+ *
  * Declared before 'LIGHT_DEBUG' because 'readLightDebug()' writes it, and a
  * 'let' read from a function that runs above its own declaration is a
  * temporal-dead-zone throw, not a hoist. That mistake cost one render: the
  * module failed to initialise and the harness reported a mean luma of 6.
  */
-let LIGHT_DEBUG_SHADOWS = true;
+const SHADOW_BIT_KEY = 1;
+const SHADOW_BIT_RIM = 2;
+const SHADOW_BIT_CAVITY = 4;
+let LIGHT_DEBUG_SHADOWS = SHADOW_BIT_KEY | SHADOW_BIT_RIM | SHADOW_BIT_CAVITY;
 
 /**
  * Reserved 'lightdebug' key: '?lightdebug=report:1' makes the rig print the
@@ -1765,7 +1780,7 @@ function readLightDebug(): Partial<Record<keyof LightingPreset, number>> | null 
     if (!Number.isFinite(n)) continue;
     const key = name.trim();
     if (key === 'shadows') {
-      LIGHT_DEBUG_SHADOWS = n !== 0;
+      LIGHT_DEBUG_SHADOWS = n & (SHADOW_BIT_KEY | SHADOW_BIT_RIM | SHADOW_BIT_CAVITY);
       continue;
     }
     if (key === 'report') {
@@ -1775,10 +1790,10 @@ function readLightDebug(): Partial<Record<keyof LightingPreset, number>> | null 
     out[key] = n;
   }
   const keys = Object.keys(out);
-  if (keys.length === 0 && LIGHT_DEBUG_SHADOWS && !LIGHT_DEBUG_REPORT) return null;
+  if (keys.length === 0 && LIGHT_DEBUG_SHADOWS === 7 && !LIGHT_DEBUG_REPORT) return null;
   console.warn(
     `[lighting] debug override active: ${keys.map((k) => `${k}=${out[k]}`).join(' ')}` +
-      (LIGHT_DEBUG_SHADOWS ? '' : ' shadows=off'),
+      (LIGHT_DEBUG_SHADOWS === 7 ? '' : ` shadows=${LIGHT_DEBUG_SHADOWS}`),
   );
   return keys.length > 0 ? (out as Partial<Record<keyof LightingPreset, number>>) : null;
 }
@@ -2254,11 +2269,29 @@ export class LightingRig {
    * Fit the key light's shadow frustum to the diorama. Call after terrain is
    * built; re-call if the map bounds change.
    */
+  /**
+   * The shadow frustum is fitted here and NOTHING downstream re-reads the number
+   * it produces, which is how a 'shadowRadius' authored in texels can silently
+   * mean a metre of blur: the penumbra a preset asks for is texels, and what a
+   * texel is worth in world units is decided entirely by this radius. Report it.
+   */
+  private reportFit(): void {
+    if (!LIGHT_DEBUG_REPORT) return;
+    const r = this.boundsSphere.radius;
+    console.error(
+      `[lighting] fit radius=${r.toFixed(2)} centre=${this.boundsSphere.center
+        .toArray()
+        .map((v) => v.toFixed(1))
+        .join(',')} mapSize=${this.shadowMapSize} texelWorld=${((r * 2) / this.shadowMapSize).toFixed(4)}`,
+    );
+  }
+
   fitTo(bounds: Box3): void {
     this.bounds.copy(bounds);
     this.bounds.getBoundingSphere(this.boundsSphere);
     // A little slack so units standing on the outermost tiles still cast.
     this.boundsSphere.radius = Math.max(1, this.boundsSphere.radius * 1.08 + 1);
+    this.reportFit();
     this.commit();
   }
 
@@ -2291,11 +2324,10 @@ export class LightingRig {
   private commit(): void {
     // See 'LIGHT_DEBUG'. Last writer, deliberately.
     if (LIGHT_DEBUG) Object.assign(this.live, LIGHT_DEBUG);
-    if (!LIGHT_DEBUG_SHADOWS) {
-      this.key.castShadow = false;
-      this.rim.castShadow = false;
+    if (!(LIGHT_DEBUG_SHADOWS & SHADOW_BIT_KEY)) this.key.castShadow = false;
+    if (!(LIGHT_DEBUG_SHADOWS & SHADOW_BIT_RIM)) this.rim.castShadow = false;
+    if (!(LIGHT_DEBUG_SHADOWS & SHADOW_BIT_CAVITY))
       for (const c of this.cavityLights) c.castShadow = false;
-    }
     const s = this.live;
     const centre = this.boundsSphere.center;
     const radius = this.boundsSphere.radius;

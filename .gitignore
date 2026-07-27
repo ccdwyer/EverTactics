@@ -12,3 +12,4 @@ refs/
 # Agent scratch output — diagnostic renders, probe scripts. Not part of the project.
 tools/_scratch/
 tools/out/
+tools/_delegate/

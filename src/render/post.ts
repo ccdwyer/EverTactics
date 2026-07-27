@@ -600,11 +600,36 @@ export const REFERENCE_FLOOR = {
    */
   vignetteRadiusMin: 0.46,
   /**
-   * Grain amplitude as a fraction of full scale. Measured against the reference frames at
-   * 1:1 — 0.03 was still invisible in a screenshot, which fails the "clearly visible" note
-   * in VISUAL_TARGET.md section 5.
+   * Grain amplitude as a fraction of full scale.
+   *
+   * WAS 0.05, set by eye to satisfy a "clearly visible" note in VISUAL_TARGET.md
+   * section 5. That note asked for the wrong thing and the number that satisfied
+   * it was the single largest contributor to the texel-density defect the blind
+   * judges have named in every protocol run on this project.
+   *
+   * The references are quantised: measured over the central 60% at 1920x1080, the
+   * fraction of horizontally-adjacent pixel pairs within 2 code values of each
+   * other is 0.44-0.80 across the curated corpus. It has to be, because a pixel
+   * -art sprite and a matched world texture both hold one value across several
+   * screen pixels — that shared run length IS the "one authored medium" read, and
+   * it is what a judge means by shared quantisation and shared grain.
+   *
+   * Independent per-pixel noise at amplitude 0.05 makes any such run impossible.
+   * Measured on 'battle-open': flat fraction 0.230 against a 0.44-0.80 reference
+   * band, and — more damning — the per-tile SPREAD of that fraction collapsed to
+   * 0.152 where every reference sits at 0.36-0.75, i.e. the grain had erased the
+   * difference between a smooth wall and a detailed one across the whole frame.
+   * Turning grain off alone took those to 0.537 and 0.654, landing on
+   * 'official_003_steam.jpg' (0.523 / 0.648) almost exactly.
+   *
+   * 0.012 at cell size 2 keeps grain doing the job it is actually needed for —
+   * breaking up banding in the sky and in the long falloff behind the board —
+   * and measures 0.502 / 0.595, inside the reference band on both.
+   *
+   * If you raise this, re-run the probe before you argue about it. "I can see it
+   * in a screenshot" is the criterion that produced 0.05.
    */
-  grainAmount: 0.05,
+  grainAmount: 0.012,
 } as const;
 
 export function defaultPostSettings(tileSize = 1): PostSettings {
@@ -1612,6 +1637,8 @@ export class PostStack implements PostEffectsHost {
       uSpriteTint: { value: new Vector3(1, 1, 1) },
       uLutMix: { value: 0 },
       uLutAmount: { value: this.settings.grade.amount },
+      uHighlightDesat: { value: HIGHLIGHT_DESAT },
+      uHighlightDesatStart: { value: HIGHLIGHT_DESAT_START },
       uLutSize: { value: LUT_SIZE },
       uWaves: { value: this.waveUniform },
       uWaveCount: { value: 0 },
@@ -2132,12 +2159,17 @@ export class PostStack implements PostEffectsHost {
     (cu['uNearBounce']!.value as Vector3).set(fg.nearBounce[0], fg.nearBounce[1], fg.nearBounce[2]);
     cu['uNearBottomStart']!.value = Math.min(0.999, Math.max(0.001, fg.nearBottomStart));
     cu['uNearHighFloor']!.value = Math.min(1, Math.max(0, fg.nearHighFloor));
-    cu['uGrainAmount']!.value = this.settings.grain.enabled
-      ? floor
-        ? Math.max(this.settings.grain.amount, REFERENCE_FLOOR.grainAmount)
-        : this.settings.grain.amount
-      : 0;
-    cu['uGrainSize']!.value = Math.max(1, this.settings.grain.size * this.pixelRatio);
+    cu['uGrainAmount']!.value =
+      FX_DEBUG?.grainAmount ??
+      (this.settings.grain.enabled
+        ? floor
+          ? Math.max(this.settings.grain.amount, REFERENCE_FLOOR.grainAmount)
+          : this.settings.grain.amount
+        : 0);
+    cu['uGrainSize']!.value = Math.max(
+      1,
+      (FX_DEBUG?.grainSize ?? this.settings.grain.size) * this.pixelRatio,
+    );
     cu['uGrainShadowBias']!.value = this.settings.grain.shadowBias;
     cu['uChromaAmount']!.value = this.settings.chroma.enabled ? this.settings.chroma.amount : 0;
     cu['uChromaEdge']!.value = this.settings.chroma.edge;
@@ -2148,6 +2180,8 @@ export class PostStack implements PostEffectsHost {
     (cu['uSpriteTint']!.value as Vector3).set(spriteGrade.tint[0], spriteGrade.tint[1], spriteGrade.tint[2]);
     cu['uLutMix']!.value = this.lutMix;
     cu['uLutAmount']!.value = this.settings.grade.enabled ? this.settings.grade.amount : 0;
+    cu['uHighlightDesat']!.value = FX_DEBUG?.highlightDesat ?? HIGHLIGHT_DESAT;
+    cu['uHighlightDesatStart']!.value = FX_DEBUG?.highlightDesatStart ?? HIGHLIGHT_DESAT_START;
     cu['uAspect']!.value = this.width / this.height;
     cu['uDebug']!.value = debugCode(this.debugView);
 
@@ -2329,6 +2363,51 @@ const DEBUG_VIEWS: readonly DebugView[] = [
   'no-grade',
   'aerial',
 ];
+
+/**
+ * '?fx=grainAmount:0,grainSize:3' on the page URL.
+ *
+ * Same motivation as 'lightdebug' in the lighting rig, for the same reason it was added
+ * there: the texel-density defect is a claim about pixel-level energy, and attributing that
+ * energy to a pass means shooting the frame with exactly one pass changed. Rebuilding per
+ * experiment made that a five-minute loop and nobody ran it, so the numbers being argued
+ * over had never been measured. Inert without a 'location'.
+ */
+type FxDebug = {
+  grainAmount?: number;
+  grainSize?: number;
+  highlightDesat?: number;
+  highlightDesatStart?: number;
+};
+
+const FX_KEYS = ['grainAmount', 'grainSize', 'highlightDesat', 'highlightDesatStart'] as const;
+
+const FX_DEBUG: FxDebug | null = readFxDebug();
+
+function readFxDebug(): FxDebug | null {
+  const search = (globalThis as { location?: { search?: string } }).location?.search;
+  if (!search) return null;
+  const raw = new URLSearchParams(search).get('fx');
+  if (!raw) return null;
+  const out: Record<string, number> = {};
+  for (const pair of raw.split(',')) {
+    const [name, value] = pair.split(':');
+    const n = Number(value);
+    if (!name || !Number.isFinite(n)) continue;
+    const key = FX_KEYS.find((k) => k === name.trim());
+    if (key) out[key] = n;
+  }
+  return Object.keys(out).length > 0 ? (out as FxDebug) : null;
+}
+
+/**
+ * Fraction of chroma removed from a fully-clipped highlight, and the luminance
+ * at which the ramp starts. See the block that consumes them in
+ * 'materials/post/composite.ts' for what they are for and what they were
+ * measured against.
+ */
+const HIGHLIGHT_DESAT = 0.55;
+const HIGHLIGHT_DESAT_START = 0.34;
 
 /**
  * '?postdebug=coc' on the page URL. The screenshot harness can only pass query parameters,

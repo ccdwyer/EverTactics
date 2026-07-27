@@ -104,6 +104,8 @@ uniform vec3  uSpriteTint;
 
 uniform float uLutMix;
 uniform float uLutAmount;
+uniform float uHighlightDesat;
+uniform float uHighlightDesatStart;
 uniform float uLutSize;
 
 uniform vec4  uWaves[${MAX_SHOCKWAVES}];   // xy = centre in uv, z = radius, w = amplitude
@@ -527,6 +529,36 @@ void main() {
 
   if (uDebug != 6) {
     color = mix(color, applyLUT(color), uLutAmount);
+  }
+
+  // Highlight desaturation — the two-source read.
+  //
+  // Measured across 22 curated reference frames, the LIT third of a shipped
+  // frame carries chroma 0.03-0.42 (median 0.22) while its SHADOW third carries
+  // 0.24-0.99 (median 0.55). Chroma lives in the fill, not in the key. That is
+  // what makes two sources legible: a near-neutral key reads as the sun, and the
+  // tinted shadow reads as a separate sky or bounce filling it.
+  //
+  // Ours measured 0.56 lit against 0.49 shadow — MORE colour in the light than
+  // in the shadow, which is the signature of one coloured source washing the
+  // whole picture, and is why judges read the frame as ambient plus decoration.
+  // The rig was not the cause: dropping 'chroma' and 'colorSplit' to near
+  // nothing moved the lit third only 0.56 -> 0.53. The LUT was, and it is doing
+  // the right thing to the shadows (0.12 -> 0.49) while overdoing the lights
+  // (0.38 -> 0.56), so this corrects only the half that is wrong.
+  //
+  // It mixes toward 'vec3(l)' at the fragment's OWN luminance, so it is chroma
+  // only: the histogram, the mean and the spread are untouched, which matters
+  // because the fast way to lose this frame is an operation that dims and
+  // flattens at the same time.
+  if (uHighlightDesat > 0.0) {
+    float hl = luma(color);
+    // Ramp over a fixed 0.30 of display range rather than up to 1.0. This frame's
+    // LIT third sits at display luma 0.44, not near white — a ramp anchored at 1.0
+    // has barely started by the time it reaches the pixels it is meant to correct,
+    // which is why the first version measured a 0.07 move at desat 0.7.
+    float w = smoothstep(uHighlightDesatStart, uHighlightDesatStart + 0.30, hl);
+    color = mix(color, vec3(hl), w * uHighlightDesat);
   }
 
   if (uGrainAmount > 0.0) {
