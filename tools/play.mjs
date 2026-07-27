@@ -127,13 +127,58 @@ const probe = () =>
     };
   }).catch(() => ({}));
 
-for (let i = 0; i < keys.length; i++) {
-  const key = keys[i];
-  await page.keyboard.press(key);
-  await page.waitForTimeout(stepDelay);
-  const name = `${String(i + 1).padStart(2, '0')}-${key}.png`;
+/**
+ * A step is either a key press or a click. Movement cannot be driven by keys
+ * alone — picking a destination tile is a click on the board — so a keys-only
+ * harness can open the Move menu and never actually move, which produces a
+ * filmstrip of identical poses that looks like "animation is broken" when
+ * nothing was ever asked to walk.
+ *
+ *   --steps "key:Enter,click:0.42x0.55,burst:12x120"
+ *
+ * `burst:NxM` captures N frames M ms apart without further input. That is the
+ * only way to see a walk cycle: the traversal is over in well under a second,
+ * so one screenshot per input lands after the motion has finished.
+ */
+const stepSpec = arg('steps', '');
+const parsed = stepSpec
+  ? stepSpec.split(',').map((s) => s.trim()).filter(Boolean)
+  : keys.map((k) => `key:${k}`);
+
+let shotIndex = 0;
+const capture = async (label) => {
+  shotIndex += 1;
+  const name = `${String(shotIndex).padStart(2, '0')}-${label}.png`;
   await page.screenshot({ path: `${outDir}/${name}` });
-  steps.push({ step: i + 1, action: key, shot: name, state: await probe() });
+  return name;
+};
+
+for (const spec of parsed) {
+  const [kind, valueRaw] = spec.includes(':') ? spec.split(':') : ['key', spec];
+  const value = valueRaw ?? '';
+
+  if (kind === 'click') {
+    const [fx, fy] = value.split('x').map(Number);
+    await page.mouse.move(fx * width, fy * height);
+    await page.waitForTimeout(120);
+    await page.mouse.click(fx * width, fy * height);
+    await page.waitForTimeout(stepDelay);
+    steps.push({ action: spec, shot: await capture(`click-${fx}-${fy}`), state: await probe() });
+    continue;
+  }
+
+  if (kind === 'burst') {
+    const [n, gap] = value.split('x').map(Number);
+    for (let j = 0; j < (n || 8); j++) {
+      await page.waitForTimeout(gap || 100);
+      steps.push({ action: `burst${j}`, shot: await capture(`burst${String(j).padStart(2, '0')}`) });
+    }
+    continue;
+  }
+
+  await page.keyboard.press(value);
+  await page.waitForTimeout(stepDelay);
+  steps.push({ action: spec, shot: await capture(value), state: await probe() });
 }
 
 await browser.close();
