@@ -52,12 +52,18 @@ const CHAMFER_DROP = 0.052;
  * a grass bank ends in a rolled-over shoulder of turf about three times as wide and
  * as deep, because the soil under it slumps and the grass grows down the face. Using
  * the masonry chamfer on both is what made the embankments read as stepped boxes with
- * a bevel filed on, so natural ground gets its own, much fatter shoulder.
+ * a bevel filed on, so natural ground gets its own, much fatter shoulder. It is not
+ * fatter still because a 20%+ inset eats so much of the top face that every turf tile
+ * turns into a truncated pyramid and the field reads as faceted, not as soft.
  */
-const TURF_CHAMFER = 0.19;
-const TURF_CHAMFER_DROP = 0.135;
-/** Subdivisions per tile edge on top faces (also used for ramps and AO resolution). */
-const TOP_SUBDIV = 4;
+const TURF_CHAMFER = 0.16;
+const TURF_CHAMFER_DROP = 0.11;
+/**
+ * Subdivisions per tile edge on top faces (also used for ramps and AO resolution).
+ * Six rather than four so the ground relief and the AO bake resolve as curvature
+ * instead of as four big facets per tile.
+ */
+const TOP_SUBDIV = 6;
 /**
  * Drop, in world units, at which a side face becomes a sculpted cliff rather than a
  * flat extruded quad. One tile of elevation (two half-tiles) is already enough to
@@ -122,46 +128,70 @@ const RELIEF_SURFACES: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
 /**
  * Round 3: 0.13 was too polite to survive the grade — at a half-tile of 0.5 world
  * units it moved the turf by a quarter of a course, which reads as noise on the
- * texture rather than as ground that has shape. 0.22 is a visible swell.
+ * texture rather than as ground that has shape.
+ *
+ * Round 4 walked 0.32 back to 0.18 after looking at the frame. Past roughly a third of
+ * a half-tile the swell stops reading as ground and starts reading as crumpled foil,
+ * because the slope it implies over one tile is steeper than soil ever sits at; the
+ * weighting in `groundRelief` matters more than the amplitude does.
  */
-const RELIEF_AMPLITUDE = 0.22;
+const RELIEF_AMPLITUDE = 0.18;
 /**
  * Per-surface multiplier on that swell. A ploughed dirt bank is lumpier than a
  * mown cloister lawn, and packed snow is smoother than either; giving each its own
  * amplitude is what stops every natural surface sharing one silhouette.
  */
 const RELIEF_SCALE: Readonly<Partial<Record<SurfaceKind, number>>> = {
-  grass: 0.85,
-  dirt: 1.35,
+  grass: 0.9,
+  dirt: 1.2,
   sand: 1.05,
   snow: 0.7,
-  swamp: 0.75,
+  swamp: 0.8,
 };
 
 /**
- * World-Y offset applied to natural ground tops at world (wx, wz).
+ * World-Y offset applied to natural ground tops at world (wx, wz), on a terrace whose
+ * nominal elevation is `level` half-tiles.
  *
  * Deliberately **never positive**: sprites anchor at `tile.height * HEIGHT_UNIT`, so
  * soil that rose above that would leave feet hanging in the air. Turf that dips below
  * it just buries the feet a little, which is what grounded looks like. As a bonus it
  * leaves paving standing a few centimetres proud of the grass it abuts, so the
  * material boundary is a real lip instead of a texture change.
+ *
+ * **Why `level` is an input** (round 4). With relief a pure function of XZ, every tile
+ * in an embankment sampled almost the same swell, so a three-terrace bank came out as
+ * three parallel lids — the offset moved the whole run together instead of breaking it
+ * up, and the bank still read as stacked boxes. Feeding the terrace elevation into the
+ * noise decorrelates terraces from each other while keeping the guarantee that matters:
+ * two tiles that must be watertight along a shared edge are, by definition, at the same
+ * elevation and the same surface, so they still sample identical noise and still agree
+ * exactly. Tiles at *different* elevations already have a side face between them, and
+ * that face is built from each side's own relief, so a disagreement there is hidden
+ * inside real geometry rather than opening a crack.
  */
-function groundRelief(surface: SurfaceKind, wx: number, wz: number): number {
+function groundRelief(surface: SurfaceKind, wx: number, wz: number, level = 0): number {
   if (!RELIEF_SURFACES.has(surface)) return 0;
+  // The terrace offset is deliberately irrational-ish so two nearby terraces never land
+  // on the same slice of the noise field.
+  const ly = level * 3.37;
   // Three octaves: a slow swell across the whole lawn, a hummock roughly one tile
   // across, and a grain just coarse enough that TOP_SUBDIV still resolves it (any
   // finer and the top face aliases into a shimmer under the pixel snap).
-  const broad = fbm3(wx * 0.27, 0, wz * 0.27, 913, 2);
-  const fine = fbm3(wx * 1.05, 0, wz * 1.05, 2287, 2);
-  const grain = fbm3(wx * 1.32, 0, wz * 1.32, 5171, 2);
-  const n = Math.min(1, Math.max(0, broad * 0.56 + fine * 0.32 + grain * 0.12));
-  return -RELIEF_AMPLITUDE * (RELIEF_SCALE[surface] ?? 1) * (0.12 + 0.88 * n);
+  const broad = fbm3(wx * 0.23, ly, wz * 0.23, 913, 2);
+  const fine = fbm3(wx * 0.61, ly, wz * 0.61, 2287, 2);
+  const grain = fbm3(wx * 1.35, ly, wz * 1.35, 5171, 2);
+  // Weighted hard toward the broad swell. The high octaves used to carry a third of
+  // the amplitude at roughly half a tile of wavelength, which is a 30-degree slope on
+  // every square metre of lawn — soil does not do that, and the result read as crumpled
+  // foil rather than as ground. They now only break the swell's own contour lines.
+  const n = Math.min(1, Math.max(0, broad * 0.68 + fine * 0.23 + grain * 0.09));
+  return -RELIEF_AMPLITUDE * (RELIEF_SCALE[surface] ?? 1) * (0.1 + 0.9 * n);
 }
 
 /** Height of the walkable surface of a tile, in world units. */
 export function tileSurfaceY(tile: Tile): number {
-  return tile.height * HEIGHT_UNIT + groundRelief(tile.surface, tile.x, tile.y);
+  return tile.height * HEIGHT_UNIT + groundRelief(tile.surface, tile.x, tile.y, tile.height);
 }
 
 /**
@@ -171,7 +201,7 @@ export function tileSurfaceY(tile: Tile): number {
 export function tileWorldPosition(field: Battlefield, x: number, y: number): THREE.Vector3 {
   const tile = field.tileAt(x, y);
   const h = tile ? tile.height + slopeOffsetHalf(tile.slope, 0.5, 0.5) : 0;
-  const relief = tile ? groundRelief(tile.surface, x * TILE_SIZE, y * TILE_SIZE) : 0;
+  const relief = tile ? groundRelief(tile.surface, x * TILE_SIZE, y * TILE_SIZE, tile.height) : 0;
   return new THREE.Vector3(x * TILE_SIZE, h * HEIGHT_UNIT + relief, y * TILE_SIZE);
 }
 
@@ -2051,7 +2081,7 @@ const ORTHO: ReadonlyArray<readonly [number, number]> = [
 function centreY(t: Tile): number {
   return (
     (t.height + slopeOffsetHalf(t.slope, 0.5, 0.5)) * HEIGHT_UNIT +
-    groundRelief(t.surface, t.x * TILE_SIZE, t.y * TILE_SIZE)
+    groundRelief(t.surface, t.x * TILE_SIZE, t.y * TILE_SIZE, t.height)
   );
 }
 
@@ -2475,7 +2505,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
       solidTopHalf(t) + slopeOffsetHalf(isWaterSurface(t.surface) ? 'flat' : t.slope, u, vv);
     const relief = isWaterSurface(t.surface)
       ? 0
-      : groundRelief(t.surface, (tx + u - 0.5) * TILE_SIZE, (ty + vv - 0.5) * TILE_SIZE);
+      : groundRelief(t.surface, (tx + u - 0.5) * TILE_SIZE, (ty + vv - 0.5) * TILE_SIZE, t.height);
     return half * HEIGHT_UNIT + relief;
   };
 

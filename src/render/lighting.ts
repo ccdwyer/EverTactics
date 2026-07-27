@@ -422,7 +422,7 @@ export const LIGHTING_PRESETS: Readonly<Record<LightingPresetName, LightingPrese
     // Softening the falloff to 1.5 buys most of that reach back at a third of
     // the peak — the pool is wider now and the stone inside it still has stones
     // in it.
-    practicalGain: 1.9,
+    practicalGain: 2.15,
     practicalDecay: 1.35,
   },
 

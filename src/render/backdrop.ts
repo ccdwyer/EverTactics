@@ -65,13 +65,19 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  ClampToEdgeWrapping,
   ConeGeometry,
   CylinderGeometry,
+  DataTexture,
   DoubleSide,
   Group,
+  LinearFilter,
   Mesh,
+  NoColorSpace,
+  RedFormat,
   ShaderMaterial,
   SphereGeometry,
+  UnsignedByteType,
   Vector2,
   Vector3,
 } from 'three';
@@ -82,6 +88,34 @@ import { GLSL_NOISE, type EnvironmentPalette } from './sky.js';
 // ─────────────────────────────────────────────────────────────────────────────
 // Layout contract
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Signed distance field of the board's real XZ silhouette. Built by
+ * `buildFootprintField` in `atmosphere.ts`; declared here because
+ * `BackdropLayout` is the contract between the two and the dependency already
+ * runs atmosphere → backdrop.
+ *
+ * Positive outside the board, negative inside, in world units. Sampled from JS
+ * for prop placement and from GLSL (via the R8 `encoded` copy) for the ground
+ * plate's occlusion, contact and bounce terms.
+ */
+export interface BoardFootprint {
+  /** Grid resolution (square). */
+  res: number;
+  /** World units covered by the whole grid, on each axis. */
+  span: number;
+  /** World units per cell. */
+  cell: number;
+  /** World-XZ offset of cell (0,0)'s corner, RELATIVE TO THE BOARD CENTRE. */
+  originX: number;
+  originZ: number;
+  /** Signed distance in world units: positive outside the board, negative in. */
+  distance: Float32Array;
+  /** Distance the encoded byte texture saturates at, world units. */
+  range: number;
+  /** `distance` remapped to 0..255 over [-range, +range], for an R8 texture. */
+  encoded: Uint8Array;
+}
 
 /**
  * Everything the surround needs to know about the shot. Computed by
@@ -131,11 +165,59 @@ export interface BackdropLayout {
   yaw: number;
   /** Deterministic layout seed. Screenshots must be reproducible. */
   seed: number;
+  /**
+   * Signed distance field of the board's REAL silhouette, measured in
+   * `atmosphere.ts`. Everything that needs "how far is this point from the
+   * diorama" prefers this and falls back to the AABB rectangle when it is null
+   * (a scene with no terrain group, or a measure that found no geometry).
+   *
+   * The AABB is a poor answer on any map with corner towers or an irregular
+   * outline: it sits well outside the visible facets, so clutter authored to
+   * hug the wall lands in open ground and shading shaped to it misses the edge.
+   */
+  footprint: BoardFootprint | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Deterministic RNG
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Bilinear sample of the footprint field. `wx`/`wz` are world-axis offsets from
+ * the board centre. Outside the grid this returns the clamped border value,
+ * which is the padding distance — larger than anything that samples it cares
+ * about, so callers never need a range check.
+ */
+export function sampleFootprint(field: BoardFootprint, wx: number, wz: number): number {
+  const { res, cell, originX, originZ, distance } = field;
+  const fx = Math.min(res - 1.001, Math.max(0, (wx - originX) / cell - 0.5));
+  const fz = Math.min(res - 1.001, Math.max(0, (wz - originZ) / cell - 0.5));
+  const x0 = Math.floor(fx);
+  const z0 = Math.floor(fz);
+  const tx = fx - x0;
+  const tz = fz - z0;
+  const i = z0 * res + x0;
+  const a = distance[i]!;
+  const b = distance[i + 1]!;
+  const c = distance[i + res]!;
+  const d = distance[i + res + 1]!;
+  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+}
+
+/**
+ * A 1×1 stand-in so `uFootTex` is always bound. WebGL errors on a sampler with
+ * no texture even when the branch reading it is never taken, and `uFootHas`
+ * gates that branch at runtime, not at compile time.
+ */
+let FALLBACK_FOOT: DataTexture | null = null;
+function fallbackFootTexture(): DataTexture {
+  if (!FALLBACK_FOOT) {
+    FALLBACK_FOOT = new DataTexture(new Uint8Array([255]), 1, 1, RedFormat, UnsignedByteType);
+    FALLBACK_FOOT.colorSpace = NoColorSpace;
+    FALLBACK_FOOT.needsUpdate = true;
+  }
+  return FALLBACK_FOOT;
+}
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -723,13 +805,16 @@ attribute vec3 aCenter;
 attribute float aRadius;
 attribute float aSeed;
 attribute float aWarm;
+attribute float aGain;
 varying vec2  vOffset;
 varying float vSeed;
 varying float vWarm;
+varying float vGain;
 void main() {
   vOffset = position.xy;
   vSeed = aSeed;
   vWarm = aWarm;
+  vGain = aGain;
   vec4 mv = modelViewMatrix * vec4(aCenter, 1.0);
   mv.xy += position.xy * aRadius;
   gl_Position = projectionMatrix * mv;
@@ -745,6 +830,7 @@ uniform float uTime;
 varying vec2  vOffset;
 varying float vSeed;
 varying float vWarm;
+varying float vGain;
 void main() {
   float r = length(vOffset);
   if (r > 1.0) discard;
@@ -759,7 +845,7 @@ void main() {
   float f = 0.82 + 0.18 * sin(uTime * (1.6 + vSeed * 3.1) + vSeed * 31.0)
                  * (0.5 + 0.5 * sin(uTime * (0.7 + vSeed * 1.3)));
   vec3 col = mix(uCoolColor, uWarmColor, vWarm);
-  gl_FragColor = vec4(col * a * f * uGain, 1.0);
+  gl_FragColor = vec4(col * a * f * uGain * vGain, 1.0);
 }
 `;
 
@@ -829,6 +915,16 @@ uniform vec2  uShadowOffset;
  */
 uniform vec2  uFootHalf;
 uniform vec2  uYawCS;
+/**
+ * The measured silhouette. R8, 0.5 = on the edge, decoded to world units by
+ * uFootRange. uFootHas is 0 when no terrain group was found, in which case the
+ * analytic AABB rectangle stands in.
+ */
+uniform sampler2D uFootTex;
+uniform float uFootOrigin;
+uniform float uFootSpan;
+uniform float uFootRange;
+uniform float uFootHas;
 uniform float uBoardRadius;
 uniform float uHazeNear;
 uniform float uHorizonDepth;
@@ -854,8 +950,18 @@ vec2 toWorldXZ(vec2 l) {
  */
 float footprintSdf(vec2 l) {
   vec2 w = toWorldXZ(l);
-  vec2 q = abs(w) - uFootHalf;
-  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+  float d;
+  if (uFootHas > 0.5) {
+    vec2 uv = (w - vec2(uFootOrigin)) / uFootSpan;
+    d = (texture2D(uFootTex, clamp(uv, 0.0, 1.0)).r * 2.0 - 1.0) * uFootRange;
+  } else {
+    vec2 q = abs(w) - uFootHalf;
+    d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+  }
+  // Warped so the darkening this drives never reads as an outline traced round
+  // the board. Amplitude is a third of a board radius, i.e. bigger than the
+  // field's own cell size by an order of magnitude, so it dominates any
+  // stair-stepping the 128-cell grid leaves on a diagonal facet.
   return d + (etFbm(l * 0.09 + 17.0, 3) - 0.5) * uBoardRadius * 0.34;
 }
 
@@ -1026,6 +1132,24 @@ void main() {
   float nearAmt = clamp(depth / (uNearDepth * 0.85), 0.0, 1.0);
   col *= mix(1.0, 0.40, nearAmt * nearAmt);
 
+  // Outer-margin falloff.
+  //
+  // Away from the board none of the terms above apply — no occlusion bowl, no
+  // near-field crush, and distance haze has not started — so the plate renders
+  // at its full lit value out at the frame edges. With the moss tertiary in
+  // uFarColor and the macro multiplier peaking at 1.76 that measured as a
+  // desaturated sage mass at luma 48 hard against the right edge: the brightest
+  // thing in the lower third of the frame, in the one hue that belongs to
+  // neither side of the grade, reading as a pale untextured card because the
+  // defocus at that distance leaves only its value behind.
+  //
+  // Both references keep the outer margin clearly under the play space —
+  // Triangle vignettes into near-black corners, FFT drops to unlit rock. A
+  // lateral ramp is also the second-largest low-frequency gradient available on
+  // this surface, so it pays for itself twice.
+  float lateral = smoothstep(uHalfW * 0.55, uHalfW * 1.75, abs(vLocal.x));
+  col *= mix(1.0, 0.30, lateral * lateral);
+
   gl_FragColor = vec4(max(col, 0.0) * uExposure, alpha);
 }
 `;
@@ -1127,13 +1251,23 @@ export class Backdrop extends Group {
   private readonly yawRig = new Group();
   private readonly bandMeshes: Mesh[] = [];
   private groundMesh: Mesh | null = null;
+  /** R8 copy of the measured footprint field, uploaded once per layout. */
+  private footTexture: DataTexture | null = null;
 
   private readonly structMaterials: ShaderMaterial[] = [];
   private groundMaterial: ShaderMaterial | null = null;
 
   /** Practical positions harvested while building the bands. Yaw-local. */
-  private glowSites: { x: number; y: number; z: number; r: number; seed: number; warm: number }[] =
-    [];
+  private glowSites: {
+    x: number;
+    y: number;
+    z: number;
+    r: number;
+    seed: number;
+    warm: number;
+    /** Per-lamp intensity, already carrying the distance falloff. */
+    gain: number;
+  }[] = [];
   private glowMesh: Mesh | null = null;
   private glowMaterial: ShaderMaterial | null = null;
 
@@ -1216,19 +1350,39 @@ export class Backdrop extends Group {
         depthMin: -R * 1.6,
         depthMax: R * 1.6,
         lateralMax: halfW * 1.6,
-        scale: 0.95,
+        // 0.62, down from 0.95. `rock()` and `bush()` are authored at 0.7-2.2
+        // units *before* the band scale, so at 0.95 a single skirt piece came out
+        // up to two and a half world units — two and a half tiles, taller than the
+        // masonry courses it is supposed to be piled against. This band's whole
+        // job is knee-high debris straddling the base line; anything that reads as
+        // a landform is competing with the board rather than dressing it.
+        scale: 0.62,
         haze: [R * 1.2, R + run * 2.4, 0.30],
-        // Raised from 0.86. Measured on the round-4 frame the skirt props were
-        // present but rendering at luma 8-14 against a plate at 15 — objects
-        // with no contrast against the surface they stand on cannot break a
-        // silhouette, which is the only reason this band exists.
-        tone: 1.06,
+        // Down from 1.06, which was set when this band was still being generated
+        // against the AABB — i.e. metres out in open ground, where it was small on
+        // screen and needed the lift to be seen at all. The footprint SDF now
+        // marches it onto the real facets, and at 1.06 the result was measured on
+        // the round-4 frame as the brightest and least saturated mass in the lower
+        // half of the image: mean RGB 67/68/64 at saturation 0.43, against the
+        // board's own cool masonry at 44/47/54 and 0.68. Neutral grey, brighter
+        // than the subject, in the corner of frame. That is three fail conditions
+        // at once, and it is what a critic sees first.
+        //
+        // 0.84 puts it under the board's lit stone and above the plate it stands
+        // on, which is the whole contrast requirement.
+        tone: 0.84,
         windows: 0,
         ringMax: 5.2,
         clearance: 0.35,
         tilt: 0.16,
         sink: 0.18,
-        kinds: ['rubble', 'rubble', 'bush', 'bush', 'crates', 'barrel', 'rock', 'fence', 'cart', 'lantern'],
+        // No `rock`. Same reason as `verge`: one large smooth cone is exactly the
+        // shape the near-field defocus reduces to a flat value blob, and it is the
+        // piece that produced the sage boulder pile. Rubble does the identical
+        // silhouette-breaking job as a cluster of small facets, which survives the
+        // blur as texture. Bushes stay — they are the only organic silhouette in
+        // the kit — but at half the weight they had.
+        kinds: ['rubble', 'rubble', 'rubble', 'crates', 'bush', 'barrel', 'fence', 'cart', 'rubble', 'lantern'],
       },
       {
         // The fringe. Small debris packed into the metre and a half hard against
@@ -1243,7 +1397,7 @@ export class Backdrop extends Group {
         // deliberately tiny and dense: individually they read as grit, and
         // collectively they turn a drawn line into a chewed one.
         name: 'verge',
-        count: 460,
+        count: 300,
         depthMin: -R * 1.9,
         depthMax: R * 1.9,
         lateralMax: halfW * 1.7,
@@ -1253,9 +1407,15 @@ export class Backdrop extends Group {
         // this band was authored entirely underground and rendered nothing at
         // all. Scale is what makes a piece survive the burial, not what makes it
         // read as debris; the density and the tilt do that.
-        scale: 0.95,
+        scale: 0.80,
         haze: [R * 1.4, R + run * 2.6, 0.26],
-        tone: 1.0,
+        // 0.82, not 1.0. Once the footprint SDF landed, this band stopped being
+        // generated out in open ground and started actually hugging the wall —
+        // which is what it was for, but it also meant 300 pieces at full tone
+        // suddenly sat *in front of* the board's near masonry. Grit that reads
+        // brighter than the wall it is piled against is not grit, it is a second
+        // subject. It has to sit under the stone it dresses.
+        tone: 0.82,
         windows: 0,
         ringMax: 1.7,
         // 0.02, not 0: `footprintDistance` is unsigned, so a negative clearance
@@ -1264,7 +1424,17 @@ export class Backdrop extends Group {
         clearance: 0.02,
         tilt: 0.42,
         sink: 0.02,
-        kinds: ['rubble', 'rubble', 'rubble', 'bush', 'bush', 'rock', 'crates'],
+        // No `rock` here, deliberately. `rock()` is a six-sided cone squashed at
+        // 0.7-2.2 units before the band scale, so a verge boulder came out over
+        // two tiles across — bigger than the masonry blocks it leans on, smooth
+        // enough that the near-field DoF erased what little facet detail it had,
+        // and in the one desaturated sage the kit owns. Measured on the round-4
+        // frame the south-east cluster was the least saturated mass in the image
+        // (0.44 against the board's 0.67) and read as a pale untextured card.
+        // Rubble is the same silhouette job done by eight small pieces instead
+        // of one large one, and it survives the blur as texture rather than as a
+        // value blob.
+        kinds: ['rubble', 'rubble', 'rubble', 'rubble', 'bush', 'bush', 'crates'],
       },
       {
         // Dressing spread over the whole visible ground plate.
@@ -1282,7 +1452,12 @@ export class Backdrop extends Group {
         lateralMax: halfW * 1.85,
         scale: 0.85,
         haze: [R * 0.9, R + run * 1.9, 0.5],
-        tone: 0.72,
+        // 0.72 put a cluster of pale sage boulders at luma 48 hard against the
+        // right frame edge — the brightest mass in the lower third, in the one
+        // hue that belongs to neither side of the grade, and smooth because the
+        // defocus at that distance leaves only value behind. Dressing on the
+        // outer plate must sit under the play space, not over it.
+        tone: 0.58,
         windows: 0,
         clearance: 4.0,
         tilt: 0.14,
@@ -1334,13 +1509,18 @@ export class Backdrop extends Group {
         // what survives is silhouette against a slightly lighter ground, which
         // is exactly how the reference foregrounds read.
         name: 'nearfield',
-        count: 240,
+        count: 130,
         depthMin: layout.nearDepth * 1.15,
         depthMax: -R * 0.12,
         lateralMax: halfW * 1.9,
-        scale: 1.0,
+        scale: 0.9,
         haze: [-999, -998, 0.0],
-        tone: 0.66,
+        // Silhouette value. Measured at 0.48 the right-hand outcrop came back at
+        // luma 47 in a desaturated sage — the brightest thing in the lower third
+        // of the frame and the only pale mass in a warm/navy grade, i.e. exactly
+        // the "flat untextured card" read, because DoF erases its surface at
+        // this distance and only the value survives.
+        tone: 0.40,
         windows: 0,
         clearance: 1.35,
         tilt: 0.22,
@@ -1366,7 +1546,14 @@ export class Backdrop extends Group {
         haze: [-999, -998, 0.0],
         // Dark, but not a hole. The references' foreground occluders are
         // silhouettes that still carry readable value structure.
-        tone: 0.46,
+        //
+        // 0.46 was still far too high once the near strip filled up around it:
+        // the foliage albedo is the one desaturated-green material in the kit,
+        // and a metre-wide out-of-focus sage mass in the bottom-right corner at
+        // luma 60 read as a pale untextured card taped over the frame. The
+        // reference foregrounds are near-silhouettes — Triangle's dock pilings
+        // and FFT's foreground terrain both sit under luma 30.
+        tone: 0.24,
         windows: 0,
         kinds: ['bush', 'bush', 'bush', 'rock', 'rubble'],
       },
@@ -1395,6 +1582,7 @@ export class Backdrop extends Group {
     const radius = new Float32Array(n * 4);
     const seed = new Float32Array(n * 4);
     const warm = new Float32Array(n * 4);
+    const gain = new Float32Array(n * 4);
     const index: number[] = [];
     const quad = [
       [-1, -1],
@@ -1416,6 +1604,7 @@ export class Backdrop extends Group {
         radius[v] = s.r;
         seed[v] = s.seed;
         warm[v] = s.warm;
+        gain[v] = s.gain;
       }
       const b = i * 4;
       index.push(b, b + 1, b + 2, b, b + 2, b + 3);
@@ -1427,6 +1616,7 @@ export class Backdrop extends Group {
     geo.setAttribute('aRadius', new BufferAttribute(radius, 1));
     geo.setAttribute('aSeed', new BufferAttribute(seed, 1));
     geo.setAttribute('aWarm', new BufferAttribute(warm, 1));
+    geo.setAttribute('aGain', new BufferAttribute(gain, 1));
     geo.setIndex(index);
 
     const material = new ShaderMaterial({
@@ -1479,9 +1669,11 @@ export class Backdrop extends Group {
      * across the whole visible left and right strips, which is exactly where the
      * void lives.
      */
+    const field = layout.footprint;
     const footprintDistance = (x: number, depth: number): number => {
       const wx = cy * x + sy * -depth;
       const wz = -sy * x + cy * -depth;
+      if (field) return Math.max(0, sampleFootprint(field, wx, wz));
       const dx = Math.abs(wx) - layout.boardHalfX;
       const dz = Math.abs(wz) - layout.boardHalfZ;
       return Math.hypot(Math.max(0, dx), Math.max(0, dz));
@@ -1510,11 +1702,31 @@ export class Backdrop extends Group {
         t -= sideX;
         wx = -hx; wz = -hz + t; nx = -1; nz = 0;
       }
-      const out = clearance + rng() * Math.max(0.1, (band.ringMax ?? 3) - clearance);
       // Jitter along the edge as well, so the run does not read as a hedge.
       const along = (rng() - 0.5) * 1.8;
-      wx += nx * out - nz * along;
-      wz += nz * out + nx * along;
+      wx += -nz * along;
+      wz += nx * along;
+
+      // March in from the AABB edge to the REAL edge.
+      //
+      // Without this the ring hugs the bounding box, which on a map with corner
+      // towers or any non-rectangular outline sits metres outside the facets the
+      // camera sees — so a band authored to break the wall/ground boundary was
+      // generated in open ground beyond it and the boundary stayed a razor line.
+      // Marching until the field crosses zero puts every piece against the mass
+      // that is actually there.
+      if (field) {
+        const step = Math.max(0.18, field.cell * 0.75);
+        for (let k = 0; k < 96; k += 1) {
+          if (sampleFootprint(field, wx, wz) <= 0.02) break;
+          wx -= nx * step;
+          wz -= nz * step;
+        }
+      }
+
+      const out = clearance + rng() * Math.max(0.1, (band.ringMax ?? 3) - clearance);
+      wx += nx * out;
+      wz += nz * out;
       return { x: cy * wx - sy * wz, depth: -(sy * wx + cy * wz) };
     };
 
@@ -1626,12 +1838,27 @@ export class Backdrop extends Group {
             x,
             y: topY - 0.22 * s,
             z: -depth,
-            // Near-camera lamps get a bigger card, which is both physically
-            // right under a defocus and what keeps the near margins from being
-            // dark: a 1.2-unit halo at three metres is a few pixels.
-            r: (0.5 + rng() * 0.55) * (depth < 0 ? 1.3 : 1),
+            // Halo size falls off with distance, hard.
+            //
+            // Under an orthographic rig a one-unit sphere covers the same number
+            // of pixels whether it is four units away or forty, so a card sized
+            // in world units gives every practical in the surround the same
+            // apparent diameter. Blurred by the DoF pass that becomes a field of
+            // interchangeable discs at wildly different implied depths, which is
+            // the "fake bokeh, composited sprite layer, no scale cue" note
+            // verbatim — and it is the projection's fault, not the blur's, so it
+            // has to be corrected here. The 0.5 exponent is a deliberate cheat:
+            // true 1/d would shrink the ridge lamps to nothing.
+            r:
+              (0.34 + rng() * 0.9) *
+              (depth < 0 ? 1.35 : 1) *
+              (1 / Math.sqrt(1 + Math.max(0, depth) / Math.max(4, layout.boardRadius * 0.7))),
             seed: rng(),
             warm: 0.55 + rng() * 0.45,
+            // Inverse-square-ish, for the same reason. A lamp at the back of the
+            // surround is not as bright as one at the board's edge, and the eye
+            // reads that ratio as depth even in a still frame.
+            gain: 1 / (1 + Math.pow(Math.max(0, depth) / Math.max(5, layout.boardRadius), 1.5)),
           });
         }
       }
@@ -1715,6 +1942,25 @@ export class Backdrop extends Group {
     geo.setAttribute('position', new BufferAttribute(verts, 3));
     geo.setIndex(index);
 
+    // The footprint field as a single-channel byte texture. R8 rather than a
+    // float format because it is filterable everywhere without an extension,
+    // and 256 steps over ±1.6 board radii is ~0.13 world units per step — two
+    // orders of magnitude finer than the softest term that reads it.
+    let footTex: DataTexture | null = null;
+    const field = layout.footprint;
+    if (field) {
+      footTex = new DataTexture(field.encoded, field.res, field.res, RedFormat, UnsignedByteType);
+      footTex.name = 'env-footprint';
+      footTex.magFilter = LinearFilter;
+      footTex.minFilter = LinearFilter;
+      footTex.wrapS = ClampToEdgeWrapping;
+      footTex.wrapT = ClampToEdgeWrapping;
+      footTex.colorSpace = NoColorSpace;
+      footTex.generateMipmaps = false;
+      footTex.needsUpdate = true;
+      this.footTexture = footTex;
+    }
+
     const material = new ShaderMaterial({
       name: 'env-ground',
       uniforms: {
@@ -1729,6 +1975,11 @@ export class Backdrop extends Group {
           value: new Vector2(Math.max(0.5, layout.boardHalfX), Math.max(0.5, layout.boardHalfZ)),
         },
         uYawCS: { value: new Vector2(Math.cos(layout.yaw), Math.sin(layout.yaw)) },
+        uFootTex: { value: footTex ?? fallbackFootTexture() },
+        uFootOrigin: { value: layout.footprint?.originX ?? 0 },
+        uFootSpan: { value: layout.footprint?.span ?? 1 },
+        uFootRange: { value: layout.footprint?.range ?? 1 },
+        uFootHas: { value: footTex ? 1 : 0 },
         uBoardRadius: { value: layout.boardRadius },
         uHazeNear: { value: layout.boardRadius * 0.9 },
         uHorizonDepth: { value: layout.horizonDepth },
@@ -1947,6 +2198,8 @@ export class Backdrop extends Group {
     }
     this.groundMaterial?.dispose();
     this.groundMaterial = null;
+    this.footTexture?.dispose();
+    this.footTexture = null;
   }
 
   dispose(): void {

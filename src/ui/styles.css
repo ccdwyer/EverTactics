@@ -2427,12 +2427,12 @@
 @media (max-width: 1024px) {
   .et-root {
     font-size: 11px;
+    --hud-safe: 14px;
     --hud-rail: 66px;
     --hud-col-left: 230px;
     --hud-col-right: 206px;
   }
   .et-unitinfo__name { font-size: 15px; }
-  .et-root { --hud-safe: 14px; }
   .et-hints { gap: 10px; }
 }
 

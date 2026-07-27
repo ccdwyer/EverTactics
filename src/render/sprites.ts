@@ -429,20 +429,43 @@ export class SpriteSheet {
   /**
    * Resolve all four team colours at once, greedily and without collisions.
    *
-   * Slot 0 is authoritative for the player: the toolkit's `battle_pal1` is the
-   * blue player palette and is also the palette baked into the PNG, so a story
-   * character with a single slot lands there too. The remaining teams claim the
-   * best-matching *unused* slot in priority order, which keeps enemies and allies
-   * visually distinct even on sheets whose alternates cluster around one hue.
+   * ─────────────────────────────────────────────────────────────────────────
+   * ROUND 4: slot 0 is *preferred* for the player, no longer forced.
+   * ─────────────────────────────────────────────────────────────────────────
+   * The previous rule pinned the player to slot 0 on the grounds that the
+   * toolkit's `battle_pal1` is the blue player palette. Dumping the team ramp
+   * of every generic family and reading its dominant hue, that is simply not
+   * true of most of them:
+   *
+   *   knight_m  pal1 h229 (blue)  — the rule holds
+   *   monk_m    pal1 h9   (red)   — and pal3, the enemy pick, is h9 as well
+   *   ryu_m     pal1 h11  (red)   — enemy pal3 h14
+   *   toki_m    pal1 h16  (red)   — enemy pal3 h15
+   *   waju_m    pal1 h8   (red)   — enemy pal3 h14
+   *
+   * On five of the seventeen families sampled the player and the enemy were
+   * being handed the *same hue*, so a friendly Monk and a hostile Monk two
+   * tiles apart rendered identically. That is a gameplay-legibility bug, not
+   * only a look one, and it is exactly the sort of thing the palette system
+   * exists to prevent.
+   *
+   * Player is therefore scored against blue like every other team, with a
+   * bonus on slot 0 so a sheet whose baked palette *is* the blue one (and any
+   * story character that ships only one palette) still lands on its shipped
+   * colours. Every subsequent team then claims the best-matching *unused* slot.
    */
   private assignTeamSlots(): void {
     if (this.teamSlot.size > 0) return;
-    this.teamSlot.set('player', 0);
 
-    const taken = new Set<number>([0]);
-    const order: Team[] = ['enemy', 'ally', 'neutral'];
+    const taken = new Set<number>();
+    const order: Team[] = ['player', 'enemy', 'ally', 'neutral'];
     for (const team of order) {
-      const slot = pickPaletteSlot(this.palettes, TEAM_TARGET_HUE[team], taken);
+      const slot = pickPaletteSlot(
+        this.palettes,
+        TEAM_TARGET_HUE[team],
+        taken,
+        team === 'player' ? { slot: 0, bonus: 0.35 } : undefined,
+      );
       if (slot < 0) {
         // Sheet has no spare palette (story characters, the WotL additions).
         this.teamSlot.set(team, 0);
@@ -718,8 +741,8 @@ function getGroundShadowTexture(): THREE.CanvasTexture {
       const cv = (v - SHADOW_FOOT_V) / 0.175;
       const contact = Math.exp(-(cu * cu + cv * cv) * 0.9);
 
-      const pu = du / 0.40;
-      const pv = (v - SHADOW_FOOT_V) / 0.30;
+      const pu = du / 0.44;
+      const pv = (v - SHADOW_FOOT_V) / 0.34;
       const pool = Math.exp(-(pu * pu + pv * pv) * 0.85) * 0.78;
 
       // Directional tail: fades and widens with distance, so the far end

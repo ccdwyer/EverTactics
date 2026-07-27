@@ -147,7 +147,7 @@ const judged = await pipeline(
     const dir = `shots/r${round}/ab/pair-${p.i}`
     await agent(
       `Run exactly this command in ${ROOT} and report the output verbatim. Do nothing else.
-cd ${ROOT} && node tools/ab.mjs --ours shots/r${round}/battle-open.png --ref "refs/curated/triangle/${p.ref}" --out ${dir} --swap ${p.swap ? 1 : 0}`,
+cd ${ROOT} && node tools/ab.mjs --ours shots/r${round}/battle-open.png --ref "refs/curated/triangle/${p.ref}" --out ${dir} --swap ${p.swap ? 1 : 0} --crop 0.6`,
       { label: `pair-${p.i}`, phase: 'Judge', effort: 'low' }
     )
     return { ...p, dir }
@@ -164,7 +164,11 @@ READ BOTH with the Read tool and study them carefully.
 
 One of them is a frame from a **shipped, commercially released** tactical RPG.
 The other is a frame from an **in-development prototype**.
-They have been normalised to identical resolution and encoding, so file properties tell you nothing.
+They have been normalised to identical resolution and encoding, so file properties tell you nothing,
+and CENTRE-CROPPED so most HUD chrome is gone from both sides. That is deliberate: in an earlier
+round judges identified frames by READING them — character names, menu vocabulary, on-screen text —
+which is recognition, not rendering quality. Judge the RENDERING: grounding, materials, lighting,
+depth, cohesion. If the only thing telling you them apart is text or naming, say so explicitly.
 Which side is which is not recorded anywhere on disk — do not go looking, judge by eye.
 
 Answer:
@@ -253,7 +257,22 @@ and the board no longer has a hard silhouette against emptiness.`,
   {
     label: 'fix-terrain',
     own: 'src/render/terrain.ts, src/render/materials/terrain.ts, src/render/materials/water.ts, src/core/grid.ts, and any new files under src/render/materials/textures/',
-    focus: `BREAK THE BOX. Round 1 substantially improved your materials — stochastic tiling, per-edge
+    focus: `TERRAIN MODULARITY IS THE #2 CITED DEFECT. Judges, unprompted:
+
+  "the same brick cube and the same plank-top block stacked at identical scale across the entire
+   map, with the same UV rotation repeating tile to tile"
+  "one brick/plank motif tiled at a single UV scale across walls, floors, roofs and stairs, with
+   no wear, no decals, and no material change between surface types"
+
+Shape work has landed over three rounds and geometry craft is up to 4.8. The remaining tell is not
+silhouette any more — it is that every surface is the same material at the same scale. Fix that:
+per-tile UV rotation and offset, genuinely different materials for wall vs floor vs roof vs stair,
+wear and grime that accumulates by surface role and edge proximity, decals, and scale variation so
+a wall does not carry floor-sized bricks.
+
+You may touch src/render/materials/** this round — that restriction is lifted.
+
+SECONDARY: Round 1 substantially improved your materials — stochastic tiling, per-edge
 chamfer, real props, coursed masonry. Texture density is no longer the weak link. Do NOT spend this
 round re-polishing materials.
 
@@ -316,6 +335,12 @@ FFT sits nearer 30 and gets far more read on vertical faces. Also break the perf
 map diamond is currently centred and square to frame, which reads as a turntable. Compose it:
 action on a diagonal, negative space used deliberately.
 
+**(0) DOF IS KEYED TO SCREEN-Y, NOT DEPTH — this is a bug, fix it first.** A judge caught it:
+"the bottom-left tower and bottom-center foliage are heavily blurred while equidistant geometry
+higher in the frame is sharp". A tilt-shift band applied in screen space blurs by position rather
+than by distance, so near and far geometry at the same screen height get the same blur. Drive the
+circle of confusion from the depth buffer.
+
 **(3) DOF is blurring gameplay.** dof: 0.35 blurs pillars and gameplay-relevant tiles at the top and
 bottom of the board. READ THE UPDATED docs/VISUAL_TARGET.md section 3 — an earlier version of that
 rubric told you to push DOF harder and it was wrong. In both reference games the blur is on SCENERY;
@@ -332,7 +357,27 @@ Then, secondary:`,
   {
     label: 'fix-sprites',
     own: 'src/render/sprites.ts, src/render/materials/sprite.ts, src/render/animation.ts',
-    focus: `SPRITE INTEGRATION AND GROUNDING.
+    focus: `SPRITE GROUNDING IS NOW THE #1 CITED DEFECT IN THE BLIND TEST. Three of six judges named
+it unprompted, in these words:
+
+  "units sit ON the top face with no contact shadow, no ambient occlusion pinch at the feet,
+   and no darkening of the tile they occupy"
+  "they float on top of the blocks instead of sitting in them"
+  "no cast shadow onto adjacent blocks"
+
+It scores 3.7/10, the lowest of any axis, and it has barely moved in four rounds while everything
+else improved. Treat this round as being about that one thing. Do not spread effort.
+
+What "grounded" actually requires, all of it:
+- A real cast shadow from the unit into the shadow map, falling on the tile AND on adjacent
+  geometry, matching the key light's azimuth. Verify it is in the shadow frustum.
+- Contact occlusion at the feet: a tight, high-contrast darkening exactly where the sprite meets
+  the surface, tighter and darker than the cast shadow. This is the single biggest cue.
+- Ambient occlusion pooling on the occupied tile itself.
+- The sprite's own lower body picking up bounce from the tile it stands on.
+Compare against refs/curated/fft/ — open a frame and look at where each unit meets the ground.
+
+SECONDARY (only after grounding is genuinely fixed):
 
 In refs/curated/fft/ the White Mage is visibly underlit by the fire in front of her; the Squire is
 rim-lit warm on one side and falls to blue on the other. Every unit casts a soft directional shadow
@@ -470,7 +515,7 @@ const rejudged = await pipeline(
     const dir = `shots/r${round}/after/ab/pair-${p.i}`
     await agent(
       `Run exactly this command in ${ROOT} and report the output verbatim. Do nothing else.
-cd ${ROOT} && node tools/ab.mjs --ours shots/r${round}/after/battle-open.png --ref "refs/curated/triangle/${p.ref}" --out ${dir} --swap ${p.swap ? 1 : 0}`,
+cd ${ROOT} && node tools/ab.mjs --ours shots/r${round}/after/battle-open.png --ref "refs/curated/triangle/${p.ref}" --out ${dir} --swap ${p.swap ? 1 : 0} --crop 0.6`,
       { label: `vpair-${p.i}`, phase: 'Verify', effort: 'low' }
     )
     return { ...p, dir }

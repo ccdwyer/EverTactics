@@ -432,8 +432,44 @@ function applySlopes(field: Battlefield, def: MapDef): void {
   }
 }
 
-/** Max height change across a single tile that still reads as a ramp, not a cliff. */
+/**
+ * Max height change across a single tile that still reads as a ramp, not a cliff.
+ *
+ * Worth knowing when reading this: the renderer's `slopeOffsetHalf` gives every incline
+ * the same fixed profile — ±1 half-tile about the tile centre, a rise of exactly 2
+ * half-tiles across the tile. So a span of 4 does *not* produce a steeper ramp; it
+ * produces the same 45° slab with a half-tile lip left over at each end. On earth that
+ * lip disappears into the turf chamfer and the cliff sculpting; on masonry it is a
+ * visible ledge, which is one of the two reasons `RAMPABLE_SURFACES` exists.
+ */
 const MAX_RAMP_SPAN = 4;
+
+/**
+ * Surfaces an incline may be *derived* on. Earth ramps; masonry steps.
+ *
+ * Round 4, measured. Rendering the same frame twice — once as authored, once with every
+ * derived slope forced flat — showed that the entire east half of Orbonne read as a heap
+ * of leaning planks in the first and as clean stepped masonry in the second. Thirteen of
+ * the nineteen derived inclines were landing on `stone`, and an incline is a 2-half-tile
+ * rise across a 1-tile top, i.e. a 45° slab. One of those is a ramp. A dozen of them,
+ * clustered through a cloister, is a collapsed roof — and each one is a full tile-sized
+ * quad whose stretched course texture reads as flat where the flat tops around it read as
+ * blocks.
+ *
+ * The references agree with the flat version: `docs/VISUAL_TARGET.md` records that
+ * Triangle "builds real architecture — modelled stairs, railings, pillars". Its stone goes
+ * up in steps. FFT's tilted slabs are hillsides and earthworks, which is exactly this set.
+ *
+ * This only gates *derivation*. An explicit `slopes` layer still wins on any surface, so a
+ * map that genuinely wants a stone ramp can still say so — it just has to say so.
+ */
+const RAMPABLE_SURFACES: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
+  'grass',
+  'dirt',
+  'sand',
+  'snow',
+  'swamp',
+]);
 
 function deriveSlope(field: Battlefield, x: number, y: number): SlopeKind {
   const here = field.tileAt(x, y);
@@ -446,26 +482,35 @@ function deriveSlope(field: Battlefield, x: number, y: number): SlopeKind {
   let best: SlopeKind = 'flat';
   let bestSpan = 0;
 
-  if (e && w) {
-    const span = e.height - w.height;
-    if (span !== 0 && Math.abs(span) <= MAX_RAMP_SPAN && here.height * 2 === e.height + w.height) {
-      best = span > 0 ? 'incline-e' : 'incline-w';
-      bestSpan = Math.abs(span);
+  // Masonry, planking and roof tile step rather than tilt, so they skip the incline
+  // tests entirely and fall through to the pit/knob bevel below — that one is a soft
+  // crown rather than a 45° slab and reads fine on any material.
+  if (RAMPABLE_SURFACES.has(here.surface)) {
+    if (e && w) {
+      const span = e.height - w.height;
+      if (
+        span !== 0 &&
+        Math.abs(span) <= MAX_RAMP_SPAN &&
+        here.height * 2 === e.height + w.height
+      ) {
+        best = span > 0 ? 'incline-e' : 'incline-w';
+        bestSpan = Math.abs(span);
+      }
     }
-  }
-  if (n && s) {
-    const span = s.height - n.height;
-    if (
-      span !== 0 &&
-      Math.abs(span) <= MAX_RAMP_SPAN &&
-      here.height * 2 === n.height + s.height &&
-      Math.abs(span) > bestSpan
-    ) {
-      best = span > 0 ? 'incline-s' : 'incline-n';
-      bestSpan = Math.abs(span);
+    if (n && s) {
+      const span = s.height - n.height;
+      if (
+        span !== 0 &&
+        Math.abs(span) <= MAX_RAMP_SPAN &&
+        here.height * 2 === n.height + s.height &&
+        Math.abs(span) > bestSpan
+      ) {
+        best = span > 0 ? 'incline-s' : 'incline-n';
+        bestSpan = Math.abs(span);
+      }
     }
+    if (best !== 'flat') return best;
   }
-  if (best !== 'flat') return best;
 
   // Not a ramp: is it a pit or a knob? Both get a bevel treatment in the mesh.
   const around = [n, s, e, w].filter((t): t is Tile => t !== undefined);
@@ -492,26 +537,38 @@ function deriveSlope(field: Battlefield, x: number, y: number): SlopeKind {
  * round-4 critics measured the consequence — the near faces were ~40% of the
  * frame and the object's silhouette was a rectangle from every yaw.
  *
- * Four plan-level moves fix that, none of them a material:
+ * Five plan-level moves fix that, none of them a material:
  *
  * **The east range is gone; a single tower survives.** Column 13 is void for its
  * whole length. What was a two-tile-deep, four-storey-tall east wall is now the
  * one-tile-wide belfry stump at (12,6) — impassable, elevation 8 — standing on a
- * shoulder that terraces 5 / 6 / 6 / 3 down columns 11–12. From the east the map
- * now reads as a spur with a tower on it, not as a slab.
+ * shoulder that runs 3 / 4 / 8 / 4 / 3 down column 12 and 3 / 3 / 4 / 4 / 2 down
+ * column 11. From the east the map now reads as a spur with a spike on it, not as
+ * a slab: only one tile of the east elevation is full height.
  *
- * **The whole south-east quarter has fallen away.** `x` ≥ 10 is void south of
- * row 8 and `x` ≥ 9 is void at row 10, so the default south-east camera looks
- * diagonally *into* the garth over a missing corner instead of over a parapet.
+ * **The whole south-east quarter has fallen away.** Everything south and east of
+ * the garth walk drops to a blocked rubble talus at elevation 0–1 — `x` ≥ 9 from
+ * row 9 down — so the default south-east camera looks diagonally *into* the garth
+ * over collapsed ground instead of over a parapet. Rubble, not `void`: a hole
+ * there would expose the backdrop plane, and the point of the move is to lose the
+ * mass, not to punch a window.
  *
- * **The north-east shoulder terraces off.** Rows 0–3 fall 5 → 4 → 3 → 2 as they
+ * **The north-east shoulder terraces off.** Rows 1–4 fall 5 → 3 → 2 → 3 as they
  * run east and the corner at (11,0)–(13,3) is gone entirely, so the north
  * elevation is a descending stair rather than a level battlement.
  *
  * **The near (south) rim is a toe, not a wall.** Row 12 dropped from a flat
- * course of 3 to 2–3, and the outer course at row 13 from 4/2 merlons to 3/1, so
- * the masonry closest to the camera is roughly half the height it was and the
- * repeated brick underside stops owning the bottom of the frame.
+ * course of 3 to 1–3, and the outer course at row 13 from 4/2 merlons to 3/1 with
+ * a fresh gap at (4,13), so the masonry closest to the camera is roughly half the
+ * height it was and the repeated brick underside stops owning the bottom of the
+ * frame. `SKIRT` in `render/terrain.ts` came down to match.
+ *
+ * **The north and west outer courses are broken, not rhythmic.** They used to
+ * alternate one pier height with one plinth height all the way round, which at
+ * distance is still a wall with a texture on it. The north course now runs
+ * 3 / 1 / 5 / — / 2 / 4 / — / 3 / 1 / 2 with voids at `x` 0, 4, 7 and 11–13; the
+ * west course drops (0,3) as well as (0,6) and (0,9) and varies its piers 5 / 4 /
+ * 5 / 4 rather than repeating one value.
  *
  * Inside, height is not decoration:
  *
@@ -520,6 +577,9 @@ function deriveSlope(field: Battlefield, x: number, y: number): SlopeKind {
  *   from the cloister floor at row 2.
  * - A **dirt ramp at (3,3)** runs 4 → 3 → 2 north-to-south off that floor into
  *   the garden — a fourth true derived ramp beside the three banks.
+ * - An **east terrace** at (9,6)–(10,7), elevation 4, with the fountain's east
+ *   apron at (8,6) raised to 5 — so the garth's east half is a stepped platform
+ *   you have to climb, not more lawn.
  * - A **timber gallery** at (2,7)–(3,7) is `bridge` deck at elevation 6: a
  *   `deckSurfaces` tile is planking on trestles, not a filled column, so it
  *   genuinely overhangs the garth four half-tiles below it and the camera sees
@@ -577,26 +637,26 @@ export const ORBONNE_COURTYARD: MapDef = {
   width: 14,
   height: 14,
   heights: [
-    '04250252412000',
+    '03150240312000',
     '266a36a66a5300',
     '56444444543200',
     '26435523443300',
-    '56425533342330',
+    '46425533342330',
     '26422233222340',
-    '06442376522480',
-    '5a663365322440',
-    '22233333333230',
+    '06442376544480',
+    '5a663365344440',
+    '12233333333230',
     '02220403221100',
-    '54420403211000',
-    '24422123221000',
-    '23222232210000',
+    '44420403211100',
+    '24422113221100',
+    '23222232211000',
     '03131312010000',
   ],
   surfaces: [
-    '#sss#sssssd###',
+    '#sss#ss#ssd###',
     'sssssssssssd##',
     'ssdssssssssd##',
-    'ssddss.sssdd##',
+    '#sddss.sssdd##',
     'ssd.ss.sss.ds#',
     'ssd...ss...ds#',
     '#sds.ssss..ds#',
@@ -606,10 +666,10 @@ export const ORBONNE_COURTYARD: MapDef = {
     'ssd.wbwd.ddd##',
     'dsd....d..dd##',
     'ssdddddddddd##',
-    '#sssssss#d####',
+    '#sss#sss#d####',
   ],
   blocked: [
-    '.###.######...',
+    '.###.##.###...',
     '#..#..#..#....',
     '#.............',
     '#.............',
@@ -622,7 +682,7 @@ export const ORBONNE_COURTYARD: MapDef = {
     '#........###..',
     '#.........##..',
     '#.........##..',
-    '.####.##.#....',
+    '.###..##.#....',
   ],
   waterLevel: 0,
   deckSurfaces: ['bridge'],

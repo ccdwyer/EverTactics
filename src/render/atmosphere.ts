@@ -52,7 +52,7 @@ import {
   type Object3D,
 } from 'three';
 
-import { Backdrop, type BackdropLayout } from './backdrop.js';
+import { Backdrop, type BackdropLayout, type BoardFootprint } from './backdrop.js';
 import {
   deriveEnvironmentPalette,
   GLSL_NOISE,
@@ -669,10 +669,21 @@ export class WorldEnvironment {
       return;
     }
     this.haveBounds = true;
-    this.footprint = buildFootprintField(target as Object3D, this.bounds);
+
+    // The footprint walk is O(terrain vertices) plus a 128x128 morphology and
+    // distance transform. `measure()` runs on a 90-frame heartbeat whether or
+    // not anything moved, so rebuilding unconditionally would burn that every
+    // second and a half for the entire battle. The board only changes when a
+    // scenario loads, and the bounds change with it.
+    const signature = `${this.bounds.min.x.toFixed(2)},${this.bounds.min.z.toFixed(2)},${this.bounds.max.x.toFixed(2)},${this.bounds.max.z.toFixed(2)},${this.bounds.max.y.toFixed(2)}`;
+    if (signature !== this.footprintSignature || this.footprint === null) {
+      this.footprintSignature = signature;
+      this.footprint = buildFootprintField(target as Object3D, this.bounds);
+    }
   }
 
   private footprint: BoardFootprint | null = null;
+  private footprintSignature = '';
 
   private relayoutIfNeeded(camera: Camera): void {
     const size = this.bounds.getSize(TMP_A);
@@ -775,6 +786,180 @@ export class WorldEnvironment {
     this.haze.dispose();
     this.scene?.remove(this.group);
     this.scene = null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Board footprint field
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why this exists.
+ *
+ * Everything the surround does about "where the board is" — the ground plate's
+ * occlusion bowl, the contact darkening, the bounce spill, and the clearance
+ * test that places the skirt and verge clutter — used the board's axis-aligned
+ * BOUNDING BOX. On a rectangular grid map with towers at the corners that box is
+ * a long way outside the mass the camera actually sees: measured on the round-4
+ * frame the near-corner facet sat about two and a half world units inside the
+ * AABB edge, so every ring of clutter authored to hug the wall was generated in
+ * open ground beyond it, and the shading terms shaped to the same rectangle
+ * missed the facet entirely. The wall/ground boundary stayed a razor line
+ * through four separate attempts to break it, all of which were aimed at the
+ * wrong place.
+ *
+ * So: rasterise the terrain's real XZ occupancy into a coarse grid, close the
+ * gaps, and run a chamfer distance transform over it. The result is a signed
+ * distance to the actual silhouette, cheap to sample from both JS (placement)
+ * and GLSL (shading), and it costs one vertex walk per scenario load.
+ */
+
+const FOOTPRINT_RES = 128;
+/** Cap on vertices visited; beyond this the walk strides. */
+const FOOTPRINT_VERTEX_BUDGET = 600_000;
+
+function buildFootprintField(target: Object3D, bounds: Box3): BoardFootprint | null {
+  const size = bounds.getSize(new Vector3());
+  const centre = bounds.getCenter(new Vector3());
+  const radius = Math.max(2, Math.hypot(size.x, size.z) * 0.5);
+  // Padding sets how far outside the board the field stays meaningful. The
+  // widest consumer is the occlusion bowl at 1.15 board radii, so 1.6 leaves
+  // headroom and still keeps the cell size under a third of a tile.
+  const pad = radius * 1.6;
+  const span = Math.max(size.x, size.z) + pad * 2;
+  const res = FOOTPRINT_RES;
+  const cell = span / res;
+  const originX = -span * 0.5;
+  const originZ = -span * 0.5;
+
+  const occ = new Uint8Array(res * res);
+  let total = 0;
+  const meshes: { pos: Float32Array | Float64Array; matrix: number[]; count: number }[] = [];
+  target.traverse((o) => {
+    const mesh = o as Mesh;
+    const attr = mesh.geometry?.attributes?.position;
+    if (!mesh.isMesh || !attr) return;
+    o.updateWorldMatrix(true, false);
+    meshes.push({
+      pos: attr.array as Float32Array,
+      matrix: o.matrixWorld.elements as unknown as number[],
+      count: attr.count,
+    });
+    total += attr.count;
+  });
+  if (total === 0) return null;
+
+  const stride = Math.max(1, Math.ceil(total / FOOTPRINT_VERTEX_BUDGET));
+  for (const m of meshes) {
+    const e = m.matrix;
+    for (let i = 0; i < m.count; i += stride) {
+      const x = m.pos[i * 3]!;
+      const y = m.pos[i * 3 + 1]!;
+      const z = m.pos[i * 3 + 2]!;
+      // Manual transform: allocating a Vector3 per vertex is the difference
+      // between a 4 ms measure and a 60 ms one on a large map.
+      const wx = e[0]! * x + e[4]! * y + e[8]! * z + e[12]! - centre.x;
+      const wz = e[2]! * x + e[6]! * y + e[10]! * z + e[14]! - centre.z;
+      const cx = Math.floor((wx - originX) / cell);
+      const cz = Math.floor((wz - originZ) / cell);
+      if (cx < 0 || cz < 0 || cx >= res || cz >= res) continue;
+      occ[cz * res + cx] = 1;
+    }
+  }
+
+  // Morphological close. Vertices only exist at block corners, so a tile top a
+  // world unit across marks two cells and leaves the two between them empty;
+  // without this the field is a sieve and the distance transform reports open
+  // ground in the middle of the courtyard.
+  const closeRadius = Math.max(1, Math.ceil(0.75 / cell));
+  dilate(occ, res, closeRadius);
+  erode(occ, res, closeRadius);
+
+  const INF = 1e9;
+  const outside = new Float32Array(res * res);
+  const inside = new Float32Array(res * res);
+  for (let i = 0; i < occ.length; i += 1) {
+    outside[i] = occ[i] ? 0 : INF;
+    inside[i] = occ[i] ? INF : 0;
+  }
+  chamfer(outside, res);
+  chamfer(inside, res);
+
+  const distance = new Float32Array(res * res);
+  const encoded = new Uint8Array(res * res);
+  const range = pad;
+  for (let i = 0; i < distance.length; i += 1) {
+    const d = (outside[i]! - inside[i]!) * cell;
+    distance[i] = d;
+    encoded[i] = Math.max(0, Math.min(255, Math.round(((d / range) * 0.5 + 0.5) * 255)));
+  }
+
+  return { res, span, cell, originX, originZ, distance, range, encoded };
+}
+
+/** In-place Chebyshev max filter. Separable, so two linear passes. */
+function dilate(grid: Uint8Array, res: number, r: number): void {
+  morph(grid, res, r, true);
+}
+function erode(grid: Uint8Array, res: number, r: number): void {
+  morph(grid, res, r, false);
+}
+function morph(grid: Uint8Array, res: number, r: number, max: boolean): void {
+  const tmp = new Uint8Array(res * res);
+  for (let z = 0; z < res; z += 1) {
+    for (let x = 0; x < res; x += 1) {
+      let v = max ? 0 : 1;
+      for (let k = -r; k <= r; k += 1) {
+        const xx = x + k;
+        // Outside the grid counts as empty, which is correct on both passes:
+        // the board never reaches the padded border.
+        const s = xx < 0 || xx >= res ? 0 : grid[z * res + xx]!;
+        v = max ? Math.max(v, s) : Math.min(v, s);
+      }
+      tmp[z * res + x] = v;
+    }
+  }
+  for (let z = 0; z < res; z += 1) {
+    for (let x = 0; x < res; x += 1) {
+      let v = max ? 0 : 1;
+      for (let k = -r; k <= r; k += 1) {
+        const zz = z + k;
+        const s = zz < 0 || zz >= res ? 0 : tmp[zz * res + x]!;
+        v = max ? Math.max(v, s) : Math.min(v, s);
+      }
+      grid[z * res + x] = v;
+    }
+  }
+}
+
+/** Two-pass chamfer distance transform, in cells. Seeds are the zeroes. */
+function chamfer(d: Float32Array, res: number): void {
+  const D = Math.SQRT2;
+  for (let z = 0; z < res; z += 1) {
+    for (let x = 0; x < res; x += 1) {
+      const i = z * res + x;
+      let v = d[i]!;
+      if (z > 0) {
+        v = Math.min(v, d[i - res]! + 1);
+        if (x > 0) v = Math.min(v, d[i - res - 1]! + D);
+        if (x < res - 1) v = Math.min(v, d[i - res + 1]! + D);
+      }
+      if (x > 0) v = Math.min(v, d[i - 1]! + 1);
+      d[i] = v;
+    }
+  }
+  for (let z = res - 1; z >= 0; z -= 1) {
+    for (let x = res - 1; x >= 0; x -= 1) {
+      const i = z * res + x;
+      let v = d[i]!;
+      if (z < res - 1) {
+        v = Math.min(v, d[i + res]! + 1);
+        if (x > 0) v = Math.min(v, d[i + res - 1]! + D);
+        if (x < res - 1) v = Math.min(v, d[i + res + 1]! + D);
+      }
+      if (x < res - 1) v = Math.min(v, d[i + 1]! + 1);
+      d[i] = v;
+    }
   }
 }
 

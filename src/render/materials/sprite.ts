@@ -1057,10 +1057,10 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uLightGain: { value: options.lightGain ?? 1 },
     uLightWrap: { value: options.lightWrap ?? 0.6 },
     uShadeChroma: { value: options.shadeChroma ?? 0.82 },
-    uDirectGain: { value: options.directGain ?? 0.72 },
-    uAlbedoScale: { value: options.albedoScale ?? 0.8 },
-    uAlbedoShoulder: { value: options.albedoShoulder ?? 0.5 },
-    uAlbedoPivot: { value: options.albedoPivot ?? 0.3 },
+    uDirectGain: { value: options.directGain ?? 0.55 },
+    uAlbedoScale: { value: options.albedoScale ?? 0.78 },
+    uAlbedoShoulder: { value: options.albedoShoulder ?? 0.9 },
+    uAlbedoPivot: { value: options.albedoPivot ?? 0.32 },
     uShadeKnee: { value: options.shadeKnee ?? 1.15 },
     uShadeCompress: { value: options.shadeCompress ?? 0.8 },
     uIndirectGain: { value: options.indirectGain ?? 0.36 },
@@ -1076,7 +1076,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     uRimColor: { value: new THREE.Color(options.rimColor ?? 0xffe6b8) },
     uRimStrength: { value: options.rimStrength ?? 0.28 },
     uBackRimColor: { value: new THREE.Color(options.backRimColor ?? 0x8fb0d8) },
-    uBackRimStrength: { value: options.backRimStrength ?? 0.07 },
+    uBackRimStrength: { value: options.backRimStrength ?? 0.055 },
 
     uBounceColor: { value: new THREE.Color(options.bounceColor ?? 0x6d5b46) },
     uBounceStrength: { value: options.bounceStrength ?? 0.42 },
@@ -1086,7 +1086,7 @@ export function createSpriteMaterial(options: SpriteMaterialOptions): SpriteMate
     // eighth of the figure sits a full stop under the rest of it. That in-art
     // fall-off is what reads as grounding at every camera angle — unlike the
     // ground decal, none of it can ever be hidden behind the billboard.
-    uFootShade: { value: 0.55 },
+    uFootShade: { value: 0.5 },
     uFootShadeTexels: { value: 10 },
     uGrounded: { value: 1 },
 
@@ -1280,6 +1280,14 @@ export function pickPaletteSlot(
   palettes: readonly Uint8Array[],
   targetHueDegrees: number,
   taken?: ReadonlySet<number>,
+  /**
+   * Optional thumb on the scale for one slot. `player` uses this to prefer the
+   * sheet's baked palette (slot 0) — the colours the character actually ships
+   * in — without being *forced* onto it when that palette is nowhere near the
+   * team hue. Scores are normalised weighted cosines in [-1, 1], so a bonus of
+   * ~0.35 wins a near-tie and loses a genuine mismatch.
+   */
+  bias?: { slot: number; bonus: number },
 ): number {
   const mask = teamRampMask(palettes);
 
@@ -1300,6 +1308,23 @@ export function pickPaletteSlot(
   }
   const floor = peakChroma * 0.3;
 
+  // …and how much *light* it carries. Chroma alone is not enough: measured on
+  // the shipped set, `battle_san_m_battle_pal8` scores past the chroma floor on
+  // a couple of faint off-black entries while every strong ramp index in it is
+  // literally 0x000000, so `ally` on an Arithmetician resolved to a slot that
+  // renders the garment as a hole. A team colour has to be a colour you can
+  // see, so the slot also has to reach a fraction of the brightest ramp on the
+  // sheet before it is allowed to represent a team.
+  const lumaOf = new Float64Array(palettes.length);
+  let peakLuma = 0;
+  for (let slot = 0; slot < palettes.length; slot++) {
+    const palette = palettes[slot];
+    if (!palette || isPaletteEmpty(palette)) continue;
+    lumaOf[slot] = rampLuma(palette, mask);
+    peakLuma = Math.max(peakLuma, lumaOf[slot] ?? 0);
+  }
+  const lumaFloor = peakLuma * 0.25;
+
   let bestIndex = -1;
   let bestScore = -Infinity;
   for (let slot = 0; slot < palettes.length; slot++) {
@@ -1307,13 +1332,32 @@ export function pickPaletteSlot(
     const palette = palettes[slot];
     if (!palette || isPaletteEmpty(palette)) continue;
     if ((chroma[slot] ?? 0) < floor) continue;
-    const score = paletteHueScore(palette, targetHueDegrees, mask);
+    if ((lumaOf[slot] ?? 0) < lumaFloor) continue;
+    const score =
+      paletteHueScore(palette, targetHueDegrees, mask) +
+      (bias && bias.slot === slot ? bias.bonus : 0);
     if (score > bestScore) {
       bestScore = score;
       bestIndex = slot;
     }
   }
   return bestIndex;
+}
+
+/** Mean luma a palette carries across its team ramp. See {@link pickPaletteSlot}. */
+function rampLuma(palette: Uint8Array, mask: Float64Array): number {
+  let total = 0;
+  let weight = 0;
+  for (let i = 1; i < 16; i++) {
+    const w = mask[i] ?? 0;
+    if (w <= 1e-3) continue;
+    const r = (palette[i * 3] ?? 0) / 255;
+    const g = (palette[i * 3 + 1] ?? 0) / 255;
+    const b = (palette[i * 3 + 2] ?? 0) / 255;
+    total += (0.2126 * r + 0.7152 * g + 0.0722 * b) * w;
+    weight += w;
+  }
+  return weight > 1e-4 ? total / weight : 0;
 }
 
 /** Total chroma a palette carries across its team ramp. See {@link pickPaletteSlot}. */

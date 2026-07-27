@@ -34,6 +34,9 @@ const outDir = resolve(arg('out', 'shots/ab/pair'));
 const swap = arg('swap', '0') === '1';
 const W = Number(arg('w', 1600));
 const H = Number(arg('h', 900));
+// Centre-crop fraction. 1 = whole frame. ~0.6 removes most HUD chrome from both
+// sides so judges compare rendering rather than reading names and menu text.
+const CROP = Math.max(0.2, Math.min(1, Number(arg('crop', 1))));
 
 for (const [label, p] of [['ours', ours], ['ref', ref]]) {
   if (!p || !existsSync(p)) {
@@ -69,10 +72,27 @@ window.draw = (src) => new Promise((done, fail) => {
     ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, ${W}, ${H});
-    const s = Math.min(${W} / img.width, ${H} / img.height);
-    const w = img.width * s, h = img.height * s;
-    ctx.drawImage(img, (${W} - w) / 2, (${H} - h) / 2, w, h);
-    done({ w: img.width, h: img.height });
+
+    // CROP MODE: take a centred window of the source before fitting.
+    //
+    // Round 4 showed the uncropped test had hit its ceiling for a reason that has
+    // nothing to do with render quality: judges identified frames by READING them.
+    // "Right frame is literally Triangle Strategy: 'Prince Roland', speaker
+    // 'Erador'", "invented roster names (ALDRIC, CORVIN)", "keyboard prompts
+    // (ENTER Confirm, ESC Back)". Character names, HUD vocabulary and on-screen
+    // text are recognition cues, not rendering tells, and no amount of shader work
+    // removes them. Cropping to the centre drops most HUD chrome on both sides
+    // symmetrically and leaves the diorama — which is the thing under test.
+    const cropFrac = ${CROP};
+    const sw = img.width * cropFrac;
+    const sh = img.height * cropFrac;
+    const sx = (img.width - sw) / 2;
+    const sy = (img.height - sh) / 2;
+
+    const s = Math.min(${W} / sw, ${H} / sh);
+    const w = sw * s, h = sh * s;
+    ctx.drawImage(img, sx, sy, sw, sh, (${W} - w) / 2, (${H} - h) / 2, w, h);
+    done({ w: img.width, h: img.height, cropped: cropFrac < 1 });
   };
   img.onerror = () => fail(new Error('decode failed'));
   img.src = src;
