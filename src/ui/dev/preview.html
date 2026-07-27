@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EverTactics — UI Preview</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #05060a; }
+      /* Stand-in for the 3D diorama so the overlay can be judged over real depth. */
+      #backdrop {
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(88% 62% at 50% 18%, #3d4f7a 0%, #1b2340 38%, #0a0e1b 78%, #05070d 100%),
+          #05070d;
+      }
+      #backdrop::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background:
+          repeating-linear-gradient(63deg, rgba(255,255,255,0.028) 0 2px, transparent 2px 78px),
+          repeating-linear-gradient(-63deg, rgba(0,0,0,0.16) 0 2px, transparent 2px 78px);
+        mask-image: linear-gradient(180deg, transparent 24%, #000 62%);
+      }
+      #ui { position: fixed; inset: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="backdrop"></div>
+    <div id="ui"></div>
+    <script type="module" src="./preview.ts"></script>
+  </body>
+</html>
