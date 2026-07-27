@@ -60,6 +60,36 @@ Blind A/B against curated Triangle Strategy battle frames, six pairs per round:
 | 9 | 5/12 baseline, 9/12 after | 11/12 and 10/12 | first n=12 round |
 | 10 | 6/12 baseline, 10/12 after | 9/12 and **8/12** | **the loop has stopped paying** |
 
+### FINAL MEASUREMENT — n=18, measurement-only, after the art-directed pass
+
+    identified correctly   5 / 18     P(<=5 | chance) = 0.048   -> BELOW chance
+    preferred ours        18 / 18     P(=18 | chance) = 0.0000038
+    ours more coherent    17 / 18     P(>=17 | chance) = 0.000072
+    mean confidence          77
+
+Thirteen of eighteen judges picked OUR frame as the shipped commercial game.
+
+**Read this carefully before celebrating it.** Three caveats, all load-bearing:
+
+1. **Judges appear to use "more striking" as a proxy for "shipped".** One said so outright: *"RIGHT
+   is the more striking image and I want to be honest about that... RIGHT wins on impact; it loses
+   on integration."* Our frame now out-punches much of the curated set, so identification may have
+   inverted for a reason unrelated to fidelity. Below-chance identification is not the same as
+   indistinguishability — it may mean the test's central assumption broke in the other direction.
+2. **The curated set is uneven.** It contains bright flat overviews and ice-island shots alongside
+   the strong night dioramas. Our best night frame against a weak reference is not a fair
+   "shipped vs prototype" test, and several tells describe a frame with "ambient-only lighting",
+   "zero object-to-object cast shadow" and "one material everywhere" — which is not our frame.
+3. **The defect list from the judges who WERE correct is still real and still open**: an edge
+   highlight that fires on faces pointing away from the key ("an edge-highlight shader, not
+   lighting"), missing object-to-object cast shadows, inconsistent sprite grounding, DOF quantised
+   per sprite rather than continuous, particles composited at full sharpness over blurred
+   background, and sprite-to-world scale drift.
+
+What IS solidly established: **preference (18/18) and coherence (17/18)**, both at p < 0.001. The
+art-directed pass did what per-axis fixing could not — rounds 9-10 moved neither, and one pass moved
+both to ceiling.
+
 ### Rounds 9-10: the polish loop is no longer producing gains
 Four n=12 measurements across two rounds: identification **5, 9, 6, 10** of 12. Mean 62%, no trend.
 The round-9 build was measured twice — 9/12 and 6/12 — and against a pooled 0.62 both tails are
