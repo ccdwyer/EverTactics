@@ -76,6 +76,35 @@ export const MEDIUM = 36;
 export const LONG = 48;
 export const VERY_LONG = 64;
 
+/**
+ * Default for `Ability.targetsTiles` when the author did not set it.
+ *
+ * FFT rule of thumb, encoded:
+ *   - explicit author flag wins
+ *   - self-only abilities are not tile-aimed
+ *   - any burst (radius > 0) aims at a panel (Fire, Cure splash, summons)
+ *   - panel-landed formulas (magical, summon, move, percent-hp) aim at a tile even
+ *     at radius 0 (Holy, Flare, Teleport)
+ *   - everything else (physical singles, heals/buffs/status on one body, Steal)
+ *     locks onto a unit so a charged cast tracks them
+ */
+function defaultTargetsTiles(s: AbilitySpec): boolean {
+  if (s.targetsTiles !== undefined) return s.targetsTiles;
+  const range = s.range ?? MELEE;
+  if (range.self) return false;
+  if ((range.radius ?? 0) > 0) return true;
+  const formula = s.formula ?? 'physical';
+  if (
+    formula === 'magical' ||
+    formula === 'summon' ||
+    formula === 'move' ||
+    formula === 'percent-hp'
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function defineAbilities(
   set: AbilitySetId,
   slot: AbilitySlot,
@@ -96,7 +125,7 @@ export function defineAbilities(
     accuracy: s.accuracy ?? 100,
     inflicts: s.inflicts,
     cures: s.cures,
-    targetsTiles: s.targetsTiles,
+    targetsTiles: defaultTargetsTiles(s),
     vfx: s.vfx,
     sfx: s.sfx,
     castAnim: s.castAnim,
@@ -538,6 +567,8 @@ function nuke(
     id, name, description, mp, ct, element,
     range: R(5, radius, { vertical: 4 }),
     formula: 'magical', power, accuracy: 100, vfx, castAnim: 'cast',
+    // Black Magick lands on a tile; walking out of the blast is the correct dodge.
+    targetsTiles: true,
   };
 }
 
@@ -630,6 +661,8 @@ function esper(e: EsperSpec): AbilitySpec {
     range: R(5, e.radius, { vertical: 5 }),
     formula: e.formula, power: e.power, accuracy: e.accuracy ?? 100,
     inflicts: e.inflicts, cures: e.cures,
+    // Espers always land on a panel; the splash hits whoever is still there.
+    targetsTiles: true,
     vfx: `summon/${e.id}`, sfx: `summon/${e.id}`, castAnim: 'cast',
   };
 }

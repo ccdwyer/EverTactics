@@ -283,9 +283,10 @@ export function defaultAnimationSet(
     durations: [900],
     loop: true,
     procedural: true,
-    // A single texel of breathing. Any more and it reads as a bobbing balloon.
+    // Sub-texel breath, rounded once at draw time: peaks at ±1 sprite pixel and
+    // sits at 0 for most of the cycle. Larger amplitudes read as Levitate.
     pose: (t, out) => {
-      out.offsetY = Math.round(Math.sin(t * TWO_PI) * 0.6);
+      out.offsetY = Math.sin(t * TWO_PI) * 0.45;
     },
   };
 

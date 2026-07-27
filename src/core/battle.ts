@@ -129,7 +129,14 @@ function fail(message: string): never {
 export interface PendingCharge {
   unit: UnitId;
   ability: string;
+  /** Aim tile stored at cast time — used as-is for tile-targeted abilities. */
   target: Vec3;
+  /**
+   * When set, the charge is **unit-targeted** and resolves at this unit's live
+   * position (FFT Steal / single-target buffs). Tile-targeted charges leave this
+   * undefined and hit `target` even if the original victim has walked away.
+   */
+  targetUnit?: UnitId;
   /** CT ticks left before the spell goes off. */
   remaining: number;
 }
@@ -149,7 +156,11 @@ export function getPendingCharges(state: BattleState): readonly PendingCharge[] 
 export function setPendingCharges(state: BattleState, charges: readonly PendingCharge[]): void {
   CHARGE_TABLE.set(
     state,
-    charges.map((c) => ({ ...c, target: { ...c.target } })),
+    charges.map((c) => ({
+      ...c,
+      target: { ...c.target },
+      ...(c.targetUnit !== undefined ? { targetUnit: c.targetUnit } : {}),
+    })),
   );
 }
 
@@ -594,7 +605,36 @@ function tickCharges(state: BattleState, rng: Rng, events: BattleEvent[]): void 
     if (removeStatus(actor, 'charging')) {
       events.push({ kind: 'status-remove', unit: actor.id, status: 'charging' });
     }
-    fireAbility(state, actor, ability, charge.target, rng, events);
+
+    // Unit-targeted charges track the victim; tile-targeted ones land on the
+    // stored panel even if the original occupant has moved or died.
+    let resolveAt = charge.target;
+    if (charge.targetUnit !== undefined) {
+      const tracked = state.units.get(charge.targetUnit);
+      // KO'd units stay trackable (Raise, etc.); only crystal/removed is a miss.
+      if (!tracked || isGone(tracked)) {
+        log(state, {
+          actor: actor.id,
+          kind: 'act',
+          text: `${actor.name}'s ${ability.name} loses its target.`,
+          data: { ability: ability.id, fizzled: true },
+        });
+        events.push({
+          kind: 'cast-fire',
+          unit: actor.id,
+          ability: ability.id,
+          target: { ...charge.target },
+        });
+        continue;
+      }
+      const tile = state.field.tileAt(tracked.pos.x, tracked.pos.y);
+      resolveAt = {
+        x: tracked.pos.x,
+        y: tracked.pos.y,
+        z: tile?.height ?? tracked.pos.z,
+      };
+    }
+    fireAbility(state, actor, ability, resolveAt, rng, events);
   }
 }
 
@@ -887,10 +927,18 @@ function checkTargetLegality(state: BattleState, actor: Unit, ability: Ability, 
     fail(`act: (${target.x},${target.y}) is out of range for ${ability.name}`);
   }
 
-  if (!ability.targetsTiles && range.radius === 0 && !livingUnitAt(state, resolved.x, resolved.y)) {
+  if (!abilityTargetsTiles(ability) && !livingUnitAt(state, resolved.x, resolved.y)) {
     fail(`act: ${ability.name} needs a unit on the target tile`);
   }
   return resolved;
+}
+
+/** Mirrors `state/targeting.ts:abilityTargetsTiles` without importing UI state. */
+function abilityTargetsTiles(ability: Ability): boolean {
+  if (ability.targetsTiles === true) return true;
+  if (ability.targetsTiles === false) return false;
+  if (ability.range.self) return false;
+  return (ability.range.radius ?? 0) > 0;
 }
 
 function performAction(
@@ -900,6 +948,7 @@ function performAction(
   target: Vec3,
   rng: Rng,
   events: BattleEvent[],
+  targetUnit?: UnitId,
 ): void {
   const resolved = checkTargetLegality(state, actor, ability, target);
 
@@ -924,7 +973,21 @@ function performAction(
     events.push({ kind: 'cast-start', unit: actor.id, ability: ability.id, target: resolved });
     applyStatus(actor, 'charging', { duration: -1, source: actor.id });
     events.push({ kind: 'status-add', unit: actor.id, status: 'charging' });
-    pushCharge(state, { unit: actor.id, ability: ability.id, target: resolved, remaining: ability.ct });
+
+    // Tile-targeted: store the panel. Unit-targeted: lock onto the victim so the
+    // resolve follows them if they walk between cast and fire.
+    const tileAimed = abilityTargetsTiles(ability);
+    const locked =
+      !tileAimed
+        ? (targetUnit ?? livingUnitAt(state, resolved.x, resolved.y)?.id)
+        : undefined;
+    pushCharge(state, {
+      unit: actor.id,
+      ability: ability.id,
+      target: resolved,
+      ...(locked !== undefined ? { targetUnit: locked } : {}),
+      remaining: ability.ct,
+    });
     log(state, {
       actor: actor.id,
       kind: 'act',
@@ -982,7 +1045,7 @@ export function applyCommand(state: BattleState, cmd: Command): BattleEvent[] {
       // The Item skillset is issued as an ordinary `act`, so the stock check has
       // to live here as well as under `item` below.
       requireStock(state, unit, ability);
-      performAction(state, unit, ability, cmd.target, rng, events);
+      performAction(state, unit, ability, cmd.target, rng, events, cmd.targetUnit);
       spendStock(state, unit, ability);
       break;
     }

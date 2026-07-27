@@ -26,7 +26,13 @@ import { SPRITE_LAYER, installPostStack, markAsSprite, type PostStackPipeline } 
 import { ALL_ABILITIES, bootstrapContent } from './content';
 import { ITEMS_BY_ID } from './items';
 import { actionSetOf } from './abilityIndex';
-import { canAimAt, coveredTiles, legalTargets, primaryTargetAt } from './targeting';
+import {
+  abilityTargetsTiles,
+  canAimAt,
+  coveredTiles,
+  legalTargets,
+  primaryTargetAt,
+} from './targeting';
 import {
   abilityById,
   abilityItemsFor,
@@ -857,7 +863,12 @@ export class Game {
     this.terrain?.clearHighlights('attack');
     this.terrain?.clearHighlights('aoe');
     this.terrain?.setPath(null);
-    if (mode.kind !== 'target') this.ui.setTargetPreview(null);
+    if (mode.kind !== 'target') {
+      this.ui.setTargetPreview(null);
+      // Leaving aim mode must drop red/blue AoE rings so they do not stick on
+      // the next command menu.
+      this.clearAoEUnitHighlights(this.activeUnit());
+    }
   }
 
   private enterCommandMode(unit: Unit): void {
@@ -1219,34 +1230,82 @@ export class Game {
 
   private onHover(tile: Vec3 | null): void {
     if (this.busy) return;
+    // Unit-targeted abilities snap the cursor onto a legal occupant — empty
+    // tiles are not aim points, so hover slides to the nearest valid unit.
+    const aim = this.snapTargetTile(tile);
     const same =
       this.hoverTile !== null &&
-      tile !== null &&
-      this.hoverTile.x === tile.x &&
-      this.hoverTile.y === tile.y;
-    this.hoverTile = tile;
+      aim !== null &&
+      this.hoverTile.x === aim.x &&
+      this.hoverTile.y === aim.y;
+    this.hoverTile = aim;
     if (same) return;
 
     this.terrain?.clearHighlights('cursor');
-    if (tile && this.scenario.layers.highlights) {
-      this.terrain?.setHighlight('cursor', [tile]);
+    if (aim && this.scenario.layers.highlights) {
+      // Higher intensity + the shader's cursor-specific rim makes the selected
+      // tile readable at gameplay zoom.
+      this.terrain?.setHighlight('cursor', [aim], 1.35);
     }
 
-    const occupant = tile ? this.unitAt(tile) : undefined;
+    const occupant = aim ? this.unitAt(aim) : undefined;
     this.ui.setInspectedUnit(occupant ? unitVM(this.state, occupant) : null);
 
-    if (this.mode.kind === 'move' && tile) {
+    if (this.mode.kind === 'move' && aim) {
       const unit = this.activeUnit();
       if (unit) {
         const occupied = buildOccupancy(this.state.units.values());
-        const path = pathTo(this.state.field, unit, occupied, tile, undefined);
+        const path = pathTo(this.state.field, unit, occupied, aim, undefined);
         this.terrain?.setPath(path.length > 1 ? path : null);
       }
     }
 
-    if (this.mode.kind === 'target' && tile) {
-      this.previewTarget(tile);
+    if (this.mode.kind === 'target' && aim) {
+      this.previewTarget(aim);
+    } else if (this.mode.kind === 'target' && !aim) {
+      this.ui.setTargetPreview(null);
+      this.terrain?.clearHighlights('aoe');
+      this.clearAoEUnitHighlights(this.activeUnit());
     }
+  }
+
+  /**
+   * For unit-targeted abilities, remap a pointer tile onto a legal unit's tile
+   * (prefer the occupant under the pointer, else the nearest legal unit within
+   * one chebyshev step so the cursor does not stick on empty ground).
+   */
+  private snapTargetTile(tile: Vec3 | null): Vec3 | null {
+    if (!tile) return null;
+    if (this.mode.kind !== 'target') return tile;
+    const unit = this.activeUnit();
+    if (!unit) return tile;
+    const ability = this.mode.ability;
+    if (abilityTargetsTiles(ability)) return tile;
+    if (canAimAt(this.state, unit, ability, tile, { tiles: [], keys: this.mode.legal })) {
+      return tile;
+    }
+    // Nearest legal occupant by chebyshev distance; refuse if nothing is in range.
+    let best: Vec3 | null = null;
+    let bestDist = Infinity;
+    for (const other of this.state.units.values()) {
+      if (other.removed) continue;
+      const key = tileKey(other.pos.x, other.pos.y);
+      if (!this.mode.legal.has(key)) continue;
+      const aim: Vec3 = {
+        x: other.pos.x,
+        y: other.pos.y,
+        z: other.pos.z,
+      };
+      if (!canAimAt(this.state, unit, ability, aim, { tiles: [], keys: this.mode.legal })) continue;
+      const d = Math.max(Math.abs(other.pos.x - tile.x), Math.abs(other.pos.y - tile.y));
+      if (d < bestDist) {
+        bestDist = d;
+        best = aim;
+      }
+    }
+    // Only snap when the pointer is adjacent to a valid target — otherwise leave
+    // the cursor free so the player can pan across the board without it jumping.
+    return bestDist <= 1 ? best : null;
   }
 
   private previewTarget(tile: Vec3): void {
@@ -1257,16 +1316,57 @@ export class Game {
     if (!this.mode.legal.has(tileKey(tile.x, tile.y))) {
       this.ui.setTargetPreview(null);
       this.terrain?.clearHighlights('aoe');
+      this.clearAoEUnitHighlights(unit);
       return;
     }
 
+    const covered = coveredTiles(this.state, unit, ability, tile);
     if (this.scenario.layers.highlights) {
-      this.terrain?.setHighlight('aoe', coveredTiles(this.state, unit, ability, tile));
+      this.terrain?.setHighlight('aoe', covered);
     }
+    this.markAffectedUnits(unit, covered);
     const victim = primaryTargetAt(this.state, unit, ability, tile);
     this.ui.setTargetPreview(
       victim ? targetPreviewVM(this.state, unit, ability, victim) : null,
     );
+  }
+
+  /**
+   * Paint every unit inside the aimed footprint from the *caster's* perspective:
+   * red for enemies of the caster, blue for allies (including a player unit
+   * caught in their own fireball — the highlight exists to prevent that mistake).
+   */
+  private markAffectedUnits(caster: Unit, covered: readonly Vec3[]): void {
+    const coveredKeys = new Set(covered.map((t) => tileKey(t.x, t.y)));
+    for (const sprite of this.sprites.all) {
+      const other = this.state.units.get(sprite.unitId);
+      if (!other || other.removed) {
+        sprite.setSelection('none');
+        continue;
+      }
+      if (other.id === caster.id) {
+        sprite.setSelection('active');
+        sprite.setTurnMarker(true);
+        continue;
+      }
+      if (!coveredKeys.has(tileKey(other.pos.x, other.pos.y))) {
+        sprite.setSelection('none');
+        sprite.setTurnMarker(false);
+        continue;
+      }
+      // Caster's team, not the player's: a confused ally casting on you is still
+      // "enemy of the caster" and must read red.
+      sprite.setSelection(other.team === caster.team ? 'ally-aoe' : 'enemy-aoe');
+      sprite.setTurnMarker(false);
+    }
+  }
+
+  private clearAoEUnitHighlights(caster: Unit | undefined): void {
+    for (const sprite of this.sprites.all) {
+      const isActive = caster !== undefined && sprite.unitId === caster.id;
+      sprite.setSelection(isActive ? 'active' : 'none');
+      sprite.setTurnMarker(isActive);
+    }
   }
 
   private async onClick(tile: Vec3): Promise<void> {
@@ -1287,15 +1387,16 @@ export class Game {
 
     if (this.mode.kind === 'target' && unit) {
       const ability = this.mode.ability;
-      if (!canAimAt(this.state, unit, ability, tile)) return;
-      const victim = primaryTargetAt(this.state, unit, ability, tile);
+      const aim = this.snapTargetTile(tile) ?? tile;
+      if (!canAimAt(this.state, unit, ability, aim)) return;
+      const victim = primaryTargetAt(this.state, unit, ability, aim);
       this.setMode({ kind: 'idle' });
       this.ui.closeMenus();
       const ok = await this.submit({
         kind: 'act',
         unit: unit.id,
         ability: ability.id,
-        target: tile,
+        target: aim,
         ...(victim ? { targetUnit: victim.id } : {}),
       });
       if (ok && this.state.active === unit.id) this.enterCommandMode(unit);
@@ -1314,12 +1415,14 @@ export class Game {
 
   refreshHud(): void {
     const active = this.activeUnit();
-    // The turn marker and selection ring belong to whoever holds the turn,
-    // including an AI unit the player never opens a menu for.
-    for (const sprite of this.sprites.all) {
-      const isActive = active !== undefined && sprite.unitId === active.id;
-      sprite.setTurnMarker(isActive);
-      sprite.setSelection(isActive ? (active.team === 'player' ? 'active' : 'hostile') : 'none');
+    // While aiming, previewTarget owns red/blue AoE rings — do not clobber them
+    // with the generic active-unit selection pass.
+    if (this.mode.kind !== 'target') {
+      for (const sprite of this.sprites.all) {
+        const isActive = active !== undefined && sprite.unitId === active.id;
+        sprite.setTurnMarker(isActive);
+        sprite.setSelection(isActive ? (active.team === 'player' ? 'active' : 'hostile') : 'none');
+      }
     }
     if (!this.scenario.layers.ui) return;
     this.ui.setTurnOrder(turnOrderVM(this.state));

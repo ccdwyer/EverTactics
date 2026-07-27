@@ -756,19 +756,27 @@ void main() {
   if (bitSet(mask, 4.0)) d = min(d, 1.0 - vLocal.y);
   if (bitSet(mask, 8.0)) d = min(d, vLocal.x);
 
-  float rimSoft = 1.0 - smoothstep(0.0, 0.20, d);
-  float rimCore = 1.0 - smoothstep(0.0, 0.06, d);
-
   float phase = uTime * 2.4 - (vTile.x + vTile.y) * 0.45;
   float pulse = 0.80 + 0.20 * sin(phase);
   // Slow diagonal shimmer keeps the fill from reading as a dead wash.
   float hatch = 0.5 + 0.5 * sin((vLocal.x + vLocal.y) * 22.0 - uTime * 1.6 + (vTile.x - vTile.y) * 3.0);
 
+  // Cursor needs a wider, harder rim so the selected tile is obvious at
+  // gameplay zoom without hunting for a thin edge.
+  float isCursor = kind > 5.5 ? 1.0 : 0.0;
+  float rimSoftW = mix(0.20, 0.34, isCursor);
+  float rimCoreW = mix(0.06, 0.14, isCursor);
+  float rimSoft = 1.0 - smoothstep(0.0, rimSoftW, d);
+  float rimCore = 1.0 - smoothstep(0.0, rimCoreW, d);
+
   float fill = 0.24 + 0.08 * hatch + rimSoft * 0.22;
-  float a = mix(fill, 0.92, rimCore) * pulse * intensity;
+  fill = mix(fill, 0.42 + 0.10 * hatch + rimSoft * 0.35, isCursor);
+  float a = mix(fill, mix(0.92, 1.0, isCursor), rimCore) * pulse * intensity;
+  a = mix(a, min(1.0, a * 1.25), isCursor);
 
   vec3 c = mix(col * 1.05, mix(col, vec3(1.0), 0.65), rimCore);
   c += col * rimSoft * 0.55;
+  c = mix(c, mix(col * 1.15, vec3(1.0), 0.55 * rimCore), isCursor);
 
   // Palette above is authored display-referred; convert before the sRGB encode.
   gl_FragColor = vec4(c * c, clamp(a, 0.0, 1.0));

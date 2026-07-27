@@ -101,9 +101,24 @@ export function primaryTargetAt(
 }
 
 /**
+ * Whether an ability aims at a **tile** (lands where you point; hits whoever is
+ * there at resolution) or at a **unit** (follows the selected unit).
+ *
+ * Prefers the authored `Ability.targetsTiles` flag; when absent, treats any
+ * non-self ability with a burst radius as tile-aimed (Fire, Cure splash, etc.)
+ * and everything else as unit-aimed (Steal, single-target buffs, Holy).
+ */
+export function abilityTargetsTiles(ability: Ability): boolean {
+  if (ability.targetsTiles === true) return true;
+  if (ability.targetsTiles === false) return false;
+  if (ability.range.self) return false;
+  return (ability.range.radius ?? 0) > 0;
+}
+
+/**
  * Whether the reducer will accept an `act` aimed here — the last gate before a
- * click becomes a command. Single-tile, unit-targeting abilities need an
- * occupant; area and tile-targeting abilities do not.
+ * click becomes a command. Unit-targeting abilities need an occupant; tile-
+ * targeting abilities (including multi-tile bursts) do not.
  */
 export function canAimAt(
   state: BattleState,
@@ -113,7 +128,6 @@ export function canAimAt(
   targets: TargetSet = legalTargets(state, unit, ability),
 ): boolean {
   if (!targets.keys.has(tileKey(target.x, target.y))) return false;
-  const range = effectiveRange(unit, ability);
-  if (ability.targetsTiles === true || range.radius > 0) return true;
+  if (abilityTargetsTiles(ability)) return true;
   return primaryTargetAt(state, unit, ability, target) !== undefined;
 }

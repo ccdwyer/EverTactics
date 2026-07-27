@@ -1463,28 +1463,36 @@ function getSelectionRingTexture(): THREE.CanvasTexture {
   ctx.clearRect(0, 0, size, size);
   ctx.translate(c, c);
 
+  // Outer glow so the reticle stays findable at gameplay zoom.
   ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 14;
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath();
+  ctx.arc(0, 0, size * 0.42, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 8;
   ctx.beginPath();
   ctx.arc(0, 0, size * 0.40, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.lineWidth = 2;
-  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 3;
+  ctx.globalAlpha = 0.7;
   ctx.beginPath();
-  ctx.arc(0, 0, size * 0.455, 0, Math.PI * 2);
+  ctx.arc(0, 0, size * 0.47, 0, Math.PI * 2);
   ctx.stroke();
 
   // Four cardinal notches — the detail that makes it read as a targeting reticle
   // rather than a glow, and it stays legible at two device pixels per texel.
   ctx.globalAlpha = 1;
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 10;
   for (let i = 0; i < 4; i++) {
     ctx.save();
     ctx.rotate((i * Math.PI) / 2 + Math.PI / 4);
     ctx.beginPath();
-    ctx.moveTo(size * 0.33, 0);
-    ctx.lineTo(size * 0.475, 0);
+    ctx.moveTo(size * 0.30, 0);
+    ctx.lineTo(size * 0.49, 0);
     ctx.stroke();
     ctx.restore();
   }
@@ -2167,10 +2175,12 @@ function getStatusAtlas(): StatusAtlas {
   });
 
   const texture = new THREE.CanvasTexture(canvas);
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.generateMipmaps = true;
-  texture.anisotropy = 4;
+  // Same discipline as unit sprites: nearest sample, no mip chain. Linear
+  // filtering was the whole of the 'blurred status icons' report.
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.anisotropy = 1;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
 
@@ -2236,13 +2246,24 @@ export interface SpriteViewContext {
   yawRadians: number;
 }
 
-export type SelectionState = 'none' | 'selected' | 'active' | 'target' | 'hostile';
+export type SelectionState =
+  | 'none'
+  | 'selected'
+  | 'active'
+  | 'target'
+  | 'hostile'
+  /** Ally inside the caster's current AoE — blue-with-warning, not red. */
+  | 'ally-aoe'
+  /** Enemy inside the caster's current AoE. */
+  | 'enemy-aoe';
 
 const SELECTION_COLORS: Readonly<Record<Exclude<SelectionState, 'none'>, number>> = {
   selected: 0x8ec8ff,
   active: 0xffd977,
   target: 0x9ef2b8,
   hostile: 0xff7a6a,
+  'ally-aoe': 0x5eb8ff,
+  'enemy-aoe': 0xff4a3a,
 };
 
 /**
@@ -2317,6 +2338,12 @@ export class UnitSprite {
    * per-cell table the pose path uses.
    */
   private frameFootCenterX = 0;
+  /**
+   * Texels the pose's boots sit above the mesh origin (the sheet-wide ground
+   * line / SHP origin). Subtracted from world Y so a standing figure whose art
+   * floats inside its cell still plants on the tile surface.
+   */
+  private frameFootPlant = 0;
   private frameHeadTexels = 0;
 
   private walker: PathWalker | null = null;
@@ -2349,7 +2376,9 @@ export class UnitSprite {
     this.sheet = sheet;
     this.options = {
       depthBias: options.depthBias ?? 0.14,
-      footSink: options.footSink ?? 2,
+      // Per-pose footBottomY now plants the boots; a single-texel sink keeps the
+      // contact darkening reading as pressed-in rather than hovering.
+      footSink: options.footSink ?? 1,
       castShadow: options.castShadow ?? true,
       receiveShadow: options.receiveShadow ?? true,
       contactShadow: options.contactShadow ?? true,
@@ -2407,7 +2436,9 @@ export class UnitSprite {
     }
 
     {
-      const size = TILE_SIZE * 1.25;
+      // Larger than the tile so AoE and selection rings read at gameplay zoom
+      // without hunting for a thin halo under the boots.
+      const size = TILE_SIZE * 1.65;
       const geometry = new THREE.PlaneGeometry(size, size);
       geometry.rotateX(-Math.PI / 2);
       const material = new THREE.MeshBasicMaterial({
@@ -2890,8 +2921,10 @@ export class UnitSprite {
     const viewPos = this.scratchView.copy(world).applyMatrix4(camera.matrixWorldInverse);
 
     // Art-space offsets act in the screen plane; view x/y *are* screen right/up.
+    // frameFootPlant pulls a pose whose boots sit above the cell floor down onto
+    // the tile; footSink is a one-texel contact bite after that.
     viewPos.x += texelsToWorld(offsetX);
-    viewPos.y += texelsToWorld(offsetY - this.options.footSink);
+    viewPos.y += texelsToWorld(offsetY - this.frameFootPlant - this.options.footSink);
     viewPos.z += this.options.depthBias;
 
     const w = view.worldPerDevicePixel;
@@ -3049,12 +3082,23 @@ export class UnitSprite {
       this.turnMarker.rotation.set(0, view.yawRadians, 0, 'YXZ');
     }
 
-    this.statusStrip.position.set(
-      this.mesh.position.x,
-      headY + texelsToWorld(9),
-      this.mesh.position.z,
-    );
-    this.statusStrip.rotation.set(0, view.yawRadians, 0, 'YXZ');
+    {
+      // Snap the strip to whole device pixels the same way the body is snapped —
+      // fractional placement was a second source of icon blur after linear filter.
+      const stripY = headY + texelsToWorld(9);
+      const stripView = this.scratchView.set(
+        this.mesh.position.x,
+        stripY,
+        this.mesh.position.z,
+      ).applyMatrix4(camera.matrixWorldInverse);
+      if (w > 0) {
+        stripView.x = Math.round(stripView.x / w) * w;
+        stripView.y = Math.round(stripView.y / w) * w;
+      }
+      stripView.applyMatrix4(camera.matrixWorld);
+      this.statusStrip.position.copy(stripView);
+      this.statusStrip.rotation.set(0, view.yawRadians, 0, 'YXZ');
+    }
 
     // 8 — floating text.
     if (this.labels.length > 0) this.updateLabels(dt, view, headY);
@@ -3187,6 +3231,8 @@ export class UnitSprite {
     // limbs around, so it must not be re-derived per frame. See 'measureExtents'.
     this.frameFootCenterX = composer.layout.originX - width / 2;
     this.frameHeadTexels = composed.headTopY - composer.layout.originY;
+    // SHP origin is the plant point; only drop further if art hangs above it.
+    this.frameFootPlant = Math.max(0, composed.footBottomY - composer.layout.originY);
     return true;
   }
 
@@ -3232,6 +3278,10 @@ export class UnitSprite {
     this.bundle.uniforms.uBodyTexels.value = Math.max(8, body);
     this.frameFootCenterX = layout.footCenterX[cell] ?? 0;
     this.frameHeadTexels = (headTop || layout.frameHeight) - layout.groundOffset;
+    // Standing poses often float several texels above the sheet-wide ground line
+    // (groundOffset is the lowest opaque row *anywhere* in the band). Plant this
+    // pose's own boots, not the crouch/death pose that pinned the sheet figure.
+    this.frameFootPlant = Math.max(0, footBase - layout.groundOffset);
   }
 
   dispose(): void {
