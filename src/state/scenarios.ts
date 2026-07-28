@@ -16,7 +16,6 @@ import { jobActions, jobSkillset } from './abilityIndex';
 import { bootstrapContent } from './content';
 
 import {
-  beginScenario,
   unitFromPersisted,
   type CampaignState,
 } from '@core/campaign';
@@ -152,9 +151,9 @@ export interface BuiltScenario {
 }
 
 /**
- * Campaign path result: a playable battle plus the campaign with
- * `progress.current` pinned to this scenario. Pass `.campaign` into
- * `battleToCampaign` after the fight so completion is recorded.
+ * Campaign path result: a playable battle plus the same campaign object the
+ * caller passed in, with `progress.current` pinned to this scenario (mutated
+ * in place). `battleToCampaign(originalCampaign, battle, ts)` works.
  */
 export interface CampaignBuiltScenario extends BuiltScenario {
   campaign: CampaignState;
@@ -317,10 +316,10 @@ export function buildScenario(scenario: Scenario): BuiltScenario {
  * changes the fight. Map geometry and enemy placements still come from the
  * scenario definition.
  *
- * Also pins `progress.current` to `scenario.id` on the returned campaign
- * (overwriting any stale value). Callers must feed that campaign into
- * {@link battleToCampaign} after the fight — there is no separate launch step
- * to remember and no optional scenarioId on write-back.
+ * **Mutates** `campaign.progress.current` to `scenario.id` (overwriting any
+ * stale value) so the object the caller already holds works with
+ * {@link battleToCampaign} — there is no separate launched copy to remember
+ * and no optional scenarioId on write-back.
  *
  * Does not replace {@link buildScenario}: diagnostic scenes and the screenshot
  * harness keep using the hardcoded path.
@@ -331,14 +330,14 @@ export function campaignToBattle(
 ): CampaignBuiltScenario {
   bootstrapContent();
 
-  // Launch step is part of this function, not a separate beginScenario the
-  // caller might forget. Reuses updatedAt (no Date.now in the stack).
-  const launched = beginScenario(campaign, scenario.id, campaign.updatedAt);
+  // Pin on the caller's object. battleToCampaign(campaign, battle, ts) must
+  // record completion without requiring the caller to keep built.campaign.
+  campaign.progress.current = scenario.id;
 
   const field = generateMap(scenario.mapId);
   // Campaign seed drives CT stagger and battle RNG — scenario.seed is unused
   // on this path (it remains the seed for the diagnostic buildScenario path).
-  const battleSeed = launched.seed;
+  const battleSeed = campaign.seed;
   const rng = createRng(battleSeed);
   const units = new Map<UnitId, Unit>();
   const personalities = new Map<UnitId, PersonalityId>();
@@ -349,10 +348,10 @@ export function campaignToBattle(
 
   // Roster order → scenario start tiles. Extra roster members sit out; extra
   // start tiles stay empty. Formation screen will choose the mapping later.
-  const deployCount = Math.min(launched.roster.length, playerPlacements.length);
+  const deployCount = Math.min(campaign.roster.length, playerPlacements.length);
   for (let i = 0; i < deployCount; i++) {
     const placement = playerPlacements[i]!;
-    const persisted = launched.roster[i]!;
+    const persisted = campaign.roster[i]!;
     const pos = resolvePlacement(field, placement.at, taken);
     const unit = unitFromPersisted(persisted, {
       team: 'player',
@@ -372,7 +371,7 @@ export function campaignToBattle(
   }
 
   const playerStock = new Map<ItemId, number>();
-  for (const [id, n] of Object.entries(launched.inventory)) {
+  for (const [id, n] of Object.entries(campaign.inventory)) {
     if (n > 0) playerStock.set(id, n);
   }
 
@@ -391,7 +390,7 @@ export function campaignToBattle(
 
   primeDerived(units.values());
 
-  return { scenario, state, personalities, campaign: launched };
+  return { scenario, state, personalities, campaign };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

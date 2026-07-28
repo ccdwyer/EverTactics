@@ -25,8 +25,12 @@ import type {
   Vec3,
   Zodiac,
 } from './types';
+import { JOBS } from './jobs';
 import {
   createUnit,
+  EXP_PER_LEVEL,
+  MAX_JOB_LEVEL,
+  MAX_LEVEL,
   refreshDerived,
   setRawStats,
   type RawStats,
@@ -325,7 +329,72 @@ const ZODIACS: ReadonlySet<string> = new Set([
   'serpentarius',
 ]);
 
+/** Top-level keys of a current-version CampaignState. Any other key is corrupt/future. */
+const CAMPAIGN_KEYS: ReadonlySet<string> = new Set([
+  'version',
+  'seed',
+  'gil',
+  'roster',
+  'inventory',
+  'progress',
+  'createdAt',
+  'updatedAt',
+]);
+
+const PROGRESS_KEYS: ReadonlySet<string> = new Set(['completed', 'current']);
+
+const PERSISTED_UNIT_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'name',
+  'gender',
+  'zodiac',
+  'level',
+  'exp',
+  'totalExp',
+  'currentJob',
+  'jobs',
+  'equipment',
+  'secondaryAction',
+  'reaction',
+  'support',
+  'movement',
+  'raw',
+  'brave',
+  'faith',
+]);
+
+const RAW_STAT_KEYS: ReadonlySet<string> = new Set(['hp', 'mp', 'pa', 'ma', 'spd']);
+
+const JOB_PROGRESS_KEYS: ReadonlySet<string> = new Set(['level', 'jp', 'totalJp', 'learned']);
+
+const EQUIPMENT_SLOT_KEYS: ReadonlySet<string> = new Set([
+  'rightHand',
+  'leftHand',
+  'head',
+  'body',
+  'accessory',
+]);
+
+/**
+ * Current-version saves must not silently drop unknown fields.
+ * Reject so a future schema key is never rewritten away on load.
+ */
+function rejectUnknownKeys(
+  obj: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  path: string,
+): void {
+  for (const key of Object.keys(obj)) {
+    if (!allowed.has(key)) {
+      throw new Error(`campaign migrate: ${path} has unknown field "${key}"`);
+    }
+  }
+}
+
 function parseCurrentVersion(obj: Record<string, unknown>): CampaignState {
+  // Unknown top-level keys would be stripped by reconstruction — reject instead.
+  rejectUnknownKeys(obj, CAMPAIGN_KEYS, 'campaign');
+
   if (!isFiniteInt(obj.seed)) {
     throw new Error('campaign migrate: missing or invalid seed (must be an integer)');
   }
@@ -363,7 +432,9 @@ function parseCurrentVersion(obj: Record<string, unknown>): CampaignState {
 
 /**
  * Current-version inventory: every entry must be a non-negative integer.
- * Invalid counts reject the whole save — never drop keys or floor silently.
+ * Invalid counts reject the whole save — never drop keys, floor, or rewrite.
+ * Zero counts are preserved so a current-version blob round-trips byte-identically
+ * (migration of *older* versions may still drop zeros; this path must not).
  */
 function requireInventory(raw: object): Record<ItemId, number> {
   const out: Record<ItemId, number> = {};
@@ -373,13 +444,14 @@ function requireInventory(raw: object): Record<ItemId, number> {
         `campaign migrate: inventory["${id}"] must be a non-negative integer`,
       );
     }
-    if ((n as number) > 0) out[id] = n as number;
+    out[id] = n as number;
   }
   return out;
 }
 
 function requireProgress(raw: object): CampaignProgress {
   const obj = raw as Record<string, unknown>;
+  rejectUnknownKeys(obj, PROGRESS_KEYS, 'progress');
   if (!Array.isArray(obj.completed)) {
     throw new Error('campaign migrate: progress.completed must be an array');
   }
@@ -408,33 +480,53 @@ function requirePersistedUnit(raw: unknown, index: number): PersistedUnit {
   }
   const u = raw as Record<string, unknown>;
   const path = `roster[${index}]`;
+  rejectUnknownKeys(u, PERSISTED_UNIT_KEYS, path);
 
   if (typeof u.id !== 'string') throw new Error(`campaign migrate: ${path}.id missing`);
   if (typeof u.name !== 'string') throw new Error(`campaign migrate: ${path}.name missing`);
-  if (typeof u.currentJob !== 'string') {
-    throw new Error(`campaign migrate: ${path}.currentJob missing`);
-  }
   if (typeof u.gender !== 'string' || !GENDERS.has(u.gender)) {
     throw new Error(`campaign migrate: ${path}.gender invalid`);
   }
   if (typeof u.zodiac !== 'string' || !ZODIACS.has(u.zodiac)) {
     throw new Error(`campaign migrate: ${path}.zodiac invalid`);
   }
-  if (!isFiniteInt(u.level) || (u.level as number) < 1) {
-    throw new Error(`campaign migrate: ${path}.level invalid (must be integer >= 1)`);
+  if (!isFiniteInt(u.level) || (u.level as number) < 1 || (u.level as number) > MAX_LEVEL) {
+    throw new Error(
+      `campaign migrate: ${path}.level invalid (must be integer 1..${MAX_LEVEL})`,
+    );
   }
-  if (!isFiniteNonNegInt(u.exp)) {
-    throw new Error(`campaign migrate: ${path}.exp invalid (must be non-negative integer)`);
+  // Engine keeps exp in [0, EXP_PER_LEVEL) and forces 0 at MAX_LEVEL (see gainExp).
+  if (
+    !isFiniteInt(u.exp) ||
+    (u.exp as number) < 0 ||
+    (u.exp as number) >= EXP_PER_LEVEL
+  ) {
+    throw new Error(
+      `campaign migrate: ${path}.exp invalid (must be integer 0..${EXP_PER_LEVEL - 1})`,
+    );
+  }
+  if ((u.level as number) >= MAX_LEVEL && (u.exp as number) !== 0) {
+    throw new Error(
+      `campaign migrate: ${path}.exp must be 0 at level ${MAX_LEVEL}`,
+    );
   }
   // totalExp is required at the current schema version — never default to 0.
   if (!isFiniteNonNegInt(u.totalExp)) {
     throw new Error(`campaign migrate: ${path}.totalExp missing or invalid (must be non-negative integer)`);
   }
-  if (!isFiniteNonNegInt(u.brave)) {
-    throw new Error(`campaign migrate: ${path}.brave invalid (must be non-negative integer)`);
+  if (!isFiniteInt(u.brave) || (u.brave as number) < 0 || (u.brave as number) > 100) {
+    throw new Error(`campaign migrate: ${path}.brave invalid (must be integer 0..100)`);
   }
-  if (!isFiniteNonNegInt(u.faith)) {
-    throw new Error(`campaign migrate: ${path}.faith invalid (must be non-negative integer)`);
+  if (!isFiniteInt(u.faith) || (u.faith as number) < 0 || (u.faith as number) > 100) {
+    throw new Error(`campaign migrate: ${path}.faith invalid (must be integer 0..100)`);
+  }
+  if (typeof u.currentJob !== 'string') {
+    throw new Error(`campaign migrate: ${path}.currentJob missing`);
+  }
+  if (!JOBS.has(u.currentJob)) {
+    throw new Error(
+      `campaign migrate: ${path}.currentJob "${u.currentJob}" is not a known job`,
+    );
   }
   if (u.raw === null || typeof u.raw !== 'object' || Array.isArray(u.raw)) {
     throw new Error(`campaign migrate: ${path}.raw missing or invalid`);
@@ -501,6 +593,7 @@ function requirePersistedUnit(raw: unknown, index: number): PersistedUnit {
 }
 
 function requireRaw(r: Record<string, unknown>, path: string): RawStats {
+  rejectUnknownKeys(r, RAW_STAT_KEYS, `${path}.raw`);
   for (const key of ['hp', 'mp', 'pa', 'ma', 'spd'] as const) {
     if (!isFiniteNonNegInt(r[key])) {
       throw new Error(
@@ -523,13 +616,20 @@ function requireJobs(
 ): Record<JobId, PersistedJobProgress> {
   const out: Record<JobId, PersistedJobProgress> = {};
   for (const [jobId, value] of Object.entries(raw)) {
+    // Current-version job keys must exist in the job table — never invent rows.
+    if (!JOBS.has(jobId)) {
+      throw new Error(`campaign migrate: ${path}.jobs["${jobId}"] is not a known job`);
+    }
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error(`campaign migrate: ${path}.jobs["${jobId}"] is not an object`);
     }
     const p = value as Record<string, unknown>;
     const jpPath = `${path}.jobs["${jobId}"]`;
-    if (!isFiniteInt(p.level) || (p.level as number) < 1) {
-      throw new Error(`campaign migrate: ${jpPath}.level invalid (must be integer >= 1)`);
+    rejectUnknownKeys(p, JOB_PROGRESS_KEYS, jpPath);
+    if (!isFiniteInt(p.level) || (p.level as number) < 1 || (p.level as number) > MAX_JOB_LEVEL) {
+      throw new Error(
+        `campaign migrate: ${jpPath}.level invalid (must be integer 1..${MAX_JOB_LEVEL})`,
+      );
     }
     if (!isFiniteNonNegInt(p.jp)) {
       throw new Error(`campaign migrate: ${jpPath}.jp invalid (must be non-negative integer)`);
@@ -545,17 +645,20 @@ function requireJobs(
         throw new Error(`campaign migrate: ${jpPath}.learned[${i}] must be a string`);
       }
     }
+    // Preserve learned[] order exactly. Sorting would rewrite a current-version
+    // save and break round-trip equality (migration of older versions may sort).
     out[jobId] = {
       level: p.level as number,
       jp: p.jp as number,
       totalJp: p.totalJp as number,
-      learned: [...(p.learned as string[])].sort(),
+      learned: [...(p.learned as string[])],
     };
   }
   return out;
 }
 
 function requireEquipment(raw: Record<string, unknown>, path: string): Equipment {
+  rejectUnknownKeys(raw, EQUIPMENT_SLOT_KEYS, `${path}.equipment`);
   const equipment: Equipment = {};
   const slots = ['rightHand', 'leftHand', 'head', 'body', 'accessory'] as const;
   for (const slot of slots) {
@@ -717,12 +820,12 @@ function num(v: unknown, fallback: number): number {
 /**
  * Mark which scenario the player is entering.
  *
- * Prefer the campaign returned by {@link campaignToBattle} (in `state/scenarios.ts`),
- * which calls this automatically so callers cannot forget the step. Exposed for
- * tests and any non-battle launch path that still needs to pin `progress.current`.
+ * Pins `progress.current` on a *new* campaign object (does not mutate `campaign`).
+ * {@link campaignToBattle} mutates the caller's campaign in place instead, so
+ * write-back works with the object the caller already holds.
  *
- * Pure: returns a new campaign; does not mutate the input. Overwrites any stale
- * `progress.current` so a previous scenario cannot be credited by accident.
+ * Overwrites any stale `progress.current` so a previous scenario cannot be
+ * credited by accident.
  */
 export function beginScenario(
   campaign: CampaignState,
@@ -748,10 +851,10 @@ export function beginScenario(
  * party inventory stock, and — on victory — `progress.current` into
  * `progress.completed`. Does not mutate `campaign` or `battle`; returns a new state.
  *
- * Scenario identity comes only from `campaign.progress.current`. The launch path
- * is {@link campaignToBattle}, which returns a campaign with `current` set to the
- * scenario id (overwriting any stale value). There is no optional scenarioId
- * parameter — callers pass the campaign returned from launch into this function.
+ * Scenario identity comes only from `campaign.progress.current`. Launch via
+ * {@link campaignToBattle} pins `current` on the *caller's* campaign object, so
+ * `battleToCampaign(originalCampaign, battle, ts)` records completion without
+ * requiring the caller to keep a separate launched copy.
  *
  * Inventory: reads `battle.inventories` for the player team if present. Does not
  * call `inventoryFor` (which would mutate the battle and manufacture default

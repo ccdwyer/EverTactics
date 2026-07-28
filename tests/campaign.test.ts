@@ -172,16 +172,36 @@ describe('campaign serialize / deserialize', () => {
     original.gil = 1500;
     original.progress.completed = ['tutorial-skirmish'];
     original.roster[0]!.exp = 47;
+    // Deliberately unsorted learned[] — current-version load must not re-sort.
     original.roster[0]!.jobs['knight'] = {
       level: 3,
       jp: 120,
       totalJp: 320,
-      learned: ['accumulate', 'throw-stone'].sort(),
+      learned: ['throw-stone', 'accumulate'],
     };
+    // Zero inventory count must survive round-trip, not be dropped.
+    original.inventory['use-ether'] = 0;
 
     const restored = deserialize(serialize(original));
     expect(restored).toEqual(original);
     expect(restored.version).toBe(CAMPAIGN_VERSION);
+    expect(restored.roster[0]!.jobs['knight']!.learned).toEqual(['throw-stone', 'accumulate']);
+    expect(restored.inventory['use-ether']).toBe(0);
+  });
+
+  it('current-version inventory count of 0 is preserved (not dropped)', () => {
+    const restored = migrate(validV1Shell({ inventory: { 'use-potion': 0 } }));
+    expect(restored.inventory).toEqual({ 'use-potion': 0 });
+  });
+
+  it('current-version learned array order is preserved (not sorted)', () => {
+    const unit = validPersistedUnit({
+      jobs: {
+        squire: { level: 1, jp: 0, totalJp: 0, learned: ['throw-stone', 'accumulate'] },
+      },
+    });
+    const restored = migrate(validV1Shell({ gil: 0, roster: [unit] }));
+    expect(restored.roster[0]!.jobs.squire!.learned).toEqual(['throw-stone', 'accumulate']);
   });
 
   it('migrate upgrades a hand-written v0 blob without throwing', () => {
@@ -368,6 +388,92 @@ describe('campaign serialize / deserialize', () => {
         }),
       ),
     ).toThrow(/currentJob/);
+  });
+
+  it('migrate rejects out-of-range brave/faith/level and unknown jobs', () => {
+    // Upper bounds from the engine: brave/faith 0..100, level 1..MAX_LEVEL (99).
+    // Previously only lower bounds were checked, so 1000 / level 100 / fake jobs
+    // were accepted as plausible saves.
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ brave: 1000 })] })),
+    ).toThrow(/brave/);
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ faith: 1000 })] })),
+    ).toThrow(/faith/);
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ level: 100 })] })),
+    ).toThrow(/level/);
+    expect(() =>
+      migrate(
+        validV1Shell({
+          gil: 0,
+          roster: [
+            validPersistedUnit({
+              currentJob: 'not-a-real-job',
+              jobs: { 'not-a-real-job': { level: 1, jp: 0, totalJp: 0, learned: [] } },
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/currentJob|known job/);
+    // Job progress key unknown to JOBS.
+    expect(() =>
+      migrate(
+        validV1Shell({
+          gil: 0,
+          roster: [
+            validPersistedUnit({
+              jobs: {
+                squire: { level: 1, jp: 0, totalJp: 0, learned: [] },
+                'fake-job': { level: 1, jp: 0, totalJp: 0, learned: [] },
+              },
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/known job/);
+  });
+
+  it('migrate rejects impossible EXP (engine keeps 0..99; 0 at level 99)', () => {
+    // gainExp levels when exp >= EXP_PER_LEVEL (100) and forces exp=0 at MAX_LEVEL.
+    // A current-version save with exp:100 is not a state the engine produces.
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ level: 10, exp: 100 })] })),
+    ).toThrow(/exp/);
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ level: 10, exp: 1000 })] })),
+    ).toThrow(/exp/);
+    // At max level the engine zeroes exp — non-zero is impossible.
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ level: 99, exp: 50 })] })),
+    ).toThrow(/exp/);
+    // Boundary: exp 0..99 at mid levels, and 0 at level 99, must still load.
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ level: 10, exp: 99 })] })),
+    ).not.toThrow();
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, roster: [validPersistedUnit({ level: 99, exp: 0 })] })),
+    ).not.toThrow();
+  });
+
+  it('migrate rejects unknown fields on a current-version save (never strip silently)', () => {
+    // Policy: migration may transform older versions; a current-version blob is
+    // never rewritten. Unknown keys would be dropped by field reconstruction —
+    // reject instead so a future schema field is not silently discarded.
+    expect(() =>
+      migrate(validV1Shell({ futureField: 42 })),
+    ).toThrow(/unknown field|futureField/);
+    expect(() =>
+      migrate(validV1Shell({ progress: { completed: [], mystery: true } })),
+    ).toThrow(/unknown field|mystery/);
+    expect(() =>
+      migrate(
+        validV1Shell({
+          gil: 0,
+          roster: [{ ...validPersistedUnit(), extraUnitField: 'nope' }],
+        }),
+      ),
+    ).toThrow(/unknown field|extraUnitField/);
   });
 
   it('migrate rejects a present but non-integer version (does not treat as v0)', () => {
@@ -656,7 +762,9 @@ describe('battleToCampaign', () => {
     }));
 
     const built = campaignToBattle(base, scenario);
-    expect(built.campaign.progress.current).toBe(scenario.id);
+    // Pins on the caller's object (same reference as built.campaign).
+    expect(base.progress.current).toBe(scenario.id);
+    expect(built.campaign).toBe(base);
     const state = built.state;
 
     // Award known gains without playing a full fight.
@@ -673,8 +781,8 @@ describe('battleToCampaign', () => {
 
     state.phase = 'victory';
 
-    // Three-arg form with the campaign returned from campaignToBattle.
-    const after = battleToCampaign(built.campaign, state, 200);
+    // Three-arg form with the original campaign the caller already held.
+    const after = battleToCampaign(base, state, 200);
     expect(after.updatedAt).toBe(200);
     expect(after.createdAt).toBe(base.createdAt);
     expect(after.progress.completed).toContain(scenario.id);
@@ -694,28 +802,22 @@ describe('battleToCampaign', () => {
       expect(jobAfter!.totalJp).toBe((jobBefore?.totalJp ?? 0) + 25);
     }
 
-    // Original campaign was not mutated.
+    // Write-back returns a new state; completed is not mutated onto the input.
     expect(base.progress.completed).not.toContain(scenario.id);
-    expect(base.progress.current).toBeUndefined();
     expect(base.updatedAt).toBe(100);
   });
 
-  it('campaignToBattle pins progress.current so battleToCampaign completes without a separate step', () => {
+  it('records completion when the original campaign is passed to battleToCampaign', () => {
+    // Brief contract: completion must not depend on which object the caller kept.
+    // campaignToBattle pins progress.current on the passed campaign in place.
     const base = campaignFromBattleOpen(8, 10);
     const scenario = getScenario('battle-open');
-
-    // The bridge is two calls: campaignToBattle → battleToCampaign.
-    // Feeding the *input* campaign (no current) must not complete — that would
-    // only work if someone invented a fourth scenarioId arg.
     const built = campaignToBattle(base, scenario);
-    expect(base.progress.current).toBeUndefined();
-    expect(built.campaign.progress.current).toBe(scenario.id);
+    expect(base.progress.current).toBe(scenario.id);
+    expect(built.campaign).toBe(base);
 
     built.state.phase = 'victory';
-    const forgotLaunch = battleToCampaign(base, built.state, 20);
-    expect(forgotLaunch.progress.completed).not.toContain(scenario.id);
-
-    const after = battleToCampaign(built.campaign, built.state, 20);
+    const after = battleToCampaign(base, built.state, 20);
     expect(after.progress.completed).toContain(scenario.id);
     expect(after.progress.current).toBe(scenario.id);
   });
@@ -726,11 +828,13 @@ describe('battleToCampaign', () => {
     const scenario = getScenario('battle-open');
 
     const built = campaignToBattle(base, scenario);
+    expect(base.progress.current).toBe(scenario.id);
+    expect(base.progress.current).not.toBe('old-stale-fight');
     expect(built.campaign.progress.current).toBe(scenario.id);
-    expect(built.campaign.progress.current).not.toBe('old-stale-fight');
 
     built.state.phase = 'victory';
-    const after = battleToCampaign(built.campaign, built.state, 20);
+    // Original campaign (not a separate launched copy) still completes correctly.
+    const after = battleToCampaign(base, built.state, 20);
     expect(after.progress.completed).toContain(scenario.id);
     expect(after.progress.completed).not.toContain('old-stale-fight');
   });
@@ -739,7 +843,7 @@ describe('battleToCampaign', () => {
     const base = campaignFromBattleOpen(3, 10);
     const built = campaignToBattle(base, getScenario('battle-open'));
     built.state.phase = 'defeat';
-    const after = battleToCampaign(built.campaign, built.state, 20);
+    const after = battleToCampaign(base, built.state, 20);
     expect(after.progress.completed).not.toContain('battle-open');
     // current still records where the player was.
     expect(after.progress.current).toBe('battle-open');
