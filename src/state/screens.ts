@@ -14,12 +14,13 @@
  * anything the screen calls affordable really is purchasable.
  */
 
-import { findItem } from './items';
+import { findItem, shopStockForChapter } from './items';
 import { unitVM } from './viewModels';
 
 import { ABILITY_SETS, getAbility } from '@core/abilities';
 import type { CampaignState, FormationEntry, PersistedUnit } from '@core/campaign';
 import { unitFromPersisted } from '@core/campaign';
+import { buyPrice, canAfford, sellPrice } from '@core/economy';
 import { JOBS, allJobs, findJob } from '@core/jobs';
 import { jobLevelOf, unlockStatus, type UnlockContext } from '@core/jobs/tree';
 import { canEquipItem, canSwitchToJob, EQUIP_SLOT_ORDER, type EquipSlot } from '@core/party';
@@ -36,6 +37,7 @@ import type {
   RosterEquipSlotVM,
   RosterScreenVM,
   RosterUnitEditVM,
+  ShopScreenVM,
   WorldMapScreenVM,
 } from '@ui/types';
 
@@ -469,6 +471,55 @@ export function worldMapScreenVM(campaign: CampaignState): WorldMapScreenVM {
         }
       : {}),
     gil: campaign.gil,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shop
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function shopScreenVM(
+  campaign: CampaignState,
+  opts: { chapter: number; townName: string },
+): ShopScreenVM {
+  const chapter = Math.max(1, Math.floor(opts.chapter));
+  const stock = shopStockForChapter(chapter).map((item) => {
+    const price = buyPrice(item.price);
+    return {
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      category: item.category,
+      price,
+      owned: campaign.inventory[item.id] ?? 0,
+      affordable: canAfford(campaign.gil, price),
+    };
+  });
+
+  const inventory = Object.entries(campaign.inventory)
+    .filter(([, count]) => count > 0)
+    .map(([itemId, count]) => {
+      const item = findItem(itemId);
+      return item
+        ? {
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            price: sellPrice(item.price),
+            count,
+          }
+        : null;
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    title: opts.townName,
+    subtitle: `Chapter ${chapter} provisions`,
+    chapter,
+    gil: campaign.gil,
+    stock,
+    inventory,
   };
 }
 

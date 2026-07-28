@@ -202,7 +202,10 @@ export class WorldMapScreen extends Screen {
 
   private confirm(): void {
     const node = this.vm?.nodes[this.cursor];
-    if (!node || node.state !== 'available') {
+    const canVisit =
+      node?.state === 'available' ||
+      (node?.kind === 'town' && node.state === 'completed');
+    if (!node || !canVisit) {
       play('error');
       this.mapPanel.shake();
       return;

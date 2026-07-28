@@ -11,7 +11,8 @@
  * Potion usable in battle.
  */
 
-import type { Item } from '@core/types';
+import type { DropTableEntry } from '@core/economy';
+import type { Item, ItemId } from '@core/types';
 
 function weapon(over: Partial<Item> & Pick<Item, 'id' | 'name' | 'category' | 'wp'>): Item {
   return {
@@ -219,3 +220,65 @@ export const ITEMS_BY_ID: ReadonlyMap<string, Item> = new Map(ITEMS.map((i) => [
 export function findItem(id: string): Item | undefined {
   return ITEMS_BY_ID.get(id);
 }
+
+export interface ShopStockEntry {
+  readonly itemId: ItemId;
+  /** First campaign chapter in which the item may be purchased. */
+  readonly chapter: number;
+}
+
+/**
+ * Authored campaign shop stock. Later chapters inherit every earlier entry.
+ * The item table remains the sole source of names, descriptions, and prices.
+ */
+export const SHOP_STOCK: readonly ShopStockEntry[] = [
+  { itemId: 'dagger', chapter: 1 },
+  { itemId: 'broadsword', chapter: 1 },
+  { itemId: 'javelin', chapter: 1 },
+  { itemId: 'oak-staff', chapter: 1 },
+  { itemId: 'rod', chapter: 1 },
+  { itemId: 'leather-helm', chapter: 1 },
+  { itemId: 'feather-hat', chapter: 1 },
+  { itemId: 'leather-armor', chapter: 1 },
+  { itemId: 'linen-robe', chapter: 1 },
+  { itemId: 'buckler', chapter: 1 },
+  { itemId: 'use-potion', chapter: 1 },
+  { itemId: 'use-antidote', chapter: 1 },
+  { itemId: 'use-phoenix-down', chapter: 1 },
+  { itemId: 'mythril-knife', chapter: 2 },
+  { itemId: 'long-sword', chapter: 2 },
+  { itemId: 'partisan', chapter: 2 },
+  { itemId: 'long-bow', chapter: 2 },
+  { itemId: 'white-staff', chapter: 2 },
+  { itemId: 'flame-rod', chapter: 2 },
+  { itemId: 'bronze-helm', chapter: 2 },
+  { itemId: 'green-beret', chapter: 2 },
+  { itemId: 'headband', chapter: 2 },
+  { itemId: 'chain-mail', chapter: 2 },
+  { itemId: 'silk-robe', chapter: 2 },
+  { itemId: 'leather-outfit', chapter: 2 },
+  { itemId: 'round-shield', chapter: 2 },
+  { itemId: 'use-hi-potion', chapter: 2 },
+  { itemId: 'use-ether', chapter: 2 },
+  { itemId: 'use-remedy', chapter: 2 },
+];
+
+export function shopStockForChapter(chapter: number): Item[] {
+  return SHOP_STOCK
+    .filter((entry) => entry.chapter <= chapter)
+    .map((entry) => findItem(entry.itemId))
+    .filter((item): item is Item => item !== undefined);
+}
+
+/** Loot candidates are gated by enemy level inside core/economy. */
+export const BATTLE_DROP_TABLE: readonly DropTableEntry[] = [
+  { itemId: 'use-potion', minLevel: 1, weight: 8 },
+  { itemId: 'use-antidote', minLevel: 1, weight: 3 },
+  { itemId: 'use-phoenix-down', minLevel: 4, weight: 2 },
+  { itemId: 'dagger', minLevel: 6, weight: 1 },
+  { itemId: 'use-hi-potion', minLevel: 10, weight: 5 },
+  { itemId: 'use-ether', minLevel: 12, weight: 3 },
+  { itemId: 'mythril-knife', minLevel: 16, weight: 1 },
+  { itemId: 'long-sword', minLevel: 18, weight: 1 },
+  { itemId: 'use-remedy', minLevel: 18, weight: 2 },
+];

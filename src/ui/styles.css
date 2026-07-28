@@ -2983,6 +2983,80 @@
 .et-unitcard__note { grid-column: 1 / -1; font-size: 11.5px; font-style: italic; color: var(--ink-muted); }
 .et-unitcard[data-team='enemy'] { border-color: rgba(217, 88, 74, 0.35); }
 
+/* ── shop screen ─────────────────────────────────────────────────────────── */
+.et-shop .et-screen__content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+}
+.et-shop__funds {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--gold-bright);
+}
+.et-shop__funds svg { width: 16px; height: 16px; }
+.et-shop__intro {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  color: var(--ink-muted);
+  font-style: italic;
+  letter-spacing: 0.04em;
+}
+.et-shop__intro-icon { width: 18px; height: 18px; color: var(--gold-bright); }
+.et-shop__panel { min-width: 0; min-height: 0; }
+.et-shop__panel .et-panel__body { height: 100%; min-height: 0; }
+.et-shop__panel.is-focused {
+  filter: drop-shadow(0 0 14px rgba(201, 162, 39, 0.2));
+}
+.et-shop__list { height: 100%; max-height: 64vh; overflow-y: auto; padding: 4px; }
+.et-shop-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  min-height: 64px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(217, 193, 137, 0.13);
+}
+.et-shop-row__main,
+.et-shop-row__value { display: flex; flex-direction: column; min-width: 0; }
+.et-shop-row__value { align-items: flex-end; gap: 4px; white-space: nowrap; }
+.et-shop-row__name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink-bright);
+}
+.et-shop-row__description {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 11.5px;
+  font-style: italic;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.et-shop-row__price {
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+}
+.et-shop-row__owned { color: var(--ink-muted); font-size: 11px; letter-spacing: 0.08em; }
+.et-shop__inventory .et-shop-row__name { color: #33280f; }
+.et-shop__inventory .et-shop-row__description,
+.et-shop__inventory .et-shop-row__owned { color: #75633d; }
+.et-shop__inventory .et-shop-row__price { color: #6b551f; }
+.et-shop-row.is-unaffordable .et-shop-row__price { color: var(--danger); }
+
 /* ── result screen ───────────────────────────────────────────────────────── */
 .et-result .et-screen__content { flex-direction: column; align-items: center; gap: 14px; }
 .et-result__crest {
@@ -3331,6 +3405,10 @@
   .et-abilities__list-panel { width: 212px; }
   .et-abilities__detail-panel { width: 196px; }
   .et-jobscreen__right { flex-basis: 330px; }
+  .et-shop .et-screen__content {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.8fr);
+  }
+  .et-shop-row__description { max-width: 360px; }
 }
 
 @media (max-width: 1024px) {

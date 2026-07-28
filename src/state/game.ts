@@ -24,7 +24,12 @@ import * as THREE from 'three';
 
 import { SPRITE_LAYER, installPostStack, markAsSprite, type PostStackPipeline } from './render';
 import { ALL_ABILITIES, bootstrapContent } from './content';
-import { ITEMS_BY_ID } from './items';
+import {
+  BATTLE_DROP_TABLE,
+  ITEMS_BY_ID,
+  findItem,
+  shopStockForChapter,
+} from './items';
 import { actionSetOf } from './abilityIndex';
 import {
   abilityTargetsTiles,
@@ -59,6 +64,7 @@ import {
   campaignFormationScreenVM,
   campaignJobScreenVM,
   campaignRosterScreenVM,
+  shopScreenVM,
   worldMapScreenVM,
 } from './screens';
 import { loadCampaign, saveCampaign } from './save';
@@ -71,6 +77,7 @@ import {
   type CampaignState,
   type FormationEntry,
 } from '@core/campaign';
+import { buyItem, computeBattleRewards, sellItem } from '@core/economy';
 import { stockAwareWorld } from '@core/inventory';
 import { WORLD_NODES, completeTravelNode, isUnlocked, type WorldNode } from '@core/world';
 import { IllegalCommandError, advance, affectedTiles, applyCommand } from '@core/battle';
@@ -185,7 +192,9 @@ export class Game {
   private mode: Mode = { kind: 'idle' };
   private readonly shot: boolean;
   private readonly worldMapMode: boolean;
+  private readonly worldNodeId: string | null;
   private pendingWorldNode: WorldNode | null = null;
+  private shopNode: WorldNode | null = null;
   private busy = false;
   private queue: Promise<void> = Promise.resolve();
   private hoverTile: Vec3 | null = null;
@@ -203,6 +212,7 @@ export class Game {
     this.scenario = options.params ? overrideScenario(base, options.params) : base;
     this.shot = options.shot ?? false;
     this.worldMapMode = options.worldMap ?? false;
+    this.worldNodeId = options.params?.get('node') ?? null;
 
     // Diagnostic scenes alone keep the hardcoded cast. Every real battle,
     // including non-diagnostic screenshot scenes, selects a campaign first and
@@ -727,7 +737,25 @@ export class Game {
     this.battleOver = true;
 
     const victory = this.state.phase === 'victory';
-    const rewards = victory ? getEncounter(this.scenario.encounterId)?.rewards : undefined;
+    const encounter = victory ? getEncounter(this.scenario.encounterId) : undefined;
+    const economy =
+      encounter !== undefined
+        ? computeBattleRewards(
+            this.campaign.seed,
+            this.worldNodeId ?? this.campaign.progress.current ?? this.scenario.id,
+            encounter.enemies,
+            BATTLE_DROP_TABLE,
+          )
+        : undefined;
+    const rewards =
+      encounter !== undefined && economy !== undefined
+        ? {
+            exp: encounter.rewards.exp,
+            jp: encounter.rewards.jp,
+            gil: economy.gil,
+            items: economy.items,
+          }
+        : undefined;
     this.setMode({ kind: 'idle' });
     this.ui.closeMenus();
     // Fold field progress (JP, exp, inventory stock) back into the campaign so
@@ -777,8 +805,24 @@ export class Game {
         units,
         turns: Math.max(1, Math.round(this.state.tick / 100)),
         ...(rewards ? { gil: rewards.gil } : {}),
+        ...(rewards?.items
+          ? {
+              loot: Object.entries(rewards.items).map(([itemId, count]) => ({
+                name: findItem(itemId)?.name ?? itemId,
+                count,
+                rarity: this.lootRarity(itemId),
+              })),
+            }
+          : {}),
       });
     }, 1400);
+  }
+
+  private lootRarity(itemId: string): 'common' | 'fine' | 'rare' {
+    const price = findItem(itemId)?.price ?? 0;
+    if (price >= 4_000) return 'rare';
+    if (price >= 800) return 'fine';
+    return 'common';
   }
 
   /** Level / EXP / JP at deploy, so the result screen can show real deltas. */
@@ -1063,6 +1107,7 @@ export class Game {
 
       case 'close-screen': {
         this.ui.closeScreen();
+        if (intent.screen === 'shop') this.shopNode = null;
         this.screenUnit = null;
         this.screenJob = null;
         // A job change while the screen was open rewrote the unit's command set;
@@ -1093,6 +1138,16 @@ export class Game {
             editable: true,
           }),
         );
+        break;
+      }
+
+      case 'shop-buy': {
+        this.onShopBuy(intent.itemId);
+        break;
+      }
+
+      case 'shop-sell': {
+        this.onShopSell(intent.itemId);
         break;
       }
 
@@ -1217,6 +1272,7 @@ export class Game {
   private showWorldMap(): void {
     if (!this.worldMapMode || this.disposed) return;
     this.pendingWorldNode = null;
+    this.shopNode = null;
     this.ui.setHudVisible(false);
     this.ui.openWorldMapScreen(worldMapScreenVM(this.campaign));
   }
@@ -1224,21 +1280,42 @@ export class Game {
   private onWorldNodeSelect(nodeId: string): void {
     if (!this.worldMapMode) return;
     const node = WORLD_NODES.find((candidate) => candidate.id === nodeId);
+    const completed = node
+      ? this.campaign.progress.completed.includes(node.id)
+      : false;
     if (
       !node ||
-      this.campaign.progress.completed.includes(node.id) ||
+      (completed && node.kind !== 'town') ||
       !isUnlocked(node, this.campaign)
     ) {
       this.ui.sound('error');
       return;
     }
 
-    if (node.kind !== 'battle') {
+    if (node.kind === 'town') {
+      const progressed = completeTravelNode(this.campaign, node, Date.now());
+      this.persistCampaign(progressed);
+      this.shopNode = node;
+      this.ui.openShopScreen(
+        shopScreenVM(this.campaign, {
+          chapter: node.chapter,
+          townName: node.name,
+        }),
+      );
+      this.ui.banner(node.name, {
+        subtitle: 'The company makes camp and trades for the road ahead.',
+        tone: 'victory',
+        duration: 1800,
+      });
+      return;
+    }
+
+    if (node.kind === 'event') {
       const progressed = completeTravelNode(this.campaign, node, Date.now());
       this.persistCampaign(progressed);
       this.ui.updateWorldMapScreen(worldMapScreenVM(this.campaign));
       this.ui.banner(node.name, {
-        subtitle: node.kind === 'town' ? 'The company makes camp.' : 'The road opens ahead.',
+        subtitle: 'The road opens ahead.',
         tone: 'victory',
         duration: 1800,
       });
@@ -1458,6 +1535,55 @@ export class Game {
   private persistCampaign(next: CampaignState): void {
     this.campaign = next;
     saveCampaign(next);
+  }
+
+  private onShopBuy(itemId: string): void {
+    const node = this.shopNode;
+    if (this.ui.currentScreen !== 'shop' || !node) {
+      this.ui.sound('error');
+      return;
+    }
+    const item = shopStockForChapter(node.chapter).find((candidate) => candidate.id === itemId);
+    if (!item) {
+      this.ui.sound('error');
+      return;
+    }
+    const result = buyItem(this.campaign, item.id, item.price, Date.now());
+    if (!result.ok) {
+      this.ui.sound('error');
+      this.refreshShopIfOpen();
+      return;
+    }
+    this.persistCampaign(result.campaign);
+    this.ui.sound('confirm');
+    this.refreshShopIfOpen();
+  }
+
+  private onShopSell(itemId: string): void {
+    const item = findItem(itemId);
+    if (this.ui.currentScreen !== 'shop' || !this.shopNode || !item) {
+      this.ui.sound('error');
+      return;
+    }
+    const result = sellItem(this.campaign, item.id, item.price, Date.now());
+    if (!result.ok) {
+      this.ui.sound('error');
+      this.refreshShopIfOpen();
+      return;
+    }
+    this.persistCampaign(result.campaign);
+    this.ui.sound('confirm');
+    this.refreshShopIfOpen();
+  }
+
+  private refreshShopIfOpen(): void {
+    if (this.ui.currentScreen !== 'shop' || !this.shopNode) return;
+    this.ui.updateShopScreen(
+      shopScreenVM(this.campaign, {
+        chapter: this.shopNode.chapter,
+        townName: this.shopNode.name,
+      }),
+    );
   }
 
   /** Map-authored deploy tiles — not the scenario cast's combat positions. */

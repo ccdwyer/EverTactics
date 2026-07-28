@@ -24,6 +24,7 @@ import { FormationScreen } from './screens/FormationScreen';
 import { JobScreen } from './screens/JobScreen';
 import { ResultScreen } from './screens/ResultScreen';
 import { RosterScreen } from './screens/RosterScreen';
+import { ShopScreen } from './screens/ShopScreen';
 import { WorldMapScreen } from './screens/WorldMapScreen';
 import type {
   AbilityItemVM,
@@ -35,6 +36,7 @@ import type {
   ResultScreenVM,
   RosterScreenVM,
   ScreenName,
+  ShopScreenVM,
   TargetPreviewVM,
   TurnEntryVM,
   UIIntent,
@@ -85,6 +87,7 @@ export class UIRoot {
   private readonly jobScreen: JobScreen;
   private readonly formationScreen: FormationScreen;
   private readonly rosterScreen: RosterScreen;
+  private readonly shopScreen: ShopScreen;
   private readonly resultScreen: ResultScreen;
   private readonly worldMapScreen: WorldMapScreen;
 
@@ -161,6 +164,7 @@ export class UIRoot {
     this.jobScreen = new JobScreen(emit);
     this.formationScreen = new FormationScreen(emit);
     this.rosterScreen = new RosterScreen(emit);
+    this.shopScreen = new ShopScreen(emit);
     this.resultScreen = new ResultScreen(emit);
     this.worldMapScreen = new WorldMapScreen(emit);
 
@@ -376,6 +380,15 @@ export class UIRoot {
     this.worldMapScreen.set(vm);
   }
 
+  openShopScreen(vm: ShopScreenVM): void {
+    this.shopScreen.set(vm);
+    this.presentScreen('shop', this.shopScreen);
+  }
+
+  updateShopScreen(vm: ShopScreenVM): void {
+    this.shopScreen.set(vm);
+  }
+
   /** Push new data into an already-open job screen (after learning, job change…). */
   updateJobScreen(vm: JobScreenVM): void {
     this.jobScreen.set(vm);
@@ -421,7 +434,13 @@ export class UIRoot {
 
   private presentScreen(
     name: ScreenName,
-    screen: WorldMapScreen | JobScreen | FormationScreen | RosterScreen | ResultScreen,
+    screen:
+      | WorldMapScreen
+      | ShopScreen
+      | JobScreen
+      | FormationScreen
+      | RosterScreen
+      | ResultScreen,
   ): void {
     if (this.openScreen && this.openScreen !== name) this.closeScreen();
     screen.show(this.root, () => {
@@ -441,13 +460,14 @@ export class UIRoot {
 
   private screenFor(
     name: ScreenName,
-  ): WorldMapScreen | JobScreen | FormationScreen | RosterScreen | ResultScreen {
+  ): WorldMapScreen | ShopScreen | JobScreen | FormationScreen | RosterScreen | ResultScreen {
     switch (name) {
       case 'world': return this.worldMapScreen;
+      case 'shop': return this.shopScreen;
       case 'job': return this.jobScreen;
       case 'formation': return this.formationScreen;
       case 'roster': return this.rosterScreen;
-      default: return this.resultScreen;
+      case 'result': return this.resultScreen;
     }
   }
 

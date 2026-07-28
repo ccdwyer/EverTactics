@@ -131,7 +131,6 @@ export interface Encounter {
   readonly enemies: readonly UnitPlacement[];
   readonly objective: Objective;
   readonly rewards: {
-    readonly gil: number;
     readonly exp: number;
     readonly jp: number;
   };
@@ -846,31 +845,31 @@ export const ENCOUNTERS: Readonly<Record<string, Encounter>> = {
     id: 'orbonne-vanguard',
     enemies: ORBONNE_VANGUARD,
     objective: { kind: 'defeat-all' },
-    rewards: { gil: 720, exp: 25, jp: 40 },
+    rewards: { exp: 25, jp: 40 },
   },
   'mandalia-scouts': {
     id: 'mandalia-scouts',
     enemies: MANDALIA_SCOUTS,
     objective: { kind: 'defeat-all' },
-    rewards: { gil: 840, exp: 30, jp: 45 },
+    rewards: { exp: 30, jp: 45 },
   },
   'orbonne-revenants': {
     id: 'orbonne-revenants',
     enemies: ORBONNE_REVENANTS,
     objective: { kind: 'defeat-all' },
-    rewards: { gil: 980, exp: 35, jp: 55 },
+    rewards: { exp: 35, jp: 55 },
   },
   'mandalia-ambushers': {
     id: 'mandalia-ambushers',
     enemies: MANDALIA_AMBUSHERS,
     objective: { kind: 'defeat-all' },
-    rewards: { gil: 1120, exp: 40, jp: 65 },
+    rewards: { exp: 40, jp: 65 },
   },
   'orbonne-occupiers': {
     id: 'orbonne-occupiers',
     enemies: ORBONNE_OCCUPIERS,
     objective: { kind: 'defeat-all' },
-    rewards: { gil: 1500, exp: 55, jp: 90 },
+    rewards: { exp: 55, jp: 90 },
   },
 };
 

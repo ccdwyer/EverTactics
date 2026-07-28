@@ -121,6 +121,7 @@ export interface BattleRewards {
   readonly gil: number;
   readonly exp: number;
   readonly jp: number;
+  readonly items?: Readonly<Record<ItemId, number>>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1012,6 +1013,10 @@ export function battleToCampaign(
       gainExp(rewarded, rewards.exp);
       gainJp(rewarded, rewards.jp);
       nextRoster[i] = unitToPersisted(rewarded);
+    }
+    for (const [itemId, count] of Object.entries(rewards.items ?? {})) {
+      if (!Number.isSafeInteger(count) || count <= 0) continue;
+      inventory[itemId] = (inventory[itemId] ?? 0) + count;
     }
   }
 

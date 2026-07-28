@@ -281,6 +281,33 @@ export interface WorldMapScreenVM {
   gil: number;
 }
 
+export interface ShopStockItemVM {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  owned: number;
+  affordable: boolean;
+}
+
+export interface ShopInventoryItemVM {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  count: number;
+}
+
+export interface ShopScreenVM {
+  title: string;
+  subtitle?: string;
+  chapter: number;
+  gil: number;
+  stock: readonly ShopStockItemVM[];
+  inventory: readonly ShopInventoryItemVM[];
+}
+
 export type EquipSlotName =
   | 'rightHand'
   | 'leftHand'
@@ -393,6 +420,10 @@ export type UIIntent =
   | { kind: 'world-open-jobs' }
   /** World map: open the company roster. */
   | { kind: 'world-open-roster' }
+  /** Shop: buy one stocked item. */
+  | { kind: 'shop-buy'; itemId: string }
+  /** Shop: sell one item from campaign inventory. */
+  | { kind: 'shop-sell'; itemId: string }
   /** Roster screen: open the job screen for a unit. */
   | { kind: 'open-job-screen'; unitId: string }
   /** Roster: equip an inventory item onto a unit. */
@@ -412,7 +443,7 @@ export type UIIntent =
   /** Battle results acknowledged. */
   | { kind: 'result-dismiss' };
 
-export type ScreenName = 'world' | 'job' | 'formation' | 'roster' | 'result';
+export type ScreenName = 'world' | 'shop' | 'job' | 'formation' | 'roster' | 'result';
 
 export type IntentHandler = (intent: UIIntent) => void;
 

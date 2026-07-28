@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { advance, applyCommand } from '../src/core/battle';
 import { createCampaign, type CampaignState, type PersistedUnit } from '../src/core/campaign';
+import { computeBattleRewards } from '../src/core/economy';
+import { BATTLE_DROP_TABLE } from '../src/state/items';
 
 const routing = vi.hoisted(() => ({
   scenario: null as unknown,
@@ -17,6 +19,11 @@ const saves = vi.hoisted(() => ({
 
 const uiCapture = vi.hoisted(() => ({
   openedJobVM: null as { jobs?: Array<{ id: string; unlocked: boolean }> } | null,
+  openedShopVM: null as {
+    title?: string;
+    chapter?: number;
+    stock?: Array<{ id: string }>;
+  } | null,
 }));
 
 vi.mock('../src/state/scenarios', async (importOriginal) => {
@@ -111,6 +118,9 @@ vi.mock('../src/ui/UIRoot', () => ({
     closeMenus = vi.fn();
     banner = vi.fn();
     sound = vi.fn();
+    openShopScreen = vi.fn((vm: typeof uiCapture.openedShopVM) => {
+      uiCapture.openedShopVM = vm;
+    });
     openJobScreen = vi.fn((vm: typeof uiCapture.openedJobVM) => {
       uiCapture.openedJobVM = vm;
     });
@@ -125,6 +135,7 @@ vi.mock('../src/ui/UIRoot', () => ({
 import { Game } from '../src/state/game';
 import {
   buildScenario,
+  getEncounter,
   getScenario,
   isDiagnosticScenario,
   listScenarios,
@@ -196,10 +207,11 @@ beforeEach(() => {
   saves.loadCalls = 0;
   saves.written.length = 0;
   uiCapture.openedJobVM = null;
+  uiCapture.openedShopVM = null;
 });
 
 describe('Game campaign routing', () => {
-  it('boots a new game through the campaign launcher with three Potions', () => {
+  it('boots through the campaign launcher and routes an unlocked town into its shop', () => {
     routing.scenario = peacefulFirstBattle();
 
     const game = newGame();
@@ -211,17 +223,49 @@ describe('Game campaign routing', () => {
     expect(game.state.inventories?.get('player')?.get('use-potion')).toBe(3);
     expect(game.campaign.progress.current).toBe('battle-open');
     expect(saves.written.at(-1)?.progress.current).toBe('battle-open');
+
+    saves.loaded = {
+      ...game.campaign,
+      progress: { completed: ['battle-open'], current: 'battle-open' },
+    };
+    const map = new Game({
+      scenarioId: 'battle-open',
+      worldMap: true,
+      container: {} as HTMLElement,
+      uiMount: {} as HTMLElement,
+    });
+    (map as unknown as { onWorldNodeSelect(nodeId: string): void })
+      .onWorldNodeSelect('gariland-camp');
+    expect(uiCapture.openedShopVM).toMatchObject({
+      title: 'Gariland Camp',
+      chapter: 1,
+    });
+    expect(uiCapture.openedShopVM?.stock?.some((item) => item.id === 'dagger')).toBe(true);
+    expect(map.campaign.progress.completed).toEqual(['battle-open', 'gariland-camp']);
   });
 
   it('records a victory in the first battle without assigning BattleState fields', () => {
     routing.scenario = peacefulFirstBattle();
     const game = newGame();
+    const encounter = getEncounter(game.scenario.encounterId)!;
+    const expected = computeBattleRewards(
+      game.campaign.seed,
+      'battle-open',
+      encounter.enemies,
+      BATTLE_DROP_TABLE,
+    );
 
     advance(game.state);
     expect(game.state.phase).toBe('victory');
 
     (game as unknown as { onBattleOver(): void }).onBattleOver();
     expect(game.campaign.progress.completed).toEqual(['battle-open']);
+    expect(game.campaign.gil).toBe(expected.gil);
+    for (const [itemId, count] of Object.entries(expected.items)) {
+      expect(game.campaign.inventory[itemId]).toBe(
+        ((itemId === 'use-potion' ? 3 : 0) + count),
+      );
+    }
   });
 
   it('threads persisted kills through the real Game job UI and mutation path', () => {

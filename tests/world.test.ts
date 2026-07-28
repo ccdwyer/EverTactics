@@ -6,6 +6,7 @@ import {
   serialize,
   type CampaignState,
 } from '../src/core/campaign';
+import { computeBattleRewards } from '../src/core/economy';
 import {
   WORLD_NODES,
   availableNodes,
@@ -21,6 +22,7 @@ import {
   getScenario,
   newGameCampaign,
 } from '../src/state/scenarios';
+import { BATTLE_DROP_TABLE } from '../src/state/items';
 import type { BattleState } from '../src/core/types';
 
 const FIRST_BATTLE_ID = 'battle-open';
@@ -66,18 +68,24 @@ describe('world progression', () => {
     expect(encounter).toBeDefined();
     const firstUnit = campaign.roster[0]!;
     const firstJob = firstUnit.jobs[firstUnit.currentJob]!;
+    const economy = computeBattleRewards(
+      campaign.seed,
+      FIRST_BATTLE_ID,
+      encounter!.enemies,
+      BATTLE_DROP_TABLE,
+    );
     const built = campaignToBattle(campaign, scenario);
     const won = battleToCampaign(
       campaign,
       finishedBattle(built.state, 'victory'),
       1_700_000_001_000,
-      encounter!.rewards,
+      { ...encounter!.rewards, gil: economy.gil, items: economy.items },
     );
 
     expect(won.progress.completed).toContain(FIRST_BATTLE_ID);
     expect(nextObjective(won)?.id).toBe(FIRST_DESTINATION_ID);
     expect(availableNodes(won).map((node) => node.id)).toContain(FIRST_DESTINATION_ID);
-    expect(won.gil).toBe(campaign.gil + encounter!.rewards.gil);
+    expect(won.gil).toBe(campaign.gil + economy.gil);
     expect(won.roster[0]!.totalExp).toBe(firstUnit.totalExp + encounter!.rewards.exp);
     expect(won.roster[0]!.jobs[firstUnit.currentJob]!.totalJp).toBe(
       firstJob.totalJp + encounter!.rewards.jp,
