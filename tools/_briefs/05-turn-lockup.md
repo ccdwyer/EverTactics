@@ -1,67 +1,57 @@
-# BUG: the game locks up after the second enemy acts
+# BUG: infinite command-rejection loop hangs the battle
 
-Player-reported, reproduced in normal play: a battle proceeds, and after roughly the second enemy
-turn the game stops advancing. No console errors.
+## The root cause is known. Do not re-derive it.
 
-## What is already known — do not re-derive this
+Player console output, repeating forever:
 
-**The bug is NOT in the reducer or the AI.** `tests/playthrough.test.ts` and
-`tests/integration.test.ts` drive full AI-vs-AI battles to a decisive result across 8 seeds and 2
-maps, and they pass (500 tests green). Those tests call `advance` / `decideTurn` / `applyCommand`
-directly and never touch `Game`.
+    [game] rejected command                              game.ts:707
+      {kind:'act', unit:'e-quill', ability:'yell', target:{…}, targetUnit:'e-maelor'}
+      act: (10,1) is out of range for Yell
 
-So the hang is in the **interactive turn loop in `src/state/game.ts`** — `beginTurn`, `submit`,
-`play`, and the `queue` promise chain — not in `src/core/`.
+`decideTurn` proposes an `act` that `applyCommand` refuses as out of range. The turn is never
+closed out, `beginTurn` asks the AI again, the AI is deterministic, so it proposes **the same
+illegal command** forever. The battle hangs.
 
-Prime suspects, in order:
-1. **`Game.play()` never resolves.** It awaits animations for an event stream; if one event type
-   has no handler that settles (or a VFX/timeline promise never completes), the `await` hangs
-   forever and `busy` stays true, so no further turn begins. An enemy using an ability the player
-   has not used yet would explain "second enemy" specifically.
-2. **The `queue` promise chain deadlocks** — something awaits the queue from inside a task already
-   on it.
-3. **`beginTurn` early-returns without rescheduling.** Look at every `return` in `beginTurn`: if any
-   path exits while `phase !== 'awaiting-command'` and nothing re-enters the loop, the clock stops.
-4. **An AI unit's `decideTurn` returns commands that `applyCommand` rejects**, the throw is caught
-   somewhere, and the turn is never closed out with a `wait`.
+This is a **rules disagreement between the AI and the reducer**, not an animation or promise bug.
+My earlier guess that `Game.play()` was hanging on an unresolved VFX promise was wrong — ignore it.
 
-## Reproduce it first
+Note `tests/playthrough.test.ts` does not catch this because its driver skips a command when the
+phase is no longer `awaiting-command` and then force-closes the turn with a `wait`. It papers over
+exactly this failure.
 
-Do not fix anything until you can reproduce it on demand. Suggested approach:
+## Fix all three of these
 
-    npx vite build && npx vite preview --port 4173 --strictPort &
-    node tools/play.mjs --scene battle-open --steps "key:Enter,click:<x>x<y>,burst:20x1500" --port 4173 --out shots/lockup
+### 1. The real bug — AI and reducer must agree on range
+`e-quill` believes it can target `e-maelor` at (10,1) with Yell; `applyCommand` disagrees. Find
+where the AI computes an ability's legal targets and make it use the **same** function the reducer
+validates with. Two implementations of "is this in range" is the defect; one canonical predicate is
+the fix. Check `effectiveRange` / `usesWeaponRange` handling in particular — an ability whose reach
+comes from the weapon is the likely divergence.
 
-Note a click only registers on a legal destination tile; a miss leaves `mode` at `command` and
-nothing happens. Poll `window.__EVERTACTICS__` (exposed with `?debug=1`) for
-`state.phase`, `state.active`, `state.tick`, `busy` and `mode.kind` every second and find the exact
-moment `tick` stops advancing while `busy` is true.
+### 2. The engine must never hang, whatever the AI proposes
+Even with (1) fixed, a rejected AI command must not be able to loop forever. In the turn loop:
+if a unit's proposed commands are all rejected, **log once and close the turn with `wait`**. A
+misbehaving AI should cost that unit its turn, not the whole game.
 
-A headless alternative that may reproduce faster: drive `Game` directly in a test, letting the AI
-take several turns, with a timeout — if `play()` never resolves, the test hangs and you have it.
+### 3. Stop the test driver from hiding it
+`tests/playthrough.test.ts` and `tests/integration.test.ts` swallow this class of bug. Make an
+`IllegalCommandError` from an AI-proposed command **fail the test**, rather than being skipped and
+force-closed. Then add a regression test that reproduces the loop: run seeded AI-vs-AI battles and
+assert no command is ever rejected.
 
-## Fix requirements
-
-- Whatever the cause, **`busy` must not be able to strand.** Add a defensive timeout or a `finally`
-  that always releases it, so a single misbehaving animation degrades to a skipped effect rather
-  than a dead game. A hung turn loop is unrecoverable for the player.
-- Add a regression test that drives `Game` (not just the reducer) through **at least six
-  consecutive turns including multiple enemy turns**, and fails if the clock stops advancing.
-- Do not weaken the existing determinism guarantees; `tests/playthrough.test.ts` and
-  `tests/integration.test.ts` must keep passing.
-
-## Rules
+## Requirements
 
 - `src/core/` never imports three.js; randomness only via the seeded `Rng`.
 - `BattleState` is mutated only by `applyCommand`.
+- Determinism must hold — same seed, byte-identical event stream.
+- 500 tests currently pass; do not regress them.
 - Never a backtick in a shader-file comment.
-- 500 tests currently pass. Do not regress them.
 
 ## Success criteria
 
     npx tsc --noEmit     clean
     npx vitest run       500 existing + your regression test
-    npm run verify       green, all four metrics gates
+    npm run verify       green, all four gates
 
-Report: the actual root cause with the file and line, how you reproduced it, and the evidence the
-fix works — not a description of what you changed.
+And prove the actual scenario: run seeded AI-vs-AI battles across at least 8 seeds on both maps and
+report **zero** rejected commands. Report the root cause with file and line, and the numbers you got.
