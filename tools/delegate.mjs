@@ -155,6 +155,13 @@ for (let round = 1; round <= maxRounds; round++) {
   writeFileSync(`${logDir}/round${round}-verify.txt`, verify.out);
   console.error(verify.ok ? 'verification PASSED' : 'verification FAILED');
 
+  // `git diff` does not show untracked files, so a builder that creates NEW files
+  // produces a diff the reviewer cannot see. Sol caught this exactly: it was handed
+  // a diff importing '@core/campaign' with campaign.ts absent, correctly reported
+  // that HEAD-plus-diff would not compile, and failed the round — on evidence that
+  // was an artefact of this harness. `git add -N` marks untracked files
+  // intent-to-add so they appear in the diff without being staged for commit.
+  try { git('add', '-N', '.'); } catch { /* nothing to add */ }
   const diff = git('diff', before);
   const diffstat = git('diff', '--stat', before);
   if (!diff.trim()) {
