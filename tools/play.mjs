@@ -30,7 +30,10 @@ const arg = (n, d) => {
 const scene = arg('scene', null);
 const outDir = resolve(arg('out', 'shots/play'));
 const reportPath = arg('report', null);
-const host = arg('host', '127.0.0.1');
+// `localhost`, not `127.0.0.1`. `vite preview` binds the IPv6 loopback, and node's
+// fetch refuses a bare 127.0.0.1 against it — so a 127.0.0.1 default made every
+// run die with "dev server did not start" while curl to the same port returned 200.
+const host = arg('host', 'localhost');
 const port = Number(arg('port', 5173));
 const width = Number(arg('w', 1600));
 const height = Number(arg('h', 900));

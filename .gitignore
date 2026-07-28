@@ -18,3 +18,4 @@ tools/_delegate/
 .DS_Store
 **/.DS_Store
 !shots/v01-acceptance/
+!shots/acc-mine*/
