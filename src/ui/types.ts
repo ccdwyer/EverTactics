@@ -281,6 +281,13 @@ export interface WorldMapScreenVM {
   gil: number;
 }
 
+export interface TitleScreenVM {
+  title: string;
+  subtitle?: string;
+  continueAvailable: boolean;
+  overwriteConfirmationRequired: boolean;
+}
+
 export interface ShopStockItemVM {
   id: string;
   name: string;
@@ -386,6 +393,10 @@ export interface ResultScreenVM {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type UIIntent =
+  /** Title screen: create a fresh campaign after any required overwrite confirmation. */
+  | { kind: 'title-new-game'; overwriteConfirmed: boolean }
+  /** Title screen: load the durable campaign exactly as saved. */
+  | { kind: 'title-continue' }
   /** A top-level command row was chosen (`move`, `act`, `item`, `wait`, `status`, …). */
   | { kind: 'command'; id: string }
   /** An ability row was confirmed in the ability submenu. */
@@ -443,7 +454,14 @@ export type UIIntent =
   /** Battle results acknowledged. */
   | { kind: 'result-dismiss' };
 
-export type ScreenName = 'world' | 'shop' | 'job' | 'formation' | 'roster' | 'result';
+export type ScreenName =
+  | 'title'
+  | 'world'
+  | 'shop'
+  | 'job'
+  | 'formation'
+  | 'roster'
+  | 'result';
 
 export type IntentHandler = (intent: UIIntent) => void;
 

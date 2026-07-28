@@ -3166,6 +3166,137 @@
 .et-result__gil-label { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: #6c5b34; }
 
 /* ===========================================================================
+   Title screen
+   =========================================================================== */
+
+.et-title .et-screen__scrim {
+  background:
+    radial-gradient(ellipse at 50% 62%, rgba(203, 132, 43, 0.11), transparent 34%),
+    linear-gradient(180deg, rgba(3, 7, 17, 0.38), rgba(2, 5, 13, 0.74));
+  backdrop-filter: blur(1.5px) saturate(0.9);
+}
+.et-title .et-screen__rail {
+  display: none;
+  border: 0;
+  pointer-events: none;
+}
+.et-title .et-screen__content {
+  align-items: center;
+  justify-content: center;
+  padding: clamp(22px, 5vh, 64px);
+}
+.et-title__panel {
+  width: min(560px, calc(100vw - 48px));
+  transform-origin: 50% 54%;
+}
+.et-title__panel .et-panel__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(28px, 5vh, 52px) clamp(32px, 5vw, 68px) 30px;
+  text-align: center;
+}
+.et-title__crest {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 13px;
+  color: #1a1320;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  border: 2px solid #f1d47d;
+  rotate: 45deg;
+  background:
+    linear-gradient(135deg, #f3dda1 0 18%, #b97923 19% 52%, #e7bd59 53% 70%, #6e3f15 71%);
+  box-shadow:
+    0 0 0 5px rgba(13, 18, 35, 0.88),
+    0 0 0 6px rgba(236, 199, 100, 0.48),
+    0 8px 22px rgba(0, 0, 0, 0.58);
+  text-shadow: 0 1px 0 rgba(255, 239, 183, 0.5);
+}
+.et-title__crest span { transform: rotate(-45deg); }
+.et-title__eyebrow {
+  margin-top: 12px;
+  color: #c9b37d;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+.et-title__brand {
+  margin: 8px 0 2px;
+  color: #f1d480;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 4.2vw, 62px);
+  font-weight: 700;
+  line-height: 0.98;
+  letter-spacing: 0.1em;
+  text-indent: 0.1em;
+  text-shadow:
+    0 2px 0 #5b3715,
+    0 5px 18px rgba(0, 0, 0, 0.85);
+}
+.et-title__subtitle {
+  margin: 8px 0 18px;
+  color: #d8c9a4;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-style: italic;
+  letter-spacing: 0.08em;
+}
+.et-title__panel .et-divider {
+  width: min(360px, 90%);
+  margin: 0 auto 13px;
+}
+.et-title__notice {
+  min-height: 20px;
+  margin: 0 0 10px;
+  color: #b9ae94;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.et-title__notice.is-warning { color: #efbf8c; }
+.et-title__menu {
+  width: min(360px, 100%);
+  padding-left: 18px;
+  text-align: left;
+}
+.et-title__menu .et-menu__row {
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 14px;
+}
+.et-title__choice-label {
+  color: inherit;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.et-title__choice-detail {
+  color: #b8ab8d;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+.et-title__menu .is-disabled .et-title__choice-detail {
+  color: rgba(169, 157, 128, 0.36);
+}
+.et-title__footnote {
+  margin: 18px 0 0;
+  color: rgba(212, 198, 161, 0.64);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* ===========================================================================
    World map
    =========================================================================== */
 

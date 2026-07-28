@@ -688,6 +688,38 @@ const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
 const STARTER_PLAYER_UNITS = BATTLE_OPEN_UNITS.filter((unit) => unit.team === 'player');
 const ORBONNE_VANGUARD = BATTLE_OPEN_UNITS.filter((unit) => unit.team === 'enemy');
 
+/**
+ * The opening lesson is deliberately small and asymmetric. The company enters
+ * from the south while three under-levelled opponents watch the north arcade:
+ * the nearest foe is one move away and presents their back to the player.
+ * Explicit CT values put several player turns in the forecast before the
+ * opposition, making move, attack, facing, then turn order legible without
+ * forcing commands or pausing input.
+ */
+const CLOISTER_TRAINEES: readonly UnitPlacement[] = [
+  {
+    id: 'e-owain', name: 'Owain', job: 'squire', gender: 'male', team: 'enemy',
+    level: 4, zodiac: 'taurus', brave: 58, faith: 48,
+    at: { x: 6, y: 8 }, facing: 'N',
+    equipment: { rightHand: 'dagger', body: 'leather-outfit' },
+    secondary: 'chemist', personality: 'defensive', ct: 8,
+  },
+  {
+    id: 'e-maud', name: 'Maud', job: 'chemist', gender: 'female', team: 'enemy',
+    level: 3, zodiac: 'virgo', brave: 46, faith: 56,
+    at: { x: 4, y: 8 }, facing: 'N',
+    equipment: { rightHand: 'dagger', head: 'feather-hat', body: 'linen-robe' },
+    secondary: 'squire', personality: 'support', ct: 3,
+  },
+  {
+    id: 'e-ren', name: 'Ren', job: 'archer', gender: 'male', team: 'enemy',
+    level: 4, zodiac: 'sagittarius', brave: 54, faith: 44,
+    at: { x: 8, y: 8 }, facing: 'N',
+    equipment: { rightHand: 'long-bow', body: 'leather-outfit' },
+    secondary: 'squire', personality: 'defensive', ct: 12,
+  },
+];
+
 const MANDALIA_SCOUTS: readonly UnitPlacement[] = [
   {
     id: 'e-merek', name: 'Merek', job: 'knight', gender: 'male', team: 'enemy',
@@ -841,6 +873,12 @@ const ORBONNE_OCCUPIERS: readonly UnitPlacement[] = [
 ];
 
 export const ENCOUNTERS: Readonly<Record<string, Encounter>> = {
+  'cloister-trainees': {
+    id: 'cloister-trainees',
+    enemies: CLOISTER_TRAINEES,
+    objective: { kind: 'defeat-all' },
+    rewards: { exp: 15, jp: 25 },
+  },
   'orbonne-vanguard': {
     id: 'orbonne-vanguard',
     enemies: ORBONNE_VANGUARD,
@@ -984,6 +1022,18 @@ const BATTLE_OPEN: Scenario = {
   banner: { title: 'Orbonne Monastery', subtitle: 'The cloister garden' },
 };
 
+const FIRST_LESSON: Scenario = {
+  ...BATTLE_OPEN,
+  id: 'first-lesson',
+  name: 'Orbonne Monastery — First Watch',
+  blurb: 'A short first engagement: close the distance, strike from behind, and read the forecast.',
+  seed: 20260728,
+  encounterId: 'cloister-trainees',
+  objective: ENCOUNTERS['cloister-trainees']!.objective,
+  units: [...STARTER_PLAYER_UNITS, ...CLOISTER_TRAINEES],
+  banner: { title: 'First Watch', subtitle: 'Break the novice guard' },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Isolation scenarios
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1119,6 +1169,7 @@ const ORBONNE_RECLAMATION: Scenario = {
 
 export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   'battle-open': BATTLE_OPEN,
+  'first-lesson': FIRST_LESSON,
   'terrain-only': TERRAIN_ONLY,
   'sprites-only': SPRITES_ONLY,
   'ui-only': UI_ONLY,

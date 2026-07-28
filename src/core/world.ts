@@ -27,7 +27,7 @@ export const WORLD_NODES: readonly WorldNode[] = [
     id: 'battle-open',
     name: 'The Broken Cloister',
     kind: 'battle',
-    scenarioId: 'battle-open',
+    scenarioId: 'first-lesson',
     position: { x: 0.12, y: 0.72 },
     requires: [],
     chapter: 1,

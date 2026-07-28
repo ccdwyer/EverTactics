@@ -67,6 +67,11 @@ import {
   shopScreenVM,
   worldMapScreenVM,
 } from './screens';
+import {
+  continueCampaign,
+  startNewCampaign,
+  titleScreenVM,
+} from './onboarding';
 import { loadCampaign, saveCampaign } from './save';
 
 import { createAiWorld, decideTurn, type AiWorld } from '@core/ai';
@@ -138,8 +143,12 @@ type Mode =
   /** Picking an aim point for a chosen ability. */
   | { kind: 'target'; ability: Ability; legal: Set<string> };
 
+type AppSurface = 'battle' | 'title' | 'world-map';
+
 export interface GameOptions {
   scenarioId?: string;
+  /** Normal app boot: wait at the title screen for New Game or Continue. */
+  title?: boolean;
   /** Normal app boot: show campaign navigation instead of entering a battle. */
   worldMap?: boolean;
   /** Container for the WebGL canvas. Defaults to `#app`. */
@@ -191,7 +200,7 @@ export class Game {
 
   private mode: Mode = { kind: 'idle' };
   private readonly shot: boolean;
-  private readonly worldMapMode: boolean;
+  private appSurface: AppSurface;
   private readonly worldNodeId: string | null;
   private pendingWorldNode: WorldNode | null = null;
   private shopNode: WorldNode | null = null;
@@ -211,14 +220,18 @@ export class Game {
     const base = getScenario(options.scenarioId);
     this.scenario = options.params ? overrideScenario(base, options.params) : base;
     this.shot = options.shot ?? false;
-    this.worldMapMode = options.worldMap ?? false;
+    this.appSurface = options.title
+      ? 'title'
+      : options.worldMap
+        ? 'world-map'
+        : 'battle';
     this.worldNodeId = options.params?.get('node') ?? null;
 
     // Diagnostic scenes alone keep the hardcoded cast. Every real battle,
     // including non-diagnostic screenshot scenes, selects a campaign first and
     // then enters through campaignToBattle.
-    if (this.worldMapMode) {
-      const loaded = loadCampaign();
+    if (this.appSurface !== 'battle') {
+      const loaded = this.appSurface === 'title' ? null : loadCampaign();
       this.campaign =
         loaded !== null && loaded.roster.length > 0
           ? loaded
@@ -235,7 +248,7 @@ export class Game {
       this.built = buildScenario(backdrop);
       this.state = this.built.state;
       this.battleOver = true;
-      saveCampaign(this.campaign);
+      if (this.appSurface === 'world-map') saveCampaign(this.campaign);
     } else if (isDiagnosticScenario(this.scenario.id)) {
       this.built = buildScenario(this.scenario);
       this.state = this.built.state;
@@ -251,6 +264,14 @@ export class Game {
       this.campaign = launched.campaign;
       this.built = launched.built;
       this.state = this.built.state;
+      const routedNode = this.worldNodeId === null
+        ? undefined
+        : WORLD_NODES.find(
+            (node) =>
+              node.id === this.worldNodeId &&
+              node.scenarioId === this.scenario.id,
+          );
+      if (routedNode) this.campaign.progress.current = routedNode.id;
       // campaignToBattle pins progress.current. Persist after that happens so
       // the save on disk represents the battle that actually launched.
       if (!this.shot) saveCampaign(this.campaign);
@@ -296,10 +317,6 @@ export class Game {
     if (!this.scenario.layers.ui) this.ui.setHudVisible(false);
   }
 
-  get showingWorldMap(): boolean {
-    return this.worldMapMode;
-  }
-
   // ───────────────────────────────────────────────────────────────────────────
   // Boot
   // ───────────────────────────────────────────────────────────────────────────
@@ -335,7 +352,13 @@ export class Game {
     this.frameCamera();
     this.stage.start();
 
-    if (this.worldMapMode) {
+    if (this.appSurface === 'title') {
+      this.showTitle();
+      release();
+      return;
+    }
+
+    if (this.appSurface === 'world-map') {
       this.showWorldMap();
       release();
       return;
@@ -1071,6 +1094,33 @@ export class Game {
 
   private onIntent(intent: UIIntent): void {
     switch (intent.kind) {
+      case 'title-new-game': {
+        const result = startNewCampaign({
+          timestamp: Date.now(),
+          confirmOverwrite: intent.overwriteConfirmed,
+        });
+        if (result.kind === 'confirmation-required') {
+          this.ui.requestTitleOverwriteConfirmation();
+        } else {
+          this.enterWorldMap(result.campaign);
+        }
+        break;
+      }
+
+      case 'title-continue': {
+        const result = continueCampaign();
+        if (result.kind === 'world-map') {
+          this.enterWorldMap(result.campaign);
+        } else {
+          this.ui.sound('error');
+          this.ui.updateTitleScreen({
+            ...titleScreenVM(),
+            continueAvailable: false,
+          });
+        }
+        break;
+      }
+
       case 'camera': {
         if (intent.action === 'rotate-cw') void this.camera.rotate(1);
         else if (intent.action === 'rotate-ccw') void this.camera.rotate(-1);
@@ -1116,7 +1166,7 @@ export class Game {
         if (active && active.team === 'player' && this.mode.kind === 'command') {
           this.enterCommandMode(active);
         }
-        if (this.worldMapMode) this.showWorldMap();
+        if (this.appSurface === 'world-map') this.showWorldMap();
         break;
       }
 
@@ -1269,8 +1319,21 @@ export class Game {
   private screenUnit: UnitId | null = null;
   private screenJob: JobId | null = null;
 
+  private showTitle(): void {
+    if (this.appSurface !== 'title' || this.disposed) return;
+    this.ui.setHudVisible(false);
+    this.ui.openTitleScreen(titleScreenVM());
+  }
+
+  private enterWorldMap(campaign: CampaignState): void {
+    this.campaign = campaign;
+    this.appSurface = 'world-map';
+    this.ui.closeScreen();
+    this.showWorldMap();
+  }
+
   private showWorldMap(): void {
-    if (!this.worldMapMode || this.disposed) return;
+    if (this.appSurface !== 'world-map' || this.disposed) return;
     this.pendingWorldNode = null;
     this.shopNode = null;
     this.ui.setHudVisible(false);
@@ -1278,7 +1341,7 @@ export class Game {
   }
 
   private onWorldNodeSelect(nodeId: string): void {
-    if (!this.worldMapMode) return;
+    if (this.appSurface !== 'world-map') return;
     const node = WORLD_NODES.find((candidate) => candidate.id === nodeId);
     const completed = node
       ? this.campaign.progress.completed.includes(node.id)
@@ -1331,9 +1394,7 @@ export class Game {
   }
 
   private returnToWorldMap(): void {
-    const url = new URL(window.location.href);
-    url.search = '';
-    window.location.assign(url.toString());
+    this.enterWorldMap(this.campaign);
   }
 
   private installScreenKeys(): void {
@@ -1697,7 +1758,7 @@ export class Game {
     this.persistCampaign(result.campaign);
     this.ui.sound('confirm');
     this.ui.closeScreen();
-    if (this.worldMapMode && this.pendingWorldNode?.scenarioId) {
+    if (this.appSurface === 'world-map' && this.pendingWorldNode?.scenarioId) {
       const scenario = getScenario(this.pendingWorldNode.scenarioId);
       const url = new URL(window.location.href);
       url.search = '';

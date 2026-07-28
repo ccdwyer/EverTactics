@@ -4,6 +4,7 @@ import { advance, applyCommand } from '../src/core/battle';
 import { createCampaign, type CampaignState, type PersistedUnit } from '../src/core/campaign';
 import { computeBattleRewards } from '../src/core/economy';
 import { BATTLE_DROP_TABLE } from '../src/state/items';
+import type { UIIntent, WorldMapScreenVM } from '../src/ui/types';
 
 const routing = vi.hoisted(() => ({
   scenario: null as unknown,
@@ -18,12 +19,14 @@ const saves = vi.hoisted(() => ({
 }));
 
 const uiCapture = vi.hoisted(() => ({
+  intentHandler: null as ((intent: UIIntent) => void) | null,
   openedJobVM: null as { jobs?: Array<{ id: string; unlocked: boolean }> } | null,
   openedShopVM: null as {
     title?: string;
     chapter?: number;
     stock?: Array<{ id: string }>;
   } | null,
+  openedWorldMapVM: null as WorldMapScreenVM | null,
 }));
 
 vi.mock('../src/state/scenarios', async (importOriginal) => {
@@ -112,12 +115,19 @@ vi.mock('../src/render/vfx', () => ({
 
 vi.mock('../src/ui/UIRoot', () => ({
   UIRoot: class {
-    on = vi.fn(() => vi.fn());
+    on = vi.fn((handler: (intent: UIIntent) => void) => {
+      uiCapture.intentHandler = handler;
+      return vi.fn();
+    });
     setHudVisible = vi.fn();
     setTargetPreview = vi.fn();
     closeMenus = vi.fn();
+    closeScreen = vi.fn();
     banner = vi.fn();
     sound = vi.fn();
+    openWorldMapScreen = vi.fn((vm: WorldMapScreenVM) => {
+      uiCapture.openedWorldMapVM = vm;
+    });
     openShopScreen = vi.fn((vm: typeof uiCapture.openedShopVM) => {
       uiCapture.openedShopVM = vm;
     });
@@ -206,8 +216,10 @@ beforeEach(() => {
   saves.loaded = null;
   saves.loadCalls = 0;
   saves.written.length = 0;
+  uiCapture.intentHandler = null;
   uiCapture.openedJobVM = null;
   uiCapture.openedShopVM = null;
+  uiCapture.openedWorldMapVM = null;
 });
 
 describe('Game campaign routing', () => {
@@ -242,6 +254,17 @@ describe('Game campaign routing', () => {
     });
     expect(uiCapture.openedShopVM?.stock?.some((item) => item.id === 'dagger')).toBe(true);
     expect(map.campaign.progress.completed).toEqual(['battle-open', 'gariland-camp']);
+
+    routing.scenario = null;
+    saves.loaded = null;
+    const firstLesson = new Game({
+      scenarioId: 'first-lesson',
+      params: new URLSearchParams('node=battle-open'),
+      container: {} as HTMLElement,
+      uiMount: {} as HTMLElement,
+    });
+    expect(firstLesson.campaign.progress.current).toBe('battle-open');
+    expect(saves.written.at(-1)?.progress.current).toBe('battle-open');
   });
 
   it('records a victory in the first battle without assigning BattleState fields', () => {
@@ -266,6 +289,28 @@ describe('Game campaign routing', () => {
         ((itemId === 'use-potion' ? 3 : 0) + count),
       );
     }
+  });
+
+  it('returns to the world map with the saved campaign after dismissing battle results', () => {
+    routing.scenario = peacefulFirstBattle();
+    const game = newGame();
+
+    advance(game.state);
+    expect(game.state.phase).toBe('victory');
+    (game as unknown as { onBattleOver(): void }).onBattleOver();
+
+    const saved = saves.written.at(-1);
+    expect(saved?.progress.completed).toEqual(['battle-open']);
+    expect(uiCapture.intentHandler).not.toBeNull();
+    uiCapture.intentHandler?.({ kind: 'result-dismiss' });
+
+    expect(uiCapture.openedWorldMapVM?.gil).toBe(saved?.gil);
+    expect(
+      uiCapture.openedWorldMapVM?.nodes.find((node) => node.id === 'battle-open'),
+    ).toMatchObject({
+      id: 'battle-open',
+      state: 'completed',
+    });
   });
 
   it('threads persisted kills through the real Game job UI and mutation path', () => {

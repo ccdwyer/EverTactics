@@ -25,6 +25,7 @@ import { JobScreen } from './screens/JobScreen';
 import { ResultScreen } from './screens/ResultScreen';
 import { RosterScreen } from './screens/RosterScreen';
 import { ShopScreen } from './screens/ShopScreen';
+import { TitleScreen } from './screens/TitleScreen';
 import { WorldMapScreen } from './screens/WorldMapScreen';
 import type {
   AbilityItemVM,
@@ -38,6 +39,7 @@ import type {
   ScreenName,
   ShopScreenVM,
   TargetPreviewVM,
+  TitleScreenVM,
   TurnEntryVM,
   UIIntent,
   UIOptions,
@@ -89,6 +91,7 @@ export class UIRoot {
   private readonly rosterScreen: RosterScreen;
   private readonly shopScreen: ShopScreen;
   private readonly resultScreen: ResultScreen;
+  private readonly titleScreen: TitleScreen;
   private readonly worldMapScreen: WorldMapScreen;
 
   /** Base layer: owns the camera keybinds and the "cancel with nothing open" case. */
@@ -166,6 +169,7 @@ export class UIRoot {
     this.rosterScreen = new RosterScreen(emit);
     this.shopScreen = new ShopScreen(emit);
     this.resultScreen = new ResultScreen(emit);
+    this.titleScreen = new TitleScreen(emit);
     this.worldMapScreen = new WorldMapScreen(emit);
 
     add(this.root, this.hud, this.floats.root, this.banners.root);
@@ -371,6 +375,19 @@ export class UIRoot {
     this.presentScreen('job', this.jobScreen);
   }
 
+  openTitleScreen(vm: TitleScreenVM): void {
+    this.titleScreen.set(vm);
+    this.presentScreen('title', this.titleScreen);
+  }
+
+  updateTitleScreen(vm: TitleScreenVM): void {
+    this.titleScreen.set(vm);
+  }
+
+  requestTitleOverwriteConfirmation(): void {
+    this.titleScreen.requestOverwriteConfirmation();
+  }
+
   openWorldMapScreen(vm: WorldMapScreenVM): void {
     this.worldMapScreen.set(vm);
     this.presentScreen('world', this.worldMapScreen);
@@ -436,6 +453,7 @@ export class UIRoot {
     name: ScreenName,
     screen:
       | WorldMapScreen
+      | TitleScreen
       | ShopScreen
       | JobScreen
       | FormationScreen
@@ -450,18 +468,31 @@ export class UIRoot {
     this.openScreen = name;
     this.hud.classList.add('is-behind-screen');
     this.prompt.setVisible(false);
-    this.hints.set([
-      { keys: ['Tab'], label: 'Switch pane' },
-      { keys: ['↑', '↓', '←', '→'], label: 'Navigate' },
-      { keys: ['Enter'], label: 'Confirm' },
-      { keys: ['Esc'], label: 'Close' },
-    ]);
+    this.hints.set(name === 'title'
+      ? [
+          { keys: ['↑', '↓'], label: 'Choose' },
+          { keys: ['Enter'], label: 'Confirm' },
+        ]
+      : [
+          { keys: ['Tab'], label: 'Switch pane' },
+          { keys: ['↑', '↓', '←', '→'], label: 'Navigate' },
+          { keys: ['Enter'], label: 'Confirm' },
+          { keys: ['Esc'], label: 'Close' },
+        ]);
   }
 
   private screenFor(
     name: ScreenName,
-  ): WorldMapScreen | ShopScreen | JobScreen | FormationScreen | RosterScreen | ResultScreen {
+  ):
+    | TitleScreen
+    | WorldMapScreen
+    | ShopScreen
+    | JobScreen
+    | FormationScreen
+    | RosterScreen
+    | ResultScreen {
     switch (name) {
+      case 'title': return this.titleScreen;
       case 'world': return this.worldMapScreen;
       case 'shop': return this.shopScreen;
       case 'job': return this.jobScreen;

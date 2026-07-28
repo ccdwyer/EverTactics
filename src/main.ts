@@ -15,6 +15,7 @@
 import { Game } from '@state/game';
 import { bootstrapContent, contentSummary } from '@state/content';
 import { DEFAULT_SCENARIO, listScenarios } from '@state/scenarios';
+import { resolveBootRoute } from '@state/onboarding';
 
 declare global {
   interface Window {
@@ -24,11 +25,9 @@ declare global {
 }
 
 const params = new URLSearchParams(window.location.search);
-const shotScenario = params.get('shot');
-const sceneScenario = params.get('scene');
-const scenarioId = shotScenario ?? sceneScenario ?? DEFAULT_SCENARIO;
-const shotMode = shotScenario !== null;
-const worldMapMode = shotScenario === null && sceneScenario === null;
+const route = resolveBootRoute(params);
+const scenarioId = route.kind === 'title' ? DEFAULT_SCENARIO : route.scenarioId;
+const shotMode = route.kind === 'shot';
 
 function hideBootSplash(): void {
   const boot = document.getElementById('boot');
@@ -60,7 +59,12 @@ function showFatal(error: unknown): void {
 async function main(): Promise<void> {
   bootstrapContent();
   const summary = contentSummary();
-  const game = new Game({ scenarioId, shot: shotMode, worldMap: worldMapMode, params });
+  const game = new Game({
+    scenarioId,
+    shot: shotMode,
+    title: route.kind === 'title',
+    params,
+  });
 
   console.info(
     `[evertactics] ${game.scenario.name} · ${game.state.units.size} units · ` +
@@ -75,7 +79,7 @@ async function main(): Promise<void> {
 
   // Hand the turn over once the opening frame has converged, so the first thing
   // a player sees is the same composed frame the critic loop grades.
-  if (!shotMode && !game.showingWorldMap) {
+  if (route.kind === 'scene') {
     game.stage.onConverged(() => {
       void game.beginTurn();
     });
