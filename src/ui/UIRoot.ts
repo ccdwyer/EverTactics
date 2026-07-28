@@ -20,6 +20,11 @@ import { UnitInfoPanel } from './components/UnitInfoPanel';
 import { add, div } from './dom';
 import { InputRouter, type FocusLayer, type UIKey } from './input';
 import { setPortraitBase } from './portraits';
+import {
+  BattlePresentationScreen,
+  type BattleIntroVM,
+  type BattleOutcomeVM,
+} from './screens/BattlePresentationScreen';
 import { FormationScreen } from './screens/FormationScreen';
 import { JobScreen } from './screens/JobScreen';
 import { ResultScreen } from './screens/ResultScreen';
@@ -91,6 +96,7 @@ export class UIRoot {
   private readonly rosterScreen: RosterScreen;
   private readonly shopScreen: ShopScreen;
   private readonly resultScreen: ResultScreen;
+  private readonly battlePresentation: BattlePresentationScreen;
   private readonly titleScreen: TitleScreen;
   private readonly worldMapScreen: WorldMapScreen;
 
@@ -169,6 +175,7 @@ export class UIRoot {
     this.rosterScreen = new RosterScreen(emit);
     this.shopScreen = new ShopScreen(emit);
     this.resultScreen = new ResultScreen(emit);
+    this.battlePresentation = new BattlePresentationScreen();
     this.titleScreen = new TitleScreen(emit);
     this.worldMapScreen = new WorldMapScreen(emit);
 
@@ -434,6 +441,14 @@ export class UIRoot {
     this.presentScreen('result', this.resultScreen);
   }
 
+  presentBattleIntro(vm: BattleIntroVM): Promise<void> {
+    return this.battlePresentation.showIntro(this.root, vm);
+  }
+
+  presentBattleOutcome(vm: BattleOutcomeVM): Promise<void> {
+    return this.battlePresentation.showOutcome(this.root, vm);
+  }
+
   get currentScreen(): ScreenName | null {
     return this.openScreen;
   }
@@ -543,6 +558,7 @@ export class UIRoot {
   }
 
   dispose(): void {
+    this.battlePresentation.dispose();
     this.input.dispose();
     for (const d of this.disposers) d();
     this.disposers.length = 0;

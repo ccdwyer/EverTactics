@@ -13,7 +13,17 @@
 
 export { UIRoot } from './UIRoot';
 export type { BannerTone, HintDef } from './components/Banner';
-export { play as playUISound, setSoundEnabled, setVolume } from './audio';
+export {
+  play as playUISound,
+  playBattle,
+  setSoundEnabled,
+  setVolume,
+} from './audio';
+export type {
+  BattleSound,
+  BattleSoundOptions,
+  UISound,
+} from './audio';
 export {
   castPortrait,
   humanPortraitFiles,

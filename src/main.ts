@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   // a player sees is the same composed frame the critic loop grades.
   if (route.kind === 'scene') {
     game.stage.onConverged(() => {
-      void game.beginTurn();
+      void game.startBattle();
     });
   }
 }

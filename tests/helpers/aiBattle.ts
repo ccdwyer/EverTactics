@@ -16,6 +16,7 @@ export function runAiBattle(
   productionAi = false,
   maxTurns = 400,
   collectEvents = true,
+  onEvents?: (events: readonly BattleEvent[], state: BattleState) => void,
 ) {
   const built = buildScenario({ ...getScenario(scenarioId), seed });
   const state = built.state;
@@ -35,6 +36,7 @@ export function runAiBattle(
     while (state.phase !== 'awaiting-command' && spins < 1000) {
       if (isFinished(state)) break;
       const advanced = advance(state);
+      onEvents?.(advanced, state);
       if (collectEvents) events.push(...advanced);
       spins++;
     }
@@ -54,6 +56,7 @@ export function runAiBattle(
       commands++;
       try {
         const applied = applyCommand(state, cmd);
+        onEvents?.(applied, state);
         if (collectEvents) events.push(...applied);
       } catch (error) {
         if (error instanceof IllegalCommandError) {

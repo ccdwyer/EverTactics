@@ -127,7 +127,13 @@ import { Stage } from '@render/stage';
 import { Terrain, buildTerrain, tileWorldPosition } from '@render/terrain';
 import { VFX_KEYS, VfxSystem } from '@render/vfx';
 import { UIRoot } from '@ui/UIRoot';
-import type { FloatTextVM, ResultUnitVM, UIIntent } from '@ui/types';
+import { createBattleAudioObserver } from '@ui/battleAudio';
+import type {
+  FloatTextVM,
+  ResultScreenVM,
+  ResultUnitVM,
+  UIIntent,
+} from '@ui/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Interaction state
@@ -206,6 +212,8 @@ export class Game {
   private shopNode: WorldNode | null = null;
   private busy = false;
   private queue: Promise<void> = Promise.resolve();
+  private readonly battleAudio = createBattleAudioObserver();
+  private battleStarted = false;
   private hoverTile: Vec3 | null = null;
   private disposed = false;
   private readonly disposers: (() => void)[] = [];
@@ -588,9 +596,14 @@ export class Game {
   // ───────────────────────────────────────────────────────────────────────────
 
   private async openingSequence(): Promise<void> {
-    // A screenshot should show the steady state, not a title card that happens
-    // to still be fading. `?banner=1` forces it back on for a hero shot.
-    if (this.scenario.banner && this.scenario.layers.ui && !this.shot) {
+    // Diagnostic scenes keep their existing banner. Authored encounters present
+    // their map and encounter names after the boot splash through startBattle.
+    if (
+      this.scenario.banner
+      && this.scenario.layers.ui
+      && !this.shot
+      && isDiagnosticScenario(this.scenario.id)
+    ) {
       this.ui.banner(this.scenario.banner.title, {
         ...(this.scenario.banner.subtitle !== undefined
           ? { subtitle: this.scenario.banner.subtitle }
@@ -642,6 +655,38 @@ export class Game {
         this.ui.setInspectedUnit(unitVM(this.state, this.firstHostile(active) ?? active));
       }
     }
+  }
+
+  /**
+   * Present the authored field card once the opening camera is visible, then
+   * hand control to the ordinary recursive turn loop.
+   */
+  async startBattle(): Promise<void> {
+    if (this.disposed || this.shot || this.appSurface !== 'battle' || this.battleStarted) return;
+    this.battleStarted = true;
+
+    if (this.scenario.layers.ui && !isDiagnosticScenario(this.scenario.id)) {
+      const encounter = getEncounter(this.scenario.encounterId);
+      const map = scenarioMapDef(this.scenario);
+      if (encounter && map) {
+        await this.ui.presentBattleIntro({
+          mapName: map.name,
+          encounterName: encounter.name,
+        });
+      } else if (this.scenario.banner) {
+        await this.ui.presentBattleIntro({
+          mapName: this.scenario.banner.title,
+          encounterName: this.scenario.banner.subtitle ?? this.scenario.name,
+        });
+      } else if (map) {
+        await this.ui.presentBattleIntro({
+          mapName: map.name,
+          encounterName: this.scenario.name,
+        });
+      }
+    }
+
+    if (!this.disposed) await this.beginTurn();
   }
 
   /** The nearest enemy — used to fill the inspection panel on the opening frame. */
@@ -760,7 +805,8 @@ export class Game {
     this.battleOver = true;
 
     const victory = this.state.phase === 'victory';
-    const encounter = victory ? getEncounter(this.scenario.encounterId) : undefined;
+    const authoredEncounter = getEncounter(this.scenario.encounterId);
+    const encounter = victory ? authoredEncounter : undefined;
     const economy =
       encounter !== undefined
         ? computeBattleRewards(
@@ -786,11 +832,6 @@ export class Game {
     this.persistCampaign(
       battleToCampaign(this.campaign, this.state, Date.now(), rewards),
     );
-    this.ui.banner(victory ? 'Victory' : 'Defeat', {
-      subtitle: victory ? 'The field is yours.' : 'The company is broken.',
-      tone: victory ? 'victory' : 'defeat',
-      duration: 3200,
-    });
     if (!this.scenario.layers.ui) return;
 
     // The result screen counts up from the snapshot taken at deploy, so the
@@ -819,26 +860,32 @@ export class Game {
       });
     }
 
-    window.setTimeout(() => {
-      if (this.disposed) return;
-      this.ui.showResult({
-        outcome: victory ? 'victory' : 'defeat',
-        title: victory ? 'Victory' : 'Defeat',
-        subtitle: this.scenario.name,
-        units,
-        turns: Math.max(1, Math.round(this.state.tick / 100)),
-        ...(rewards ? { gil: rewards.gil } : {}),
-        ...(rewards?.items
-          ? {
-              loot: Object.entries(rewards.items).map(([itemId, count]) => ({
-                name: findItem(itemId)?.name ?? itemId,
-                count,
-                rarity: this.lootRarity(itemId),
-              })),
-            }
-          : {}),
-      });
-    }, 1400);
+    const result: ResultScreenVM = {
+      outcome: victory ? 'victory' : 'defeat',
+      title: victory ? 'Victory' : 'Defeat',
+      subtitle: this.scenario.name,
+      units,
+      turns: Math.max(1, Math.round(this.state.tick / 100)),
+      ...(rewards ? { gil: rewards.gil } : {}),
+      ...(rewards?.items
+        ? {
+            loot: Object.entries(rewards.items).map(([itemId, count]) => ({
+              name: findItem(itemId)?.name ?? itemId,
+              count,
+              rarity: this.lootRarity(itemId),
+            })),
+          }
+        : {}),
+    };
+    void this.presentBattleResult(result, victory);
+  }
+
+  private async presentBattleResult(result: ResultScreenVM, victory: boolean): Promise<void> {
+    await this.ui.presentBattleOutcome({
+      outcome: victory ? 'victory' : 'defeat',
+      subtitle: victory ? 'The field is yours.' : 'The company is broken.',
+    });
+    if (!this.disposed) this.ui.showResult(result);
   }
 
   private lootRarity(itemId: string): 'common' | 'fine' | 'rare' {
@@ -883,7 +930,32 @@ export class Game {
     return this.enqueue(async () => {
       this.busy = true;
       try {
-        for (const event of events) await this.playOne(event);
+        const attributedKnockdowns = new Set(
+          events
+            .filter(
+              (event): event is Extract<BattleEvent, { kind: 'knockdown' }> =>
+                event.kind === 'knockdown' && event.source !== undefined,
+            )
+            .map((event) => event.unit),
+        );
+        for (const event of events) {
+          const unit = 'unit' in event ? this.state.units.get(event.unit) : undefined;
+          const ability = 'ability' in event ? abilityById(event.ability) : undefined;
+          this.battleAudio(event, {
+            maxHp: unit?.stats.maxHp,
+            abilitySound:
+              event.kind === 'cast-fire' && ability
+                ? SPRITE_ANIM_FOR_FORMULA[ability.formula] === 'attack'
+                  ? 'swing'
+                  : 'cast'
+                : undefined,
+            suppressKnockdown:
+              event.kind === 'knockdown'
+              && event.source === undefined
+              && attributedKnockdowns.has(event.unit),
+          });
+          await this.playOne(event);
+        }
       } finally {
         this.busy = false;
       }
@@ -1779,6 +1851,7 @@ export class Game {
   private async relaunchFromCampaign(): Promise<void> {
     if (this.disposed) return;
     this.battleOver = false;
+    this.battleStarted = false;
     this.setMode({ kind: 'idle' });
     this.ui.closeMenus();
     this.hoverTile = null;
@@ -1795,13 +1868,13 @@ export class Game {
     }
     await this.spawnSprites();
 
-    // Advance to the first turn the same way boot does (without the banner).
+    // Advance to the first turn the same way boot does.
     if (this.state.units.size > 0) {
       advance(this.state);
     }
     this.syncAll();
     this.refreshHud();
-    if (!this.shot) void this.beginTurn();
+    if (!this.shot) void this.startBattle();
   }
 
   private onEquipItem(unitId: UnitId, itemId: string): void {

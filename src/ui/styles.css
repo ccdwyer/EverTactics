@@ -2621,6 +2621,80 @@
   transition: opacity var(--dur-slow) var(--ease-soft);
 }
 .et-screen.is-open { opacity: 1; pointer-events: auto; }
+
+/* ── field intro / outcome beat ─────────────────────────────────────────── */
+.et-battle-presentation {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, transparent 18%, rgba(3, 5, 11, 0.72) 42%, rgba(3, 5, 11, 0.78) 58%, transparent 82%);
+  transition: opacity 260ms var(--ease-soft);
+}
+.et-battle-presentation.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.et-battle-presentation__card {
+  position: relative;
+  display: flex;
+  width: min(820px, 86vw);
+  padding: 34px 48px 26px;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  text-align: center;
+  transform: translateY(12px) scale(0.985);
+  transition: transform 420ms var(--ease-out-expo);
+}
+.et-battle-presentation.is-open .et-battle-presentation__card {
+  transform: none;
+}
+.et-battle-presentation__eyebrow,
+.et-battle-presentation__skip {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.15em;
+  color: var(--vellum-dim);
+}
+.et-battle-presentation__title {
+  font-family: var(--font-display);
+  font-size: clamp(30px, 4.6vw, 58px);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.82), 0 0 32px rgba(240, 221, 160, 0.3);
+}
+.et-battle-presentation__subtitle {
+  font-family: var(--font-body);
+  font-size: 17px;
+  font-style: italic;
+  letter-spacing: 0.08em;
+  color: var(--vellum);
+}
+.et-battle-presentation__rule {
+  width: min(520px, 70vw);
+  height: 1px;
+  margin: 9px 0 3px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim) 24%, var(--gold-bright) 50%, var(--gold-dim) 76%, transparent);
+  box-shadow: 0 0 10px rgba(201, 162, 39, 0.3);
+}
+.et-battle-presentation__skip {
+  font-size: 10px;
+  opacity: 0.72;
+}
+.et-battle-presentation[data-kind='defeat'] .et-battle-presentation__title {
+  color: #c9bfae;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.85);
+}
 .et-screen__scrim {
   position: absolute;
   inset: 0;

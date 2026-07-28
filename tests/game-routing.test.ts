@@ -4,7 +4,11 @@ import { advance, applyCommand } from '../src/core/battle';
 import { createCampaign, type CampaignState, type PersistedUnit } from '../src/core/campaign';
 import { computeBattleRewards } from '../src/core/economy';
 import { BATTLE_DROP_TABLE } from '../src/state/items';
-import type { UIIntent, WorldMapScreenVM } from '../src/ui/types';
+import type {
+  ResultScreenVM,
+  UIIntent,
+  WorldMapScreenVM,
+} from '../src/ui/types';
 
 const routing = vi.hoisted(() => ({
   scenario: null as unknown,
@@ -27,6 +31,10 @@ const uiCapture = vi.hoisted(() => ({
     stock?: Array<{ id: string }>;
   } | null,
   openedWorldMapVM: null as WorldMapScreenVM | null,
+  intro: null as { mapName: string; encounterName: string } | null,
+  outcome: null as { outcome: 'victory' | 'defeat'; subtitle: string } | null,
+  result: null as ResultScreenVM | null,
+  outcomeGate: null as Promise<void> | null,
 }));
 
 vi.mock('../src/state/scenarios', async (importOriginal) => {
@@ -124,6 +132,17 @@ vi.mock('../src/ui/UIRoot', () => ({
     closeMenus = vi.fn();
     closeScreen = vi.fn();
     banner = vi.fn();
+    presentBattleIntro = vi.fn((vm: { mapName: string; encounterName: string }) => {
+      uiCapture.intro = vm;
+      return Promise.resolve();
+    });
+    presentBattleOutcome = vi.fn((vm: { outcome: 'victory' | 'defeat'; subtitle: string }) => {
+      uiCapture.outcome = vm;
+      return uiCapture.outcomeGate ?? Promise.resolve();
+    });
+    showResult = vi.fn((vm: ResultScreenVM) => {
+      uiCapture.result = vm;
+    });
     sound = vi.fn();
     openWorldMapScreen = vi.fn((vm: WorldMapScreenVM) => {
       uiCapture.openedWorldMapVM = vm;
@@ -220,6 +239,10 @@ beforeEach(() => {
   uiCapture.openedJobVM = null;
   uiCapture.openedShopVM = null;
   uiCapture.openedWorldMapVM = null;
+  uiCapture.intro = null;
+  uiCapture.outcome = null;
+  uiCapture.result = null;
+  uiCapture.outcomeGate = null;
 });
 
 describe('Game campaign routing', () => {
@@ -289,6 +312,60 @@ describe('Game campaign routing', () => {
         ((itemId === 'use-potion' ? 3 : 0) + count),
       );
     }
+  });
+
+  it('presents the authored map and encounter names before starting the first turn', async () => {
+    const peaceful = peacefulFirstBattle();
+    routing.scenario = { ...peaceful, layers: { ...peaceful.layers, ui: true } };
+    const game = newGame();
+    const beginTurn = vi.spyOn(game, 'beginTurn').mockResolvedValue();
+
+    await (game as unknown as { startBattle(): Promise<void> }).startBattle();
+
+    expect(uiCapture.intro).toEqual({
+      mapName: 'Orbonne Monastery — Cloister Garden',
+      encounterName: 'Orbonne Monastery — Cloister Garden',
+    });
+    expect(beginTurn).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the legacy Mandalia entry copy when no encounter record exists', async () => {
+    const legacy = getScenario('mandalia-ford');
+    routing.scenario = legacy;
+    const game = newGame();
+    vi.spyOn(game, 'beginTurn').mockResolvedValue();
+
+    await game.startBattle();
+
+    expect(uiCapture.intro).toEqual({
+      mapName: 'Mandalia Plains',
+      encounterName: 'The river crossing',
+    });
+  });
+
+  it('holds the outcome presentation before opening the result screen', async () => {
+    const peaceful = peacefulFirstBattle();
+    routing.scenario = { ...peaceful, layers: { ...peaceful.layers, ui: true } };
+    const game = newGame();
+    let releaseOutcome = (): void => undefined;
+    uiCapture.outcomeGate = new Promise<void>((resolve) => {
+      releaseOutcome = resolve;
+    });
+
+    advance(game.state);
+    expect(game.state.phase).toBe('victory');
+    (game as unknown as { onBattleOver(): void }).onBattleOver();
+
+    expect(uiCapture.outcome).toEqual({
+      outcome: 'victory',
+      subtitle: 'The field is yours.',
+    });
+    expect(uiCapture.result).toBeNull();
+
+    releaseOutcome();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(uiCapture.result?.outcome).toBe('victory');
   });
 
   it('returns to the world map with the saved campaign after dismissing battle results', () => {
