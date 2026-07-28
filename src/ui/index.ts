@@ -14,16 +14,25 @@
 export { UIRoot } from './UIRoot';
 export type { BannerTone, HintDef } from './components/Banner';
 export {
+  OUTCOME_STING_PROFILES,
   play as playUISound,
   playBattle,
+  playOutcomeSting,
   setSoundEnabled,
   setVolume,
 } from './audio';
 export type {
   BattleSound,
   BattleSoundOptions,
+  OutcomeSting,
+  OutcomeStingPlayback,
   UISound,
 } from './audio';
+export { UI_INTENT_AUDIO_POLICY } from './uiIntentAudio';
+export type {
+  UIIntentAudioPolicy,
+  UIIntentAudioSource,
+} from './uiIntentAudio';
 export {
   castPortrait,
   humanPortraitFiles,

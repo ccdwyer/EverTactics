@@ -47,11 +47,76 @@ export interface BattleSoundProfile {
   noiseGain: number;
 }
 
+export type OutcomeSting = 'victory' | 'defeat';
+
+export interface OutcomeStingNote {
+  /** Start offset in seconds. */
+  at: number;
+  /** Audible duration in seconds. */
+  duration: number;
+  frequency: number;
+  gain: number;
+  type: OscillatorType;
+  role: 'melody' | 'cadence';
+}
+
+export interface OutcomeStingProfile {
+  duration: number;
+  notes: readonly OutcomeStingNote[];
+}
+
+/**
+ * Authored phrases rather than a procedural loop.
+ *
+ * Victory climbs from the dominant into a G-major cadence. Defeat falls into an
+ * open A/E fifth: stable enough to end cleanly, but without a major/minor third
+ * that would make the loss feel resolved.
+ */
+export const OUTCOME_STING_PROFILES = {
+  victory: {
+    duration: 2.65,
+    notes: [
+      { at: 0, duration: 0.42, frequency: 293.66, gain: 0.105, type: 'triangle', role: 'melody' },
+      { at: 0.28, duration: 0.46, frequency: 392, gain: 0.11, type: 'triangle', role: 'melody' },
+      { at: 0.56, duration: 0.48, frequency: 440, gain: 0.105, type: 'triangle', role: 'melody' },
+      { at: 0.84, duration: 0.5, frequency: 493.88, gain: 0.11, type: 'triangle', role: 'melody' },
+      { at: 1.12, duration: 0.62, frequency: 587.33, gain: 0.12, type: 'triangle', role: 'melody' },
+      { at: 1.38, duration: 1.27, frequency: 392, gain: 0.075, type: 'triangle', role: 'cadence' },
+      { at: 1.38, duration: 1.27, frequency: 493.88, gain: 0.06, type: 'sine', role: 'cadence' },
+      { at: 1.38, duration: 1.27, frequency: 587.33, gain: 0.065, type: 'sine', role: 'cadence' },
+    ],
+  },
+  defeat: {
+    duration: 2.05,
+    notes: [
+      { at: 0, duration: 0.46, frequency: 293.66, gain: 0.09, type: 'triangle', role: 'melody' },
+      { at: 0.3, duration: 0.5, frequency: 261.63, gain: 0.086, type: 'triangle', role: 'melody' },
+      { at: 0.62, duration: 0.56, frequency: 233.08, gain: 0.082, type: 'triangle', role: 'melody' },
+      { at: 0.96, duration: 1.09, frequency: 220, gain: 0.085, type: 'triangle', role: 'melody' },
+      { at: 0.96, duration: 1.09, frequency: 110, gain: 0.055, type: 'sine', role: 'cadence' },
+      { at: 0.96, duration: 1.09, frequency: 329.63, gain: 0.045, type: 'sine', role: 'cadence' },
+    ],
+  },
+} as const satisfies Record<OutcomeSting, OutcomeStingProfile>;
+
+export interface OutcomeStingPlayback {
+  /** Authored phrase length in seconds, even when playback is unavailable. */
+  duration: number;
+  /** Idempotently stop the phrase and release its duck on the SFX bus. */
+  stop(): void;
+}
+
+interface ActiveOutcomeSting extends OutcomeStingPlayback {
+  stopImmediately(): void;
+}
+
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
+let sfxBus: GainNode | null = null;
 let enabled = true;
 let volume = 0.32;
 let userGestureSeen = false;
+let activeOutcomeSting: ActiveOutcomeSting | null = null;
 
 if (typeof window !== 'undefined') {
   const unlock = (): void => {
@@ -81,12 +146,18 @@ function ensure(): AudioContext | null {
   master = ctx.createGain();
   master.gain.value = volume;
   master.connect(ctx.destination);
+  sfxBus = ctx.createGain();
+  sfxBus.gain.value = 1;
+  sfxBus.connect(master);
   return ctx;
 }
 
 export function setSoundEnabled(v: boolean): void {
   enabled = v;
-  if (!v && ctx) void ctx.suspend();
+  if (!v) {
+    activeOutcomeSting?.stopImmediately();
+    if (ctx) void ctx.suspend();
+  }
 }
 
 export function setVolume(v: number): void {
@@ -107,7 +178,7 @@ interface ToneSpec {
 
 function tone(spec: ToneSpec): void {
   const c = ensure();
-  if (!c || !master) return;
+  if (!c || !sfxBus) return;
   const t0 = c.currentTime + (spec.delay ?? 0);
   const osc = c.createOscillator();
   const g = c.createGain();
@@ -118,7 +189,7 @@ function tone(spec: ToneSpec): void {
   g.gain.exponentialRampToValueAtTime(spec.gain, t0 + spec.attack);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + spec.attack + spec.decay);
   osc.connect(g);
-  g.connect(master);
+  g.connect(sfxBus);
   osc.start(t0);
   osc.stop(t0 + spec.attack + spec.decay + 0.05);
 }
@@ -126,7 +197,7 @@ function tone(spec: ToneSpec): void {
 /** Short filtered noise burst — the "paper" layer under the menu ticks. */
 function noise(gain: number, decay: number, freq: number, delay = 0): void {
   const c = ensure();
-  if (!c || !master) return;
+  if (!c || !sfxBus) return;
   const t0 = c.currentTime + delay;
   const frames = Math.max(1, Math.floor(c.sampleRate * decay));
   const buf = c.createBuffer(1, frames, c.sampleRate);
@@ -147,7 +218,7 @@ function noise(gain: number, decay: number, freq: number, delay = 0): void {
   g.gain.value = gain;
   src.connect(filter);
   filter.connect(g);
-  g.connect(master);
+  g.connect(sfxBus);
   src.start(t0);
 }
 
@@ -364,7 +435,7 @@ export function battlePitchDetune(sound: BattleSound, random = Math.random()): n
 export function playBattle(sound: BattleSound, opts: BattleSoundOptions = {}): void {
   if (!enabled) return;
   const c = ensure();
-  if (!c || !master) return;
+  if (!c || !sfxBus) return;
   const profile = battleSoundProfile(sound, opts);
   const delay = Math.max(0, opts.delay ?? 0);
   const start = c.currentTime + delay;
@@ -373,7 +444,7 @@ export function playBattle(sound: BattleSound, opts: BattleSoundOptions = {}): v
 
   const voice = c.createGain();
   voice.gain.value = 1;
-  voice.connect(master);
+  voice.connect(sfxBus);
 
   // Battle audio is intentionally non-deterministic presentation. Never draw
   // this jitter from the core battle RNG.
@@ -419,6 +490,137 @@ export function playBattle(sound: BattleSound, opts: BattleSoundOptions = {}): v
   release.onended = () => voice.disconnect();
   release.start(end);
   release.stop(end + 0.001);
+}
+
+function setBusLevel(
+  parameter: AudioParam,
+  at: number,
+  level: number,
+  duration: number,
+): void {
+  if (typeof parameter.cancelAndHoldAtTime === 'function') {
+    parameter.cancelAndHoldAtTime(at);
+  } else {
+    const current = parameter.value;
+    parameter.cancelScheduledValues(at);
+    parameter.setValueAtTime(Math.max(0.0001, current), at);
+  }
+  const target = Math.max(0.0001, level);
+  if (duration <= 0) parameter.setValueAtTime(target, at);
+  else parameter.linearRampToValueAtTime(target, at + duration);
+}
+
+function scheduleStingNote(
+  c: AudioContext,
+  destination: AudioNode,
+  origin: number,
+  note: OutcomeStingNote,
+): OscillatorNode {
+  const start = origin + note.at;
+  const end = start + note.duration;
+  const attack = Math.min(0.035, note.duration * 0.12);
+  const release = Math.min(0.32, note.duration * 0.45);
+  const oscillator = c.createOscillator();
+  const envelope = c.createGain();
+  oscillator.type = note.type;
+  oscillator.frequency.setValueAtTime(note.frequency, start);
+  envelope.gain.setValueAtTime(0.0001, start);
+  envelope.gain.exponentialRampToValueAtTime(note.gain, start + attack);
+  envelope.gain.setValueAtTime(note.gain, Math.max(start + attack, end - release));
+  envelope.gain.exponentialRampToValueAtTime(0.0001, end);
+  oscillator.connect(envelope);
+  envelope.connect(destination);
+  oscillator.start(start);
+  oscillator.stop(end + 0.02);
+  return oscillator;
+}
+
+/**
+ * Play one authored outcome phrase and return the handle owned by the outcome
+ * presentation. The safe no-op handle keeps headless observers AudioContext-free.
+ */
+export function playOutcomeSting(outcome: OutcomeSting): OutcomeStingPlayback {
+  const profile = OUTCOME_STING_PROFILES[outcome];
+  if (!enabled) return { duration: profile.duration, stop: () => undefined };
+  const c = ensure();
+  if (!c || !master || !sfxBus) {
+    return { duration: profile.duration, stop: () => undefined };
+  }
+  const effectsBus = sfxBus;
+
+  activeOutcomeSting?.stopImmediately();
+
+  const origin = c.currentTime + 0.015;
+  setBusLevel(effectsBus.gain, c.currentTime, 0.055, 0.04);
+
+  const voice = c.createGain();
+  const filter = c.createBiquadFilter();
+  voice.gain.value = 1;
+  filter.type = 'lowpass';
+  filter.Q.value = 0.72;
+  filter.frequency.setValueAtTime(outcome === 'victory' ? 1_800 : 1_550, origin);
+  filter.frequency.exponentialRampToValueAtTime(
+    outcome === 'victory' ? 3_200 : 920,
+    origin + profile.duration,
+  );
+  voice.connect(filter);
+  filter.connect(master);
+
+  const oscillators = profile.notes.map((note) =>
+    scheduleStingNote(c, voice, origin, note),
+  );
+  let stopped = false;
+  let completionTimer: ReturnType<typeof setTimeout> | undefined;
+  let playback: ActiveOutcomeSting;
+
+  const finish = (immediate: boolean): void => {
+    if (stopped) return;
+    stopped = true;
+    if (completionTimer !== undefined) clearTimeout(completionTimer);
+
+    const now = c.currentTime;
+    const fade = immediate ? 0 : 0.065;
+    if (fade === 0) {
+      voice.gain.cancelScheduledValues(now);
+      voice.gain.setValueAtTime(0.0001, now);
+    } else {
+      setBusLevel(voice.gain, now, 0.0001, fade);
+    }
+    for (const oscillator of oscillators) {
+      try {
+        oscillator.stop(now + fade);
+      } catch {
+        // A naturally completed oscillator is already stopped.
+      }
+    }
+
+    if (activeOutcomeSting === playback) {
+      activeOutcomeSting = null;
+      setBusLevel(effectsBus.gain, now, 1, immediate ? 0 : 0.12);
+    }
+
+    if (immediate) {
+      voice.disconnect();
+      filter.disconnect();
+    } else {
+      setTimeout(() => {
+        voice.disconnect();
+        filter.disconnect();
+      }, Math.ceil((fade + 0.02) * 1_000));
+    }
+  };
+
+  playback = {
+    duration: profile.duration,
+    stop: () => finish(false),
+    stopImmediately: () => finish(true),
+  };
+  activeOutcomeSting = playback;
+  completionTimer = setTimeout(
+    () => playback.stop(),
+    Math.ceil(profile.duration * 1_000),
+  );
+  return playback;
 }
 
 export function play(sound: UISound): void {

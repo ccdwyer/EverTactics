@@ -202,6 +202,7 @@ export class UIRoot {
             this.emit({ kind: 'camera', action: 'reset' });
             return true;
           case 'cancel':
+            play('cancel');
             this.emit({ kind: 'cancel' });
             return true;
           default:

@@ -6,11 +6,23 @@
  * battle state and result routing entirely in the game layer.
  */
 
-import { play } from '../audio';
+import {
+  OUTCOME_STING_PROFILES,
+  playOutcomeSting,
+  type OutcomeStingPlayback,
+} from '../audio';
 import { add, div, el, reflow } from '../dom';
 
 export const BATTLE_INTRO_DURATION_MS = 2_200;
-export const BATTLE_OUTCOME_DURATION_MS = 2_000;
+const BATTLE_OUTCOME_TAIL_MS = 150;
+
+export function battleOutcomeDurationMs(outcome: BattleOutcomeVM['outcome']): number {
+  return Math.ceil(OUTCOME_STING_PROFILES[outcome].duration * 1_000)
+    + BATTLE_OUTCOME_TAIL_MS;
+}
+
+export const BATTLE_VICTORY_OUTCOME_DURATION_MS = battleOutcomeDurationMs('victory');
+export const BATTLE_DEFEAT_OUTCOME_DURATION_MS = battleOutcomeDurationMs('defeat');
 
 export interface BattleIntroVM {
   mapName: string;
@@ -49,8 +61,13 @@ export class BattlePresentationScreen {
   private timer = 0;
   private resolve: (() => void) | null = null;
   private stopListening: (() => void) | null = null;
+  private sting: OutcomeStingPlayback | null = null;
 
-  constructor() {
+  constructor(
+    private readonly playSting: (
+      outcome: BattleOutcomeVM['outcome'],
+    ) => OutcomeStingPlayback = playOutcomeSting,
+  ) {
     this.root.setAttribute('role', 'status');
     this.root.setAttribute('aria-live', 'polite');
   }
@@ -72,7 +89,7 @@ export class BattlePresentationScreen {
   showOutcome(
     parent: HTMLElement,
     vm: BattleOutcomeVM,
-    duration = BATTLE_OUTCOME_DURATION_MS,
+    duration = battleOutcomeDurationMs(vm.outcome),
   ): Promise<void> {
     return this.show(parent, {
       kind: vm.outcome,
@@ -116,7 +133,7 @@ export class BattlePresentationScreen {
     this.root.classList.add('is-open');
     this.stopListening = listenForPresentationSkip(window, () => this.finish());
     if (vm.kind !== 'intro') {
-      play(vm.kind === 'defeat' ? 'error' : 'award');
+      this.sting = this.playSting(vm.kind);
     }
 
     return new Promise<void>((resolve) => {
@@ -130,6 +147,8 @@ export class BattlePresentationScreen {
     this.timer = 0;
     this.stopListening?.();
     this.stopListening = null;
+    this.sting?.stop();
+    this.sting = null;
     this.root.classList.remove('is-open');
     const resolve = this.resolve;
     this.resolve = null;

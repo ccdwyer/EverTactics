@@ -64,3 +64,14 @@ rounds, and the reviewer correctly failed all three for it.
    caused victory routing should be re-tested through the public surface.
 
 None of this is known-broken; it is **unverified**, which is a different and more honest claim.
+
+## v0.1 step 13 residual (reviewer-flagged, accepted)
+
+1. **A sting test asserts the wrong mechanism.** `scheduleStingNote` already calls
+   `oscillator.stop(end)`, so the skip path's second `stop()` throws in real Web Audio and is
+   caught. Silence on skip actually comes from the voice gain fade and disconnect. The
+   `FakeAudioContext` test expects two stop timestamps, which the fake permits and a real
+   AudioContext would not — so it passes for a reason that does not hold in the browser. The
+   gain/duck assertions in the same suite are load-bearing and do test the real mechanism.
+   Worth correcting the next time this file is touched: this project's recurring failure is a
+   green test over a contract it is not actually exercising.
