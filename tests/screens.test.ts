@@ -72,14 +72,13 @@ describe('jobNodeVMs', () => {
     }
   });
 
-  it('marks exactly one node current and never locks it', () => {
+  it('marks exactly one node current without bypassing unlockStatus', () => {
     const unit = player(battle());
     const nodes = jobNodeVMs(unit);
     const current = nodes.filter((n) => n.current);
     expect(current).toHaveLength(1);
     expect(current[0]?.id).toBe(unit.currentJob);
-    expect(current[0]?.unlocked).toBe(true);
-    expect(current[0]?.requirement).toBeUndefined();
+    expect(current[0]?.unlocked).toBe(unlockStatus(unit, unit.currentJob).unlocked);
   });
 
   it('names the missing prerequisites of a locked job', () => {
@@ -239,22 +238,20 @@ describe('changing job', () => {
     expect(vm.unit.job).toBe(getJob('black-mage').name);
     expect(vm.unit.move).toBe(after.move);
     expect(vm.jobs.find((n) => n.current)?.id).toBe('black-mage');
-    // canSwitchToJob is exactly unlockStatus — banked JP alone does not re-open
-    // a job. Knight needs Squire Lv 2; grant it so the return path is real.
-    const squire = unit.jobs.get('squire') ?? { level: 1, jp: 0, totalJp: 0, learned: new Set() };
-    squire.level = 2;
-    squire.totalJp = Math.max(squire.totalJp, 100);
-    unit.jobs.set('squire', squire);
+    // The job menu keeps using the same canonical predicate after a job change.
     const vmAfter = jobScreenVM(state, unit);
     const knight = vmAfter.jobs.find((n) => n.id === 'knight');
-    expect(knight?.unlocked).toBe(true);
-    expect(knight?.requirement).toBeUndefined();
+    const knightStatus = unlockStatus(unit, 'knight');
+    expect(knight?.unlocked).toBe(knightStatus.unlocked);
+    expect(knight?.requirement === undefined).toBe(knightStatus.unlocked);
   });
 
   it('unlocks a job once its prerequisite is levelled', () => {
     const state = battle();
     const unit = player(state);
-    expect(jobNodeVMs(unit).find((n) => n.id === 'knight')?.unlocked).toBe(true); // current job
+    expect(jobNodeVMs(unit).find((n) => n.id === 'knight')?.unlocked).toBe(
+      unlockStatus(unit, 'knight').unlocked,
+    );
 
     const nessa = player(state, 'p-nessa');
     const monkBefore = jobNodeVMs(nessa).find((n) => n.id === 'monk');

@@ -486,7 +486,7 @@ export type BattleEvent =
   | { kind: 'miss'; unit: UnitId }
   | { kind: 'status-add'; unit: UnitId; status: StatusId }
   | { kind: 'status-remove'; unit: UnitId; status: StatusId }
-  | { kind: 'knockdown'; unit: UnitId }
+  | { kind: 'knockdown'; unit: UnitId; source?: UnitId }
   | { kind: 'crystal'; unit: UnitId }
   | { kind: 'jp'; unit: UnitId; amount: number }
   | { kind: 'exp'; unit: UnitId; amount: number }

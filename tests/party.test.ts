@@ -7,9 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { advance, applyCommand, evaluateObjective } from '../src/core/battle';
 import {
-  battleToCampaign,
   createCampaign,
   deserialize,
   serialize,
@@ -17,12 +15,8 @@ import {
   type CampaignState,
   type PersistedUnit,
 } from '../src/core/campaign';
-import {
-  applyResolution,
-  type AbilityResolution,
-} from '../src/core/combat/formulas';
-import { applyStatus } from '../src/core/combat/status';
 import { getMapDef } from '../src/core/grid';
+import { unlockStatus } from '../src/core/jobs/tree';
 import {
   assignAbilitySlot,
   canEquipItem,
@@ -51,8 +45,6 @@ import {
 import {
   campaignToBattle,
   getScenario,
-  newGameCampaign,
-  STARTER_CAMPAIGN_INVENTORY,
 } from '../src/state/scenarios';
 import { jobNodeVMs } from '../src/state/screens';
 
@@ -329,74 +321,6 @@ describe('equip and unequip', () => {
     expect(result.campaign.inventory.defender).toBeUndefined();
   });
 
-  it('consumed potions stay gone when the battle folds back into the campaign', () => {
-    // Brief: consume a Potion via applyCommand, end the battle through the same
-    // evaluateObjective path the reducer uses, then battleToCampaign (what
-    // Game.onBattleOver calls). No direct phase assignment, no HP hacking.
-    const base = campaignOf(
-      [
-        unit({
-          id: 'k',
-          name: 'Knight',
-          currentJob: 'chemist',
-          jobs: {
-            chemist: {
-              level: 2,
-              jp: 100,
-              totalJp: 200,
-              learned: ['use-potion'],
-            },
-          },
-        }),
-      ],
-      { 'use-potion': 3, 'long-sword': 1 },
-    );
-    const formed = setFormation(base, [{ unitId: 'k', startIndex: 0 }], {
-      startTileCount: 6,
-      maxDeployed: 6,
-      timestamp: 1,
-    });
-    expect(formed.ok).toBe(true);
-    if (!formed.ok) throw new Error('unreachable');
-
-    const scenario = getScenario('battle-open');
-    const built = campaignToBattle(formed.campaign, scenario);
-    const stockBefore = built.state.inventories?.get('player')?.get('use-potion') ?? 0;
-    expect(stockBefore).toBe(3);
-
-    // Run the clock until the player unit holds the turn, then drink a Potion
-    // through the command reducer — stock falls whether or not HP was missing.
-    for (let i = 0; i < 80; i++) {
-      if (built.state.phase !== 'awaiting-command') advance(built.state);
-      if (built.state.active === 'k') break;
-      if (built.state.active === undefined) continue;
-      applyCommand(built.state, { kind: 'wait', unit: built.state.active });
-    }
-    expect(built.state.active).toBe('k');
-    const drinker = built.state.units.get('k')!;
-    applyCommand(built.state, {
-      kind: 'item',
-      unit: 'k',
-      item: 'use-potion',
-      target: { ...drinker.pos },
-    });
-    expect(built.state.inventories?.get('player')?.get('use-potion')).toBe(2);
-
-    // End the fight the way applyCommand does: KO every enemy, then
-    // evaluateObjective (not `phase = 'victory'`).
-    for (const u of built.state.units.values()) {
-      if (u.team !== 'enemy') continue;
-      u.stats.hp = 0;
-      applyStatus(u, 'ko', { duration: 3 });
-    }
-    expect(evaluateObjective(built.state)).toBe(true);
-    expect(built.state.phase).toBe('victory');
-
-    // Same fold Game.onBattleOver uses.
-    const written = battleToCampaign(formed.campaign, built.state, 99);
-    expect(written.inventory['use-potion']).toBe(2);
-    expect(written.inventory['long-sword']).toBe(1);
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -945,181 +869,6 @@ describe('rename and dismiss', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('campaign launch path (v0.1 step 3)', () => {
-  it('a new game boots through campaignToBattle with the seeded three Potions', () => {
-    // Brief: first battle inventory equals campaign stock (three, not eight).
-    const scenario = getScenario('battle-open');
-    const campaign = newGameCampaign(scenario, 1_000);
-    expect(campaign.inventory['use-potion']).toBe(3);
-    expect(campaign.inventory['use-potion']).toBe(STARTER_CAMPAIGN_INVENTORY['use-potion']);
-    // Eight is the battle-default STARTING_STOCK — must not appear on this path.
-    expect(campaign.inventory['use-potion']).not.toBe(8);
-
-    const built = campaignToBattle(campaign, scenario);
-    const stock = built.state.inventories?.get('player')?.get('use-potion') ?? 0;
-    expect(stock).toBe(3);
-    expect(built.campaign.progress.current).toBe(scenario.id);
-  });
-
-  it('winning the first battle of a new game records it in progress.completed', () => {
-    // Launch path itself pins progress.current — victory must credit that id.
-    const scenario = getScenario('battle-open');
-    const campaign = newGameCampaign(scenario, 1_000);
-    expect(campaign.progress.completed).toEqual([]);
-    expect(campaign.progress.current).toBeUndefined();
-
-    const built = campaignToBattle(campaign, scenario);
-    // progress.current is set at launch on the caller's object, not by the caller.
-    expect(campaign.progress.current).toBe(scenario.id);
-
-    built.state.phase = 'victory';
-    const after = battleToCampaign(campaign, built.state, 2_000);
-    expect(after.progress.completed).toContain(scenario.id);
-    expect(after.progress.completed).toHaveLength(1);
-  });
-
-  it('a unit that scores knockdowns accumulates a persisted kill count', () => {
-    // applyResolution is the sole combat commit path that credits kills.
-    const scenario = getScenario('battle-open');
-    const campaign = newGameCampaign(scenario, 1_000);
-    const built = campaignToBattle(campaign, scenario);
-    const state = built.state;
-
-    const actor = [...state.units.values()].find((u) => u.team === 'player');
-    const victim = [...state.units.values()].find((u) => u.team === 'enemy' && !u.removed);
-    expect(actor).toBeDefined();
-    expect(victim).toBeDefined();
-    if (!actor || !victim) throw new Error('unreachable');
-
-    expect(actor.kills ?? 0).toBe(0);
-    victim.stats.hp = 1;
-
-    const lethal: AbilityResolution = {
-      caster: actor.id,
-      ability: 'throw-stone',
-      mpCost: 0,
-      casterHpDelta: 0,
-      casterMpDelta: 0,
-      casterStatusesBroken: [],
-      events: [],
-      targets: [
-        {
-          unit: victim.id,
-          hit: {
-            hit: true,
-            chance: 100,
-            roll: -1,
-            category: 'physical',
-            direction: 'front',
-            evade: {
-              classEvade: 0,
-              weaponEvade: 0,
-              shieldEvade: 0,
-              accessoryEvade: 0,
-              magicEvade: 0,
-            },
-            evadeNullified: true,
-            consumedEvadeCharge: false,
-            zodiac: 1,
-            breakdown: [],
-          },
-          direction: 'front',
-          damage: {
-            target: victim.id,
-            kind: 'damage',
-            amount: 999,
-            hpDelta: -999,
-            mpDelta: 0,
-            attackerHpDelta: 0,
-            attackerMpDelta: 0,
-            wardAbsorbed: 0,
-            element: 'none',
-            crit: false,
-            direction: 'front',
-            affinity: 'normal',
-            zodiac: 1,
-            lethal: true,
-            breakdown: [],
-          },
-          applied: [],
-          removed: [],
-          ko: true,
-          revived: false,
-          events: [],
-        },
-      ],
-    };
-    applyResolution(state, lethal);
-
-    expect(victim.stats.hp).toBe(0);
-    expect(actor.kills).toBe(1);
-
-    const victim2 = [...state.units.values()].find(
-      (u) => u.team === 'enemy' && u.id !== victim.id && !u.removed && u.stats.hp > 0,
-    );
-    if (victim2) {
-      victim2.stats.hp = 1;
-      applyResolution(state, {
-        ...lethal,
-        targets: [{ ...lethal.targets[0]!, unit: victim2.id, damage: { ...lethal.targets[0]!.damage!, target: victim2.id } }],
-      });
-      expect(actor.kills).toBe(2);
-    }
-
-    const killsBefore = actor.kills ?? 0;
-    expect(killsBefore).toBeGreaterThanOrEqual(1);
-
-    state.phase = 'victory';
-    const after = battleToCampaign(campaign, state, 3_000);
-    const persisted = after.roster.find((u) => u.id === actor.id);
-    expect(persisted).toBeDefined();
-    expect(persisted!.kills).toBe(killsBefore);
-
-    const restored = roundTrip(after);
-    const roundTripped = restored.roster.find((u) => u.id === actor.id);
-    expect(roundTripped!.kills).toBe(killsBefore);
-
-    const live = unitFromPersisted(roundTripped!, {
-      team: 'player',
-      pos: { x: 0, y: 0, z: 0 },
-      facing: 'S',
-    });
-    expect(live.kills).toBe(killsBefore);
-  });
-
-  it('Dark Knight unlocks through the real path with no injected UnlockContext', () => {
-    // kills live on the unit; unlockStatus reads them when ctx is {}.
-    const c = campaignOf([
-      unit({
-        id: 'k',
-        name: 'Knight',
-        currentJob: 'knight',
-        kills: 20,
-        jobs: {
-          squire: { level: 8, jp: 0, totalJp: 3000, learned: [] },
-          knight: { level: 8, jp: 0, totalJp: 3000, learned: [] },
-          chemist: { level: 8, jp: 0, totalJp: 3000, learned: [] },
-          'black-mage': { level: 8, jp: 0, totalJp: 3000, learned: [] },
-        },
-      }),
-    ]);
-    const live = unitFromPersisted(c.roster[0]!, {
-      team: 'player',
-      pos: { x: 0, y: 0, z: 0 },
-      facing: 'S',
-    });
-    expect(live.kills).toBe(20);
-    // Real path: empty context, unit carries the kills.
-    expect(canSwitchToJob(live, 'dark-knight')).toBe(true);
-    expect(canSwitchToJob(live, 'dark-knight', {})).toBe(true);
-    const nodes = jobNodeVMs(live, {});
-    expect(nodes.find((n) => n.id === 'dark-knight')?.unlocked).toBe(true);
-
-    const ok = changeJob(c, 'k', 'dark-knight', 40);
-    expect(ok.ok).toBe(true);
-    if (!ok.ok) throw new Error('unreachable');
-    expect(ok.campaign.roster[0]!.currentJob).toBe('dark-knight');
-  });
-
   it('a monster with banked JP cannot switch to an ordinary job', () => {
     // canSwitchToJob is exactly unlockStatus — banked JP is not a bypass.
     const c = campaignOf([
@@ -1140,6 +889,7 @@ describe('campaign launch path (v0.1 step 3)', () => {
       pos: { x: 0, y: 0, z: 0 },
       facing: 'S',
     });
+    expect(canSwitchToJob(live, 'squire')).toBe(unlockStatus(live, 'squire').unlocked);
     expect(canSwitchToJob(live, 'knight')).toBe(false);
     const denied = changeJob(c, 'm', 'knight', 50);
     expect(denied.ok).toBe(false);

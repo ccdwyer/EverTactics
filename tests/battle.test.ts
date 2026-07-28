@@ -20,6 +20,12 @@ import { createBattlefield } from '../src/core/grid';
 import { createRng } from '../src/core/rng';
 import { applyStatus } from '../src/core/combat/status';
 import {
+  createCampaign,
+  deserialize,
+  serialize,
+  unitToPersisted,
+} from '../src/core/campaign';
+import {
   clearContent,
   createUnit,
   deriveStats,
@@ -83,7 +89,7 @@ function ability(over: Partial<Ability> & Pick<Ability, 'id' | 'name'>): Ability
 }
 
 const JOBS: Job[] = [
-  job({ id: 'brawler', name: 'Brawler' }),
+  job({ id: 'squire', name: 'Brawler' }),
   // A deliberately fragile, slow target so scripted kills are unambiguous.
   job({ id: 'strawman', name: 'Strawman', move: 3, mult: { hp: 10, mp: 100, pa: 50, ma: 50, spd: 60 } }),
 ];
@@ -165,9 +171,24 @@ interface Setup {
  * second enemy, the Mook, parked out of reach at (6,6). The Brawler job is faster
  * than the Strawman, so the hero always leads the order.
  */
-function setup(objective: Objective = { kind: 'defeat-all' }, seed = 12345): Setup {
-  const hero = createUnit({ id: 'hero', name: 'Ramza', team: 'player', job: 'brawler', level: 10, pos: { x: 1, y: 1, z: 0 }, zodiac: 'aries', brave: 70, faith: 70 });
-  const brute = createUnit({ id: 'brute', name: 'Brute', team: 'enemy', job: 'strawman', level: 8, pos: { x: 2, y: 1, z: 0 }, zodiac: 'aries', brave: 70, faith: 70 });
+function setup(
+  objective: Objective = { kind: 'defeat-all' },
+  seed = 12345,
+  opts: { bruteBaseHp?: number } = {},
+): Setup {
+  const hero = createUnit({ id: 'hero', name: 'Ramza', team: 'player', job: 'squire', level: 10, pos: { x: 1, y: 1, z: 0 }, zodiac: 'aries', brave: 70, faith: 70 });
+  const brute = createUnit({
+    id: 'brute',
+    name: 'Brute',
+    team: 'enemy',
+    job: 'strawman',
+    level: 8,
+    pos: { x: 2, y: 1, z: 0 },
+    zodiac: 'aries',
+    brave: 70,
+    faith: 70,
+    ...(opts.bruteBaseHp !== undefined ? { base: { hp: opts.bruteBaseHp } } : {}),
+  });
   const mook = createUnit({ id: 'mook', name: 'Mook', team: 'enemy', job: 'strawman', level: 8, pos: { x: 6, y: 6, z: 0 }, zodiac: 'aries', brave: 70, faith: 70 });
 
   const units = new Map<UnitId, Unit>([
@@ -321,6 +342,36 @@ describe('turn economy', () => {
     const out = applyCommand(state, { kind: 'wait', unit: 'hero' });
     expect(out).toContainEqual({ kind: 'faced', unit: 'hero', facing: 'N' });
     expect(hero.facing).toBe('N');
+  });
+});
+
+describe('knockdown credit', () => {
+  it('attributes a command knockdown and persists the scorer kill count', () => {
+    const { state, hero, brute } = setup(
+      { kind: 'defeat-all' },
+      12345,
+      { bruteBaseHp: 1 },
+    );
+    advance(state);
+
+    const events = applyCommand(state, {
+      kind: 'act',
+      unit: hero.id,
+      ability: 'strike',
+      target: { ...brute.pos },
+    });
+
+    expect(events).toContainEqual({
+      kind: 'knockdown',
+      unit: brute.id,
+      source: hero.id,
+    });
+    expect(hero.kills).toBe(1);
+
+    const campaign = createCampaign(12345, 1_000);
+    campaign.roster = [unitToPersisted(hero)];
+    const restored = deserialize(serialize(campaign));
+    expect(restored.roster[0]?.kills).toBe(1);
   });
 });
 
@@ -530,7 +581,7 @@ describe('abilities', () => {
     const exp = events.find((e) => e.kind === 'exp');
     expect(jp && jp.kind === 'jp' && jp.amount).toBeGreaterThan(0);
     expect(exp && exp.kind === 'exp' && exp.amount).toBeGreaterThan(0);
-    expect(hero.jobs.get('brawler')?.totalJp).toBeGreaterThan(0);
+    expect(hero.jobs.get('squire')?.totalJp).toBeGreaterThan(0);
   });
 
   it('aims cast-fire at the tile that was picked, not the caster', () => {

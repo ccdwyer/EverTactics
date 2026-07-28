@@ -94,12 +94,6 @@ export interface SpecialCondition {
  * Non-job-level unlock gates. Kept as data so the UI can list them alongside the
  * job-level requirements without special-casing anything.
  */
-/** Kill total for unlock gates: explicit ctx wins, else the unit's persisted tally. */
-function killCountOf(unit: Unit, ctx: UnlockContext): number {
-  if (ctx.kills !== undefined) return ctx.kills;
-  return unit.kills ?? 0;
-}
-
 export const SPECIAL_CONDITIONS: ReadonlyMap<JobId, SpecialCondition> = new Map<
   JobId,
   SpecialCondition
@@ -109,7 +103,7 @@ export const SPECIAL_CONDITIONS: ReadonlyMap<JobId, SpecialCondition> = new Map<
     {
       job: 'dark-knight',
       text: 'Defeat 20 units with this character',
-      met: (unit, ctx) => killCountOf(unit, ctx) >= 20,
+      met: (_unit, ctx) => (ctx.kills ?? 0) >= 20,
     },
   ],
   [
@@ -117,7 +111,7 @@ export const SPECIAL_CONDITIONS: ReadonlyMap<JobId, SpecialCondition> = new Map<
     {
       job: 'death-knight',
       text: 'Defeat 30 units with this character',
-      met: (unit, ctx) => killCountOf(unit, ctx) >= 30,
+      met: (_unit, ctx) => (ctx.kills ?? 0) >= 30,
     },
   ],
 ]);

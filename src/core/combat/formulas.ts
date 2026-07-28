@@ -466,8 +466,9 @@ export function applyResolution(state: BattleState, res: AbilityResolution): Bat
       } else {
         applyStatus(target, 'ko', { duration: -1, source: caster.id });
         events.push({ kind: 'status-add', unit: target.id, status: 'ko' });
-        events.push({ kind: 'knockdown', unit: target.id });
-        // Personal kill credit — campaign-persisted via unitToPersisted.
+        // Attribution is part of the event contract; the persisted counter is
+        // updated at the same reducer commit point.
+        events.push({ kind: 'knockdown', unit: target.id, source: caster.id });
         if (areHostile(caster.team, target.team)) {
           caster.kills = (caster.kills ?? 0) + 1;
         }

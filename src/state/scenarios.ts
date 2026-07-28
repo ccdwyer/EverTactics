@@ -184,6 +184,26 @@ export interface CampaignBuiltScenario extends BuiltScenario {
   campaign: CampaignState;
 }
 
+export interface CampaignBattleOptions {
+  /**
+   * Place the campaign roster at the scenario's authored player positions.
+   * Screenshot mode uses this so routing through the campaign does not move
+   * the cast the visual baselines were composed around.
+   */
+  preserveScenarioPlayerPlacements?: boolean;
+}
+
+export interface CampaignLaunchOptions extends CampaignBattleOptions {
+  /** Loaded company, or null/undefined for a brand-new game. */
+  campaign?: CampaignState | null;
+  timestamp: number;
+}
+
+export interface CampaignLaunch {
+  campaign: CampaignState;
+  built: CampaignBuiltScenario;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Placement
 // ─────────────────────────────────────────────────────────────────────────────
@@ -361,6 +381,28 @@ export function newGameCampaign(scenario: Scenario, timestamp: number): Campaign
 }
 
 /**
+ * Select the company for a real battle, then launch it through one boundary.
+ *
+ * Game uses this for loaded saves, new games, and non-diagnostic screenshot
+ * scenes. Keeping selection and launch together prevents a fresh-game caller
+ * from accidentally falling back to buildScenario.
+ */
+export function launchCampaignBattle(
+  scenario: Scenario,
+  opts: CampaignLaunchOptions,
+): CampaignLaunch {
+  const loaded = opts.campaign;
+  const campaign =
+    loaded === null || loaded === undefined || loaded.roster.length === 0
+      ? newGameCampaign(scenario, opts.timestamp)
+      : loaded;
+  const built = campaignToBattle(campaign, scenario, {
+    preserveScenarioPlayerPlacements: opts.preserveScenarioPlayerPlacements ?? false,
+  });
+  return { campaign, built };
+}
+
+/**
  * Open a battle whose player units come from the campaign roster instead of the
  * scenario's hardcoded list. Enemies (and any non-player placements) still come
  * from the scenario. Placement tiles and CT offsets are the scenario's.
@@ -381,6 +423,7 @@ export function newGameCampaign(scenario: Scenario, timestamp: number): Campaign
 export function campaignToBattle(
   campaign: CampaignState,
   scenario: Scenario,
+  opts: CampaignBattleOptions = {},
 ): CampaignBuiltScenario {
   bootstrapContent();
 
@@ -409,10 +452,10 @@ export function campaignToBattle(
   const formation = campaign.formation ?? [];
   if (formation.length > 0) {
     for (const entry of formation) {
-      const start = startTiles[entry.startIndex];
       const persisted = rosterById.get(entry.unitId);
-      if (!start || !persisted) continue;
       const hint = playerHints[entry.startIndex];
+      const start = opts.preserveScenarioPlayerPlacements ? hint?.at : startTiles[entry.startIndex];
+      if (!start || !persisted) continue;
       const pos = resolvePlacement(field, { x: start.x, y: start.y }, taken);
       const unit = unitFromPersisted(persisted, {
         team: 'player',
@@ -423,11 +466,13 @@ export function campaignToBattle(
       units.set(unit.id, unit);
     }
   } else {
-    const deployCount = Math.min(campaign.roster.length, startTiles.length);
+    const availableStarts = opts.preserveScenarioPlayerPlacements ? playerHints : startTiles;
+    const deployCount = Math.min(campaign.roster.length, availableStarts.length);
     for (let i = 0; i < deployCount; i++) {
-      const start = startTiles[i]!;
       const persisted = campaign.roster[i]!;
       const hint = playerHints[i];
+      const start = opts.preserveScenarioPlayerPlacements ? hint?.at : startTiles[i];
+      if (!start) continue;
       const pos = resolvePlacement(field, { x: start.x, y: start.y }, taken);
       const unit = unitFromPersisted(persisted, {
         team: 'player',

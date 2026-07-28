@@ -64,6 +64,16 @@ export function partyEditAllowed(battleLive: boolean): boolean {
   return !battleLive;
 }
 
+/** Unlock facts sourced from the persisted roster, never from a UI fixture. */
+export function unlockContextForUnit(
+  campaign: CampaignState,
+  unitId: UnitId,
+): UnlockContext {
+  return {
+    kills: campaign.roster.find((unit) => unit.id === unitId)?.kills ?? 0,
+  };
+}
+
 /** Gate used by every party mutation path. */
 export function assertPartyEditAllowed(
   battleLive: boolean,

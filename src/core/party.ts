@@ -53,7 +53,6 @@ export function canSwitchToJob(
   jobId: JobId,
   ctx: UnlockContext = {},
 ): boolean {
-  if (unit.currentJob === jobId) return true;
   return unlockStatus(unit, jobId, ctx).unlocked;
 }
 

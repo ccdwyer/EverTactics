@@ -34,11 +34,6 @@ declare module './types' {
     rawMp?: number;
     /** Total exp needed for the next level is always 100; this is the running total. */
     totalExp?: number;
-    /**
-     * Lifetime personal KOs credited to this unit (campaign-persisted).
-     * Gates Dark Knight / Death Knight via {@link unlockStatus}.
-     */
-    kills?: number;
   }
 }
 
