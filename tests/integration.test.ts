@@ -10,28 +10,43 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildScenario, getScenario } from '../src/state/scenarios';
-import { advance, applyCommand, evaluateObjective } from '../src/core/battle';
-import { decideTurn } from '../src/core/ai';
+import { IllegalCommandError, advance, applyCommand, evaluateObjective } from '../src/core/battle';
+import { createAiWorld, decideTurn } from '../src/core/ai';
+import { stockAwareWorld } from '../src/core/inventory';
+import { ALL_ABILITIES, ALL_ITEMS } from '../src/state/content';
 import type { BattleEvent, BattleState } from '../src/core/types';
 
 function isFinished(state: BattleState): boolean {
   return state.phase === 'victory' || state.phase === 'defeat';
 }
 
-/** Run a full AI-vs-AI battle and collect every event it produced. */
-function battle(seed: number, scenarioId = 'battle-open') {
-  const state = buildScenario({ ...getScenario(scenarioId), seed }).state;
+/** Run an AI-vs-AI battle and collect every event it produced. */
+function battle(
+  seed: number,
+  scenarioId = 'battle-open',
+  productionAi = false,
+  maxTurns = 400,
+  collectEvents = true,
+) {
+  const built = buildScenario({ ...getScenario(scenarioId), seed });
+  const state = built.state;
+  const world = productionAi
+    ? stockAwareWorld(createAiWorld({ abilities: ALL_ABILITIES, items: ALL_ITEMS }))
+    : undefined;
   const events: BattleEvent[] = [];
+  let commands = 0;
+  let rejectedCommands = 0;
   let turns = 0;
 
-  while (turns < 400) {
+  while (turns < maxTurns) {
     if (evaluateObjective(state)) break;
     if (isFinished(state)) break;
 
     let spins = 0;
     while (state.phase !== 'awaiting-command' && spins < 1000) {
       if (isFinished(state)) break;
-      events.push(...advance(state));
+      const advanced = advance(state);
+      if (collectEvents) events.push(...advanced);
       spins++;
     }
     if (state.phase !== 'awaiting-command') break;
@@ -39,17 +54,39 @@ function battle(seed: number, scenarioId = 'battle-open') {
     const id = state.active;
     if (!id) break;
 
-    for (const cmd of decideTurn(state, id)) {
-      if (state.phase !== 'awaiting-command') break;
-      events.push(...applyCommand(state, cmd));
+    const plan = productionAi
+      ? decideTurn(state, id, {
+          world: world!,
+          personalities: built.personalities,
+        })
+      : decideTurn(state, id);
+    for (const cmd of plan) {
+      if (state.phase !== 'awaiting-command' || state.active !== id) break;
+      commands++;
+      try {
+        const applied = applyCommand(state, cmd);
+        if (collectEvents) events.push(...applied);
+      } catch (error) {
+        if (error instanceof IllegalCommandError) {
+          rejectedCommands++;
+          throw new Error(
+            `AI proposed an illegal command in ${scenarioId}, seed ${seed}, turn ${turns}: ` +
+              `${JSON.stringify(cmd)} — ${error.message}`,
+          );
+        }
+        throw error;
+      }
     }
     if (state.phase === 'awaiting-command' && state.active === id) {
-      events.push(...applyCommand(state, { kind: 'wait', unit: id }));
+      throw new Error(
+        `AI plan did not close the turn in ${scenarioId}, seed ${seed}, turn ${turns}: ` +
+          JSON.stringify(plan),
+      );
     }
     turns++;
   }
 
-  return { state, events, turns };
+  return { state, events, commands, rejectedCommands, turns };
 }
 
 const kindsOf = (events: BattleEvent[]) => new Set(events.map((e) => e.kind));
@@ -113,4 +150,39 @@ describe('systems are wired into real battles', () => {
       expect(['victory', 'defeat'], `${map} did not resolve`).toContain(state.phase);
     }
   });
+
+  it(
+    'accepts every AI command across eight seeds on both shipped maps',
+    () => {
+      const seedsByMap = {
+        'battle-open': [8, 12, 5, 3, 1, 13, 777, 1234],
+        'mandalia-ford': [5, 6, 4321, 2, 1234, 20260727, 2468, 11],
+      } as const;
+      let battles = 0;
+      let commands = 0;
+      let rejectedCommands = 0;
+
+      for (const [map, seeds] of Object.entries(seedsByMap)) {
+        for (const seed of seeds) {
+          const result = battle(seed, map, true, 400, false);
+          expect(result.turns, `${map} seed ${seed} hit the turn cap`).toBeLessThan(400);
+          expect(['victory', 'defeat'], `${map} seed ${seed} did not resolve`).toContain(
+            result.state.phase,
+          );
+          battles++;
+          commands += result.commands;
+          rejectedCommands += result.rejectedCommands;
+        }
+      }
+
+      console.info(
+        `[integration] AI command sweep: battles=${battles}, commands=${commands}, ` +
+          `rejected=${rejectedCommands}`,
+      );
+      expect(battles).toBe(16);
+      expect(commands).toBeGreaterThan(0);
+      expect(rejectedCommands).toBe(0);
+    },
+    30_000,
+  );
 });

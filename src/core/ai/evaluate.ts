@@ -5,13 +5,9 @@
  * unit and scores it. Scoring is split into named terms (see `personalities.ts`)
  * so that archetypes are pure weight vectors over the same evidence.
  *
- * Dependency shape: this module imports ONLY `../types` and `./personalities`.
- * Everything it needs from the rest of core (pathfinding, real combat formulas,
- * the ability table) is reached through the `AiWorld` seam, which `battle.ts`
- * can fill with the authoritative implementations. A complete, honest default
- * implementation lives here so the AI is testable and playable on its own — the
- * defaults are *estimators*, which is what an AI wants anyway: it reasons about
- * expected outcomes, and the battle reducer remains the source of truth.
+ * Combat estimates and content lookup are reached through the `AiWorld` seam.
+ * Aim legality is not an estimate: it calls the same canonical predicate as the
+ * reducer so the AI cannot price a command that `applyCommand` will reject.
  *
  * Pure: no three.js, no Math.random.
  */
@@ -36,6 +32,8 @@ import type {
   Vec3,
   Zodiac,
 } from '../types';
+import { isAbilityInRange } from '../targeting';
+import { effectiveRange } from '../unit';
 import { battleCaution, type Personality, type ScoreTerm } from './personalities';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -417,29 +415,6 @@ export function createNavGraph(field: Battlefield, jump: number): NavGraph {
 const NAV_STEPS: readonly (readonly [number, number])[] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
 /** Terrain line of sight. Units do not block; raised terrain does. */
-export function hasLineOfSight(field: Battlefield, from: Vec3, to: Vec3): boolean {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const steps = Math.max(Math.abs(dx), Math.abs(dy)) * 2;
-  if (steps <= 1) return true;
-  // Sight is cast from roughly eye height (one half-tile above the feet).
-  const z0 = from.z + 1;
-  const z1 = to.z + 1;
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    const sx = Math.round(from.x + dx * t);
-    const sy = Math.round(from.y + dy * t);
-    if (sx === from.x && sy === from.y) continue;
-    if (sx === to.x && sy === to.y) continue;
-    const tile = field.tileAt(sx, sy);
-    if (tile === undefined) continue;
-    const beam = z0 + (z1 - z0) * t;
-    if (!tile.passable && tile.height > beam) return false;
-    if (tile.height > beam + 1) return false;
-  }
-  return true;
-}
-
 /** Tiles covered by an ability centred on `epicentre`, cast from `origin`. */
 export function tilesInAoe(
   field: Battlefield,
@@ -509,47 +484,6 @@ const FACING_STEP: Readonly<Record<Facing, readonly [number, number]>> = {
   E: [1, 0],
   W: [-1, 0],
 };
-
-/** Range/vertical/LOS legality of aiming `ability` at `epicentre` from `from`. */
-export function inRange(field: Battlefield, ability: Ability, from: Vec3, epicentre: Vec3): boolean {
-  const r = ability.range;
-  if (r.self === true) return sameTile(from, epicentre);
-  const d = manhattan(from, epicentre);
-  if (d > r.range) return false;
-  if (Number.isFinite(r.vertical) && Math.abs(from.z - epicentre.z) > r.vertical) return false;
-  if (!shapeAllows(r.shape ?? 'circle', from, epicentre, d)) return false;
-  if (r.los && !hasLineOfSight(field, from, epicentre)) return false;
-  return true;
-}
-
-/**
- * Whether an ability's targeting shape permits this aim point.
- *
- * `core/battle.ts` validates the aim by deriving the caster's facing from the
- * direction to the target and then running `grid.isInRange`. So the only
- * shape-dependent question is whether the aim point lies on a legal ray for that
- * derived facing:
- *
- *   circle — any tile inside the diamond.
- *   line   — a single ray along the facing, so the target must be cardinal.
- *   cross  — the four cardinal rays; same test.
- *   cone   — a 90-degree wedge about the facing, which by construction always
- *            contains the tile the facing was derived from.
- *
- * Omitting this test is not a scoring inaccuracy: it makes the evaluator propose
- * commands the reducer then throws on, which kills the turn.
- */
-function shapeAllows(
-  shape: NonNullable<Ability['range']['shape']>,
-  from: Vec3,
-  epicentre: Vec3,
-  distance: number,
-): boolean {
-  if (shape === 'circle') return true;
-  if (distance === 0) return shape !== 'line' && shape !== 'cone';
-  if (shape === 'cone') return true;
-  return from.x === epicentre.x || from.y === epicentre.y;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Zodiac compatibility (FFT table: trine good, square bad, opposition extreme)
@@ -657,20 +591,10 @@ export const BASIC_ATTACK: Ability = {
   formula: 'physical',
   power: 1,
   accuracy: 100,
+  usesWeaponRange: true,
   vfx: 'hit-physical',
   castAnim: 'attack',
 };
-
-/**
- * `Ability.usesWeaponRange` means the record's `range.range` is only the
- * bare-handed floor — `core/battle.ts` widens it to the equipped weapon before
- * validating the aim. The evaluator has to widen it too, or an Archer's basic
- * shot is priced as a one-tile poke and never gets proposed.
- */
-function withWeaponRange(ability: Ability, reach: number): Ability {
-  if (ability.usesWeaponRange !== true || reach <= ability.range.range) return ability;
-  return { ...ability, range: { ...ability.range, range: reach, los: true } };
-}
 
 interface WeaponProfile {
   wp: number;
@@ -736,7 +660,11 @@ export function createAiWorld(opts: AiWorldOptions = {}): AiWorld {
 
   const defaultAbilitiesFor = (_state: BattleState, unit: Unit): readonly Ability[] => {
     const out: Ability[] = [];
-    out.push(withWeaponRange(lookupAbility(BASIC_ATTACK.id) ?? BASIC_ATTACK, weaponOf(unit).range));
+    const forUnit = (ability: Ability): Ability => {
+      const range = effectiveRange(unit, ability);
+      return range === ability.range ? ability : { ...ability, range };
+    };
+    out.push(forUnit(lookupAbility(BASIC_ATTACK.id) ?? BASIC_ATTACK));
     if (abilities === undefined) return out;
 
     const silenced = hasStatus(unit, 'silence');
@@ -748,7 +676,7 @@ export function createAiWorld(opts: AiWorldOptions = {}): AiWorld {
       if (ability === undefined || ability.slot !== 'action') return;
       if (ability.mp > unit.stats.mp) return;
       if (silenced && ability.mp > 0) return;
-      out.push(ability);
+      out.push(forUnit(ability));
     };
 
     const primary = unit.jobs.get(unit.currentJob);
@@ -1520,6 +1448,7 @@ export function enumerateCandidates(ctx: AiContext): Candidate[] {
     candidates.push(moveOnly);
 
     for (const ability of abilities) {
+      const range = effectiveRange(actor, ability);
       const base = epicentresByAbility.get(ability.id);
       if (base === undefined) continue;
       // After a move the actor's own aim point is the destination, not the tile
@@ -1529,7 +1458,7 @@ export function enumerateCandidates(ctx: AiContext): Candidate[] {
       let used = 0;
       for (const epicentre of epicentres) {
         if (used >= ctx.budget.maxEpicentres) break;
-        if (!inRange(field, ability, destination.pos, epicentre)) continue;
+        if (!isAbilityInRange(field, actor.facing, range, destination.pos, epicentre)) continue;
         used++;
 
         const covered = tilesInAoe(field, ability, destination.pos, epicentre);
@@ -1543,7 +1472,8 @@ export function enumerateCandidates(ctx: AiContext): Candidate[] {
           ability,
           targetTile: epicentre,
           facing: facingToward(destination.pos, epicentre),
-          actableFromOrigin: isOrigin || inRange(field, ability, actor.pos, epicentre),
+          actableFromOrigin:
+            isOrigin || isAbilityInRange(field, actor.facing, range, actor.pos, epicentre),
           score: 0,
           terms: emptyTerms(),
           prediction: 1,

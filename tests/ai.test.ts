@@ -722,9 +722,12 @@ describe('decideTurn — archetypes diverge on one board', () => {
     const state = makeState(field, units);
     const world = createAiWorld({ abilities });
     decideTurn(state, 'ai', { world, personality: 'tactician' });
-    const t0 = performance.now();
+    // Measure this worker's CPU cost, not wall-clock time stolen by other
+    // Vitest files running seeded battle simulations in parallel.
+    const cpuStart = process.cpuUsage();
     for (let i = 0; i < 5; i++) decideTurn(state, 'ai', { world, personality: 'tactician' });
-    const ms = (performance.now() - t0) / 5;
+    const cpu = process.cpuUsage(cpuStart);
+    const ms = (cpu.user + cpu.system) / 1_000 / 5;
     expect(ms).toBeLessThan(100);
   });
 });

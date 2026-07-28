@@ -21,7 +21,8 @@
  * Both are handled here, once.
  */
 
-import { facingBetween, isInRange, tileKey, tilesInBurst } from '@core/grid';
+import { tileKey, tilesInBurst } from '@core/grid';
+import { isAbilityInRange } from '@core/targeting';
 import { effectiveRange } from '@core/unit';
 import type { Ability, BattleState, Unit, Vec3 } from '@core/types';
 
@@ -56,9 +57,7 @@ export function legalTargets(state: BattleState, unit: Unit, ability: Ability): 
   for (const tile of state.field.tiles) {
     if (tile.surface === 'void') continue;
     const point: Vec3 = { x: tile.x, y: tile.y, z: tile.height };
-    const onSelf = tile.x === unit.pos.x && tile.y === unit.pos.y;
-    const facing = onSelf ? unit.facing : facingBetween(unit.pos, point);
-    if (!isInRange(state.field, unit.pos, point, range, { facing })) continue;
+    if (!isAbilityInRange(state.field, unit.facing, range, unit.pos, point)) continue;
     tiles.push(point);
     keys.add(tileKey(tile.x, tile.y));
   }

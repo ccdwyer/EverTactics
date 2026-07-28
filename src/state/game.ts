@@ -686,6 +686,12 @@ export class Game {
       const ok = await this.submit(command);
       if (!ok) break;
     }
+    // A rejected or incomplete deterministic plan must not be recomputed while
+    // the same unit still holds the turn. The rejected command was already
+    // logged by submit; waiting costs the unit its turn and lets the clock move.
+    if (this.state.phase === 'awaiting-command' && this.state.active === unit.id) {
+      await this.submit({ kind: 'wait', unit: unit.id });
+    }
     void this.beginTurn();
   }
 
@@ -694,8 +700,8 @@ export class Game {
    * so validation, animation and HUD refresh happen in exactly one place.
    *
    * Returns false when the reducer rejected the command. The UI is supposed to
-   * only offer legal commands, so a rejection is a bug: it is logged loudly and
-   * the turn is allowed to continue rather than wedging the game.
+   * only offer legal commands, so a rejection is a bug. It is logged once and
+   * the caller decides how to recover without bypassing the reducer.
    */
   async submit(command: Command): Promise<boolean> {
     if (this.disposed) return false;

@@ -55,6 +55,7 @@ import {
 import { inventoryOf, isConsumable } from './inventory';
 import { restoreRng } from './rng';
 import { deriveStats, effectiveRange, gainExp, gainJp, getAbility, getItem } from './unit';
+import { isAbilityInRange } from './targeting';
 
 import {
   areHostile,
@@ -912,9 +913,6 @@ function checkTargetLegality(state: BattleState, actor: Unit, ability: Ability, 
   const tile = state.field.tileAt(target.x, target.y);
   if (!tile) fail(`act: target tile (${target.x},${target.y}) is off the map`);
   const resolved: Vec3 = { x: target.x, y: target.y, z: tile.height };
-
-  // The generic Attack reaches as far as the equipped weapon, not as far as the
-  // ability record says; everything else uses its declared range unchanged.
   const range = effectiveRange(actor, ability);
 
   if (range.self) {
@@ -922,8 +920,7 @@ function checkTargetLegality(state: BattleState, actor: Unit, ability: Ability, 
     return resolved;
   }
 
-  const facing = sameTile(actor.pos, resolved) ? actor.facing : facingBetween(actor.pos, resolved);
-  if (!isInRange(state.field, actor.pos, resolved, range, { facing })) {
+  if (!isAbilityInRange(state.field, actor.facing, range, actor.pos, resolved)) {
     fail(`act: (${target.x},${target.y}) is out of range for ${ability.name}`);
   }
 

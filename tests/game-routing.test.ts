@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { advance } from '../src/core/battle';
+import { advance, applyCommand } from '../src/core/battle';
 import { createCampaign, type CampaignState, type PersistedUnit } from '../src/core/campaign';
 
 const routing = vi.hoisted(() => ({
@@ -60,6 +60,7 @@ vi.mock('../src/render/camera', () => ({
   TILE_SIZE: 1,
   IsoCamera: class {
     camera = { layers: { enable: vi.fn() } };
+    focusTile = vi.fn();
   },
 }));
 
@@ -113,6 +114,8 @@ vi.mock('../src/ui/UIRoot', () => ({
     openJobScreen = vi.fn((vm: typeof uiCapture.openedJobVM) => {
       uiCapture.openedJobVM = vm;
     });
+    setTurnOrder = vi.fn();
+    setActiveUnit = vi.fn();
     updateJobScreen = vi.fn((vm: typeof uiCapture.openedJobVM) => {
       uiCapture.openedJobVM = vm;
     });
@@ -271,5 +274,50 @@ describe('Game campaign routing', () => {
     }
     expect(saves.loadCalls).toBe(0);
     expect(saves.written).toEqual([]);
+  });
+
+  it('costs an AI its turn when its proposed command is rejected', async () => {
+    vi.useFakeTimers();
+    try {
+      const game = newGame();
+
+      let guard = 0;
+      while (guard++ < 1000) {
+        if (game.state.phase === 'awaiting-command') {
+          const active = game.state.active;
+          const unit = active === undefined ? undefined : game.state.units.get(active);
+          if (unit?.team === 'enemy') break;
+          if (active !== undefined) {
+            applyCommand(game.state, { kind: 'wait', unit: active });
+            continue;
+          }
+        }
+        advance(game.state);
+      }
+
+      const active = game.state.active;
+      expect(active).toBeDefined();
+      expect(game.state.units.get(active!)?.team).toBe('enemy');
+
+      const submitted: string[] = [];
+      vi.spyOn(game, 'submit').mockImplementation(async (command) => {
+        submitted.push(command.kind);
+        if (submitted.length === 1) return false;
+
+        applyCommand(game.state, command);
+        (game as unknown as { disposed: boolean }).disposed = true;
+        return true;
+      });
+
+      const turn = game.beginTurn();
+      await vi.advanceTimersByTimeAsync(280);
+      await turn;
+
+      expect(submitted).toEqual([expect.any(String), 'wait']);
+      expect(game.state.phase).toBe('tick');
+      expect(game.state.active).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

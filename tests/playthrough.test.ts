@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildScenario, getScenario } from '../src/state/scenarios';
-import { advance, applyCommand, evaluateObjective } from '../src/core/battle';
+import { IllegalCommandError, advance, applyCommand, evaluateObjective } from '../src/core/battle';
 import { decideTurn } from '../src/core/ai';
 import type { BattleEvent, BattleState, Command } from '../src/core/types';
 
@@ -64,14 +64,28 @@ function playOut(scenarioId: string, seed: number, maxTurns = 400) {
     // is no longer legal — the reducer is right to refuse it.
     const plan = decideTurn(state, activeId);
     for (const cmd of plan) {
-      if (state.phase !== 'awaiting-command') break;
+      if (state.phase !== 'awaiting-command' || state.active !== activeId) break;
       commands.push(cmd);
-      events.push(...applyCommand(state, cmd));
+      try {
+        events.push(...applyCommand(state, cmd));
+      } catch (error) {
+        if (error instanceof IllegalCommandError) {
+          throw new Error(
+            `AI proposed an illegal command in ${scenarioId}, seed ${seed}, turn ${turns}: ` +
+              `${JSON.stringify(cmd)} — ${error.message}`,
+          );
+        }
+        throw error;
+      }
     }
 
-    // If the unit still holds the turn, close it out so the clock moves on.
+    // A complete AI plan always closes its own turn. Do not paper over an empty
+    // or incomplete plan with a test-only wait.
     if (state.phase === 'awaiting-command' && state.active === activeId) {
-      events.push(...applyCommand(state, { kind: 'wait', unit: activeId }));
+      throw new Error(
+        `AI plan did not close the turn in ${scenarioId}, seed ${seed}, turn ${turns}: ` +
+          JSON.stringify(plan),
+      );
     }
 
     turns++;
