@@ -170,9 +170,16 @@ describe('createBattlefield', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('handcrafted maps', () => {
-  it('exposes both maps', () => {
-    expect(Object.keys(MAPS).sort()).toEqual(['mandalia-plains', 'orbonne-courtyard']);
-    expect(listMaps()).toHaveLength(2);
+  it('exposes the six authored maps', () => {
+    expect(Object.keys(MAPS).sort()).toEqual([
+      'dorter-storehouse',
+      'gariland-bridge',
+      'lionel-gate',
+      'mandalia-plains',
+      'orbonne-courtyard',
+      'zeirchele-ridge',
+    ]);
+    expect(listMaps()).toHaveLength(6);
     expect(getMapDef('orbonne-courtyard')).toBe(ORBONNE_COURTYARD);
     expect(getMapDef('nope')).toBeUndefined();
     expect(() => generateMap('nope')).toThrow();

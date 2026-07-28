@@ -72,19 +72,25 @@ if (!(await serverUp())) {
   }
 }
 
-const browser = await chromium.launch({
-  args: [
-    '--use-gl=angle',
-    '--use-angle=metal',
-    '--enable-gpu',
-    '--ignore-gpu-blocklist',
-    '--enable-unsafe-webgpu',
-  ],
-});
-const page = await browser.newPage({
-  viewport: { width, height },
-  deviceScaleFactor: Number(arg('dpr', 1)),
-});
+const cdpEndpoint = process.env.EVERTACTICS_CDP_ENDPOINT;
+const browser = cdpEndpoint
+  ? await chromium.connectOverCDP(cdpEndpoint)
+  : await chromium.launch({
+      args: [
+        '--use-gl=angle',
+        '--use-angle=metal',
+        '--enable-gpu',
+        '--ignore-gpu-blocklist',
+        '--enable-unsafe-webgpu',
+      ],
+    });
+const page = cdpEndpoint
+  ? await browser.contexts()[0].newPage()
+  : await browser.newPage({
+      viewport: { width, height },
+      deviceScaleFactor: Number(arg('dpr', 1)),
+    });
+if (cdpEndpoint) await page.setViewportSize({ width, height });
 
 const errors = [];
 page.on('console', (m) => {
@@ -173,7 +179,10 @@ await page.screenshot({ path: out, type: 'png' });
  * downscaled draw, so it costs nothing and needs no image dependency.
  */
 async function frameStats(pngPath) {
-  const probe = await browser.newPage({ viewport: { width: 160, height: 90 } });
+  const probe = cdpEndpoint
+    ? await browser.contexts()[0].newPage()
+    : await browser.newPage({ viewport: { width: 160, height: 90 } });
+  if (cdpEndpoint) await probe.setViewportSize({ width: 160, height: 90 });
   try {
     const b64 = readFileSync(pngPath).toString('base64');
     const stats = await probe.evaluate(async (src) => {
@@ -216,6 +225,7 @@ try {
   // Verification is best-effort; a failure to measure is not a failure to render.
 }
 
+await page.close();
 await browser.close();
 if (child) child.kill();
 

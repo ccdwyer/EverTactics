@@ -9,6 +9,7 @@
  * These tests make that class of mistake loud.
  */
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -24,7 +25,22 @@ import {
   abilitiesInSet,
   validateAbilities,
 } from '../src/core/abilities';
+import {
+  generateMap,
+  listMaps,
+  moveCostInto,
+  reachableTiles,
+  tileKey,
+} from '../src/core/grid';
+import { WORLD_NODES } from '../src/core/world';
 import { bootstrapContent } from '../src/state/content';
+import {
+  ENCOUNTERS,
+  SCENARIOS,
+  getEncounter,
+  getScenario,
+} from '../src/state/scenarios';
+import { runAiBattle } from './helpers/aiBattle';
 
 bootstrapContent();
 
@@ -255,4 +271,186 @@ describe('ability database', () => {
     }
     expect(bad).toEqual([]);
   });
+});
+
+describe('campaign map and encounter content', () => {
+  it('builds every map with legal starts and raw enemy placements', () => {
+    const maps = listMaps();
+    expect(maps.length, 'v0.1 requires at least six authored maps').toBeGreaterThanOrEqual(6);
+
+    for (const def of maps) {
+      const field = generateMap(def.id);
+      expect(field.width, `${def.id} width`).toBe(def.width);
+      expect(field.height, `${def.id} height`).toBe(def.height);
+      expect(field.tiles, `${def.id} tile count`).toHaveLength(def.width * def.height);
+
+      for (const start of [...def.playerStarts, ...def.enemyStarts]) {
+        const tile = field.tileAt(start.x, start.y);
+        expect(tile, `${def.id} start ${tileKey(start.x, start.y)} is off-map`).toBeDefined();
+        expect(tile?.passable, `${def.id} start ${tileKey(start.x, start.y)} is impassable`).toBe(true);
+        expect(tile?.surface, `${def.id} start ${tileKey(start.x, start.y)} is void`).not.toBe('void');
+        expect(
+          tile === undefined ? Infinity : moveCostInto(tile),
+          `${def.id} start ${tileKey(start.x, start.y)} is unreachable to a Move-3 unit`,
+        ).toBeLessThanOrEqual(3);
+      }
+    }
+
+    for (const encounter of Object.values(ENCOUNTERS)) {
+      const field = generateMap(encounter.mapId);
+      const roster = Object.values(SCENARIOS).find(
+        (scenario) => scenario.encounterId === encounter.id,
+      )?.units;
+      expect(roster, `${encounter.id} has no assembled scenario roster`).toBeDefined();
+      const ids = roster?.map((unit) => unit.id) ?? [];
+      expect(new Set(ids).size, `${encounter.id} has duplicate unit ids`).toBe(ids.length);
+
+      for (const enemy of encounter.enemies) {
+        expect(enemy.team, `${encounter.id}: ${enemy.id} is not hostile`).toBe('enemy');
+        expect(enemy.personality, `${encounter.id}: ${enemy.id} has no AI personality`).toBeTruthy();
+        const tile = field.tileAt(enemy.at.x, enemy.at.y);
+        const at = tileKey(enemy.at.x, enemy.at.y);
+        expect(tile, `${encounter.id}: ${enemy.id} at ${at} is off-map`).toBeDefined();
+        expect(tile?.passable, `${encounter.id}: ${enemy.id} at ${at} is impassable`).toBe(true);
+        expect(tile?.surface, `${encounter.id}: ${enemy.id} at ${at} is void`).not.toBe('void');
+      }
+    }
+  });
+
+  it('resolves encounter maps and every world battle scenario', () => {
+    const mapIds = new Set(listMaps().map((map) => map.id));
+    const encounters = Object.values(ENCOUNTERS);
+    expect(encounters.length, 'v0.1 requires 8-10 encounters').toBeGreaterThanOrEqual(8);
+    expect(encounters.length, 'v0.1 requires 8-10 encounters').toBeLessThanOrEqual(10);
+
+    for (const encounter of encounters) {
+      expect(
+        mapIds.has(encounter.mapId),
+        `${encounter.id} points at missing map ${encounter.mapId}`,
+      ).toBe(true);
+    }
+
+    const battleNodes = WORLD_NODES.filter((node) => node.kind === 'battle');
+    expect(battleNodes.length, 'v0.1 requires 8-10 battles').toBeGreaterThanOrEqual(8);
+    expect(battleNodes.length, 'v0.1 requires 8-10 battles').toBeLessThanOrEqual(10);
+
+    for (const node of battleNodes) {
+      expect(node.scenarioId, `${node.id} has no scenarioId`).toBeDefined();
+      const scenario = node.scenarioId === undefined ? undefined : SCENARIOS[node.scenarioId];
+      expect(scenario, `${node.id} points at missing scenario ${node.scenarioId}`).toBeDefined();
+      expect(getScenario(node.scenarioId), `${node.id} getScenario lookup`).toBe(scenario);
+
+      const encounter = getEncounter(node.scenarioId);
+      expect(encounter, `${node.id} points at missing encounter ${node.scenarioId}`).toBeDefined();
+      expect(encounter?.id, `${node.id} encounter id`).toBe(node.scenarioId);
+      expect(scenario?.encounterId, `${node.id} scenario encounter id`).toBe(node.scenarioId);
+    }
+  });
+
+  it('keeps each map in one Move-3 Jump-2 region excluding cost-4 deepwater', () => {
+    for (const def of listMaps()) {
+      const field = generateMap(def.id);
+      const enterable = field.tiles.filter((tile) => moveCostInto(tile) <= 3);
+      expect(enterable.length, `${def.id} has no Move-3-enterable tiles`).toBeGreaterThan(0);
+
+      const first = enterable[0]!;
+      const visited = new Set([tileKey(first.x, first.y)]);
+      const pending = [first];
+      while (pending.length > 0) {
+        const from = pending.shift()!;
+        const reach = reachableTiles(
+          field,
+          {
+            pos: { x: from.x, y: from.y, z: from.height },
+            team: 'player',
+            stats: { move: 3, jump: 2 },
+          },
+          new Map(),
+        );
+        for (const node of reach.values()) {
+          const tile = field.tileAt(node.pos.x, node.pos.y);
+          if (tile === undefined || moveCostInto(tile) > 3) continue;
+          const key = tileKey(tile.x, tile.y);
+          if (visited.has(key)) continue;
+          visited.add(key);
+          pending.push(tile);
+        }
+      }
+
+      const stranded = enterable
+        .filter((tile) => !visited.has(tileKey(tile.x, tile.y)))
+        .map((tile) => tileKey(tile.x, tile.y));
+      expect(stranded, `${def.id} has stranded Move-3 Jump-2 regions`).toEqual([]);
+
+      if (def.id === 'mandalia-plains') {
+        const deepwater = field.tiles.filter((tile) => tile.surface === 'deepwater');
+        expect(deepwater.length, 'Mandalia must retain authored deepwater').toBeGreaterThan(0);
+        expect(deepwater.every((tile) => moveCostInto(tile) === 4)).toBe(true);
+        expect(deepwater.every((tile) => !visited.has(tileKey(tile.x, tile.y)))).toBe(true);
+      }
+    }
+  });
+
+  it('preserves the two legacy Battlefield serialisations byte-for-byte', () => {
+    const expected = {
+      'orbonne-courtyard': {
+        bytes: 20_840,
+        sha256: '092a53f300c48a64b217488ac2e5b28b87dbfc18e69662ea481a211551d6a816',
+      },
+      'mandalia-plains': {
+        bytes: 23_791,
+        sha256: '9a497cd4977aa36b1f0614cdf3ddd4eb6d25e9ddada4074176b7ccbb41817635',
+      },
+    } as const;
+
+    for (const [mapId, baseline] of Object.entries(expected)) {
+      const serialised = JSON.stringify(generateMap(mapId));
+      expect(Buffer.byteLength(serialised), `${mapId} serialised byte count`).toBe(baseline.bytes);
+      expect(
+        createHash('sha256').update(serialised).digest('hex'),
+        `${mapId} serialised SHA-256`,
+      ).toBe(baseline.sha256);
+    }
+  });
+
+  it(
+    'resolves every encounter across several seeds with zero rejected AI commands',
+    () => {
+      const seeds = [3, 17, 41] as const;
+      const encounters = Object.values(ENCOUNTERS);
+      let battles = 0;
+      let commands = 0;
+      let rejectedCommands = 0;
+
+      for (const encounter of encounters) {
+        const scenario = Object.values(SCENARIOS).find(
+          (candidate) => candidate.encounterId === encounter.id,
+        );
+        expect(scenario, `${encounter.id} has no scenario`).toBeDefined();
+        if (scenario === undefined) continue;
+
+        for (const seed of seeds) {
+          const result = runAiBattle(seed, scenario.id, true, 400, false);
+          expect(result.turns, `${encounter.id} seed ${seed} hit the turn cap`).toBeLessThan(400);
+          expect(
+            ['victory', 'defeat'],
+            `${encounter.id} seed ${seed} did not resolve`,
+          ).toContain(result.state.phase);
+          battles++;
+          commands += result.commands;
+          rejectedCommands += result.rejectedCommands;
+        }
+      }
+
+      console.info(
+        `[content] campaign sweep: maps=${listMaps().length}, ` +
+          `encounters=${Object.keys(ENCOUNTERS).length}, battles=${battles}, ` +
+          `commands=${commands}, rejected=${rejectedCommands}`,
+      );
+      expect(battles).toBe(encounters.length * seeds.length);
+      expect(commands).toBeGreaterThan(0);
+      expect(rejectedCommands).toBe(0);
+    },
+    90_000,
+  );
 });

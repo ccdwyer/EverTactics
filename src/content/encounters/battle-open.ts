@@ -1,0 +1,87 @@
+import {
+  BLACK_MAGE_KIT,
+  CUTPURSE_KIT,
+  HUNTER_KIT,
+  MONK_KIT,
+  TIME_MAGE_KIT,
+  VETERAN_KNIGHT_KIT,
+} from './loadouts';
+import type { Encounter } from './types';
+
+/** The original six-unit Orbonne opposition used by the visual demo. */
+export const battleOpenEncounter = {
+  id: 'orbonne-vanguard',
+  chapter: 1,
+  name: 'Orbonne Monastery — Cloister Garden',
+  blurb: 'Six against six across the sunken garden. Height, cover and a reflecting pool.',
+  mapId: 'orbonne-courtyard',
+  seed: 20260727,
+  enemies: [
+    {
+      id: 'e-corvin', name: 'Corvin', job: 'dragoon', gender: 'male', team: 'enemy',
+      level: 15, zodiac: 'taurus', brave: 74, faith: 50,
+      at: { x: 6, y: 4 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+      secondary: 'squire', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
+      personality: 'defensive', ct: 40,
+    },
+    {
+      id: 'e-sable', name: 'Sable', job: 'archer', gender: 'female', team: 'enemy',
+      level: 14, zodiac: 'capricorn', brave: 70, faith: 48,
+      at: { x: 11, y: 3 }, facing: 'S', equipment: HUNTER_KIT,
+      secondary: 'thief', reaction: 'arrow-guard', support: 'concentrate', movement: 'jump-plus-2',
+      personality: 'assassin', ct: 30,
+    },
+    {
+      id: 'e-halden', name: 'Halden', job: 'black-mage', gender: 'male', team: 'enemy',
+      level: 13, zodiac: 'aquarius', brave: 44, faith: 80,
+      at: { x: 7, y: 2 }, facing: 'S',
+      equipment: { ...BLACK_MAGE_KIT, rightHand: 'rod' },
+      secondary: 'mystic', reaction: 'absorb-mp', support: 'magick-attack-up',
+      movement: 'move-mp-up', personality: 'tactician', ct: 18,
+    },
+    {
+      id: 'e-bram', name: 'Bram', job: 'monk', gender: 'male', team: 'enemy',
+      level: 13, zodiac: 'cancer', brave: 82, faith: 42,
+      at: { x: 4, y: 4 }, facing: 'S', equipment: MONK_KIT,
+      secondary: 'squire', reaction: 'brave-up', support: 'martial-arts',
+      movement: 'move-plus-2', personality: 'aggressive', ct: 52,
+    },
+    {
+      id: 'e-quill', name: 'Quill', job: 'thief', gender: 'female', team: 'enemy',
+      level: 12, zodiac: 'pisces', brave: 64, faith: 55,
+      at: { x: 9, y: 5 }, facing: 'S', equipment: CUTPURSE_KIT,
+      secondary: 'squire', reaction: 'sunken-state', support: 'gained-jp-up',
+      movement: 'move-plus-3', personality: 'assassin', ct: 44,
+    },
+    {
+      id: 'e-maelor', name: 'Maelor', job: 'time-mage', gender: 'male', team: 'enemy',
+      level: 13, zodiac: 'libra', brave: 46, faith: 76,
+      at: { x: 10, y: 1 }, facing: 'S', equipment: TIME_MAGE_KIT,
+      secondary: 'white-mage', reaction: 'regenerator', support: 'half-mp',
+      movement: 'move-mp-up', personality: 'support', ct: 12,
+    },
+  ],
+  objective: { kind: 'defeat-all' },
+  rewards: { exp: 25, jp: 40 },
+  lighting: 'dawn',
+  lightingTune: {
+    keyElevation: 54,
+    keyAzimuth: 138,
+    keyIntensity: 3.1,
+    hemiIntensity: 1.62,
+    ambientIntensity: 0.62,
+    skyColor: 0xb6c6da,
+    groundColor: 0x7a6248,
+    rimIntensity: 0.7,
+    shadowRadius: 2.4,
+  },
+  grade: 'ivalice-noon',
+  camera: {
+    yawIndex: 0,
+    frameField: true,
+    pitchDegrees: 30,
+    focusTile: { x: 6, y: 6, z: 2 },
+  },
+  post: { exposure: 1.94, dof: 1, vignette: 1 },
+  banner: { title: 'Orbonne Monastery', subtitle: 'The cloister garden' },
+} as const satisfies Encounter;

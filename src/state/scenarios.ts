@@ -14,6 +14,20 @@
 
 import { jobActions, jobSkillset } from './abilityIndex';
 import { bootstrapContent } from './content';
+import {
+  ENCOUNTERS as AUTHORED_ENCOUNTERS,
+  getEncounter as findEncounter,
+  type Encounter,
+  type UnitPlacement,
+} from '../content/encounters';
+import {
+  ARCHER_KIT,
+  BLACK_MAGE_KIT,
+  KNIGHT_KIT,
+  MONK_KIT,
+  THIEF_KIT,
+  WHITE_MAGE_KIT,
+} from '../content/encounters/loadouts';
 
 import {
   createCampaign,
@@ -29,17 +43,13 @@ import type {
   AbilityId,
   BattleState,
   Battlefield,
-  Equipment,
   Facing,
-  Gender,
   ItemId,
   JobId,
   Objective,
-  Team,
   Unit,
   UnitId,
   Vec3,
-  Zodiac,
 } from '@core/types';
 import type { PersonalityId } from '@core/ai';
 import type { LightingPreset, LightingPresetName } from '@render/lighting';
@@ -101,40 +111,7 @@ export interface ScenarioCamera {
   fitWholeField?: boolean;
 }
 
-export interface UnitPlacement {
-  id: UnitId;
-  name: string;
-  job: JobId;
-  gender: Gender;
-  team: Team;
-  level: number;
-  zodiac: Zodiac;
-  brave: number;
-  faith: number;
-  at: { x: number; y: number };
-  facing: Facing;
-  equipment: Equipment;
-  /** Extra abilities beyond the automatic "everything cheap in the job" grant. */
-  learn?: readonly AbilityId[];
-  secondary?: JobId;
-  reaction?: AbilityId;
-  support?: AbilityId;
-  movement?: AbilityId;
-  personality?: PersonalityId;
-  /** Start the unit part-way up the CT clock so the first turn is not a tie. */
-  ct?: number;
-}
-
-/** Campaign-owned opposition and rewards, independent of map presentation. */
-export interface Encounter {
-  readonly id: string;
-  readonly enemies: readonly UnitPlacement[];
-  readonly objective: Objective;
-  readonly rewards: {
-    readonly exp: number;
-    readonly jp: number;
-  };
-}
+export type { Encounter, UnitPlacement } from '../content/encounters';
 
 /**
  * Per-scenario post tuning. `PostStack` tone maps and exposes on its own, so the
@@ -537,43 +514,6 @@ export function campaignToBattle(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Equipment loadouts
-// ─────────────────────────────────────────────────────────────────────────────
-
-const KNIGHT_KIT: Equipment = {
-  rightHand: 'broadsword', leftHand: 'buckler',
-  head: 'bronze-helm', body: 'chain-mail', accessory: 'bracer',
-};
-const VETERAN_KNIGHT_KIT: Equipment = {
-  rightHand: 'long-sword', leftHand: 'round-shield',
-  head: 'bronze-helm', body: 'chain-mail', accessory: 'battle-boots',
-};
-const WHITE_MAGE_KIT: Equipment = {
-  rightHand: 'white-staff', head: 'feather-hat', body: 'linen-robe', accessory: 'bracer',
-};
-const BLACK_MAGE_KIT: Equipment = {
-  rightHand: 'flame-rod', head: 'feather-hat', body: 'silk-robe', accessory: 'battle-boots',
-};
-const TIME_MAGE_KIT: Equipment = {
-  rightHand: 'oak-staff', head: 'feather-hat', body: 'linen-robe', accessory: 'reflect-ring',
-};
-const ARCHER_KIT: Equipment = {
-  rightHand: 'long-bow', head: 'green-beret', body: 'leather-outfit', accessory: 'spike-shoes',
-};
-const HUNTER_KIT: Equipment = {
-  rightHand: 'silver-bow', head: 'green-beret', body: 'leather-outfit', accessory: 'battle-boots',
-};
-const MONK_KIT: Equipment = {
-  head: 'headband', body: 'leather-outfit', accessory: 'bracer',
-};
-const THIEF_KIT: Equipment = {
-  rightHand: 'mythril-knife', head: 'green-beret', body: 'leather-outfit', accessory: 'battle-boots',
-};
-const CUTPURSE_KIT: Equipment = {
-  rightHand: 'dagger', head: 'green-beret', body: 'leather-outfit', accessory: 'battle-boots',
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // battle-open — Orbonne Monastery, cloister garden
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -588,7 +528,7 @@ const CUTPURSE_KIT: Equipment = {
  * elevation bands are occupied, which is what makes the diorama read as a
  * diorama rather than as a chessboard.
  */
-const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
+const STARTER_PLAYER_UNITS: readonly UnitPlacement[] = [
   // ── Player: the south steps and the west walk ────────────────────────────
   {
     id: 'p-aldric', name: 'Aldric', job: 'knight', gender: 'male', team: 'player',
@@ -633,287 +573,19 @@ const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
     secondary: 'archer', reaction: 'sunken-state', support: 'gained-jp-up', movement: 'move-plus-2',
     ct: 55,
   },
-
-  // ── Enemy: the north cloister, the plinth flanks, the east walk ──────────
-  {
-    // A Dragoon, not a second Knight. The enemy line used to mirror the player's
-    // roster job-for-job and level-for-level, so the two inspect panels showed
-    // byte-identical stats (Knight LV 14, 335 HP, 52 MP) and critics read the
-    // HUD as duplicated. A spear silhouette and a horned helm also give the
-    // opposing line a shape the player side does not have.
-    id: 'e-corvin', name: 'Corvin', job: 'dragoon', gender: 'male', team: 'enemy',
-    level: 15, zodiac: 'taurus', brave: 74, faith: 50,
-    at: { x: 6, y: 4 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'squire', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
-    personality: 'defensive', ct: 40,
-  },
-  {
-    id: 'e-sable', name: 'Sable', job: 'archer', gender: 'female', team: 'enemy',
-    level: 14, zodiac: 'capricorn', brave: 70, faith: 48,
-    at: { x: 11, y: 3 }, facing: 'S', equipment: HUNTER_KIT,
-    secondary: 'thief', reaction: 'arrow-guard', support: 'concentrate', movement: 'jump-plus-2',
-    personality: 'assassin', ct: 30,
-  },
-  {
-    id: 'e-halden', name: 'Halden', job: 'black-mage', gender: 'male', team: 'enemy',
-    level: 13, zodiac: 'aquarius', brave: 44, faith: 80,
-    at: { x: 7, y: 2 }, facing: 'S', equipment: { ...BLACK_MAGE_KIT, rightHand: 'rod' },
-    secondary: 'mystic', reaction: 'absorb-mp', support: 'magick-attack-up',
-    movement: 'move-mp-up',
-    personality: 'tactician', ct: 18,
-  },
-  {
-    id: 'e-bram', name: 'Bram', job: 'monk', gender: 'male', team: 'enemy',
-    level: 13, zodiac: 'cancer', brave: 82, faith: 42,
-    at: { x: 4, y: 4 }, facing: 'S', equipment: MONK_KIT,
-    secondary: 'squire', reaction: 'brave-up', support: 'martial-arts', movement: 'move-plus-2',
-    personality: 'aggressive', ct: 52,
-  },
-  {
-    id: 'e-quill', name: 'Quill', job: 'thief', gender: 'female', team: 'enemy',
-    level: 12, zodiac: 'pisces', brave: 64, faith: 55,
-    at: { x: 9, y: 5 }, facing: 'S', equipment: CUTPURSE_KIT,
-    secondary: 'squire', reaction: 'sunken-state', support: 'gained-jp-up', movement: 'move-plus-3',
-    personality: 'assassin', ct: 44,
-  },
-  {
-    id: 'e-maelor', name: 'Maelor', job: 'time-mage', gender: 'male', team: 'enemy',
-    level: 13, zodiac: 'libra', brave: 46, faith: 76,
-    at: { x: 10, y: 1 }, facing: 'S', equipment: TIME_MAGE_KIT,
-    secondary: 'white-mage', reaction: 'regenerator', support: 'half-mp', movement: 'move-mp-up',
-    personality: 'support', ct: 12,
-  },
 ];
 
-const STARTER_PLAYER_UNITS = BATTLE_OPEN_UNITS.filter((unit) => unit.team === 'player');
-const ORBONNE_VANGUARD = BATTLE_OPEN_UNITS.filter((unit) => unit.team === 'enemy');
-
-/**
- * The opening lesson is deliberately small and asymmetric. The company enters
- * from the south while three under-levelled opponents watch the north arcade:
- * the nearest foe is one move away and presents their back to the player.
- * Explicit CT values put several player turns in the forecast before the
- * opposition, making move, attack, facing, then turn order legible without
- * forcing commands or pausing input.
- */
-const CLOISTER_TRAINEES: readonly UnitPlacement[] = [
-  {
-    id: 'e-owain', name: 'Owain', job: 'squire', gender: 'male', team: 'enemy',
-    level: 4, zodiac: 'taurus', brave: 58, faith: 48,
-    at: { x: 6, y: 8 }, facing: 'N',
-    equipment: { rightHand: 'dagger', body: 'leather-outfit' },
-    secondary: 'chemist', personality: 'defensive', ct: 8,
-  },
-  {
-    id: 'e-maud', name: 'Maud', job: 'chemist', gender: 'female', team: 'enemy',
-    level: 3, zodiac: 'virgo', brave: 46, faith: 56,
-    at: { x: 4, y: 8 }, facing: 'N',
-    equipment: { rightHand: 'dagger', head: 'feather-hat', body: 'linen-robe' },
-    secondary: 'squire', personality: 'support', ct: 3,
-  },
-  {
-    id: 'e-ren', name: 'Ren', job: 'archer', gender: 'male', team: 'enemy',
-    level: 4, zodiac: 'sagittarius', brave: 54, faith: 44,
-    at: { x: 8, y: 8 }, facing: 'N',
-    equipment: { rightHand: 'long-bow', body: 'leather-outfit' },
-    secondary: 'squire', personality: 'defensive', ct: 12,
-  },
-];
-
-const MANDALIA_SCOUTS: readonly UnitPlacement[] = [
-  {
-    id: 'e-merek', name: 'Merek', job: 'knight', gender: 'male', team: 'enemy',
-    level: 12, zodiac: 'taurus', brave: 70, faith: 48,
-    at: { x: 12, y: 2 }, facing: 'S', equipment: KNIGHT_KIT,
-    secondary: 'squire', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
-    personality: 'defensive', ct: 38,
-  },
-  {
-    id: 'e-linnet', name: 'Linnet', job: 'archer', gender: 'female', team: 'enemy',
-    level: 11, zodiac: 'sagittarius', brave: 68, faith: 52,
-    at: { x: 13, y: 3 }, facing: 'S', equipment: ARCHER_KIT,
-    secondary: 'squire', reaction: 'arrow-guard', support: 'concentrate',
-    personality: 'assassin', ct: 22,
-  },
-  {
-    id: 'e-osric', name: 'Osric', job: 'monk', gender: 'male', team: 'enemy',
-    level: 11, zodiac: 'aries', brave: 78, faith: 42,
-    at: { x: 11, y: 3 }, facing: 'S', equipment: MONK_KIT,
-    secondary: 'squire', reaction: 'brave-up', support: 'martial-arts',
-    personality: 'aggressive', ct: 51,
-  },
-  {
-    id: 'e-vara', name: 'Vara', job: 'black-mage', gender: 'female', team: 'enemy',
-    level: 11, zodiac: 'scorpio', brave: 46, faith: 78,
-    at: { x: 12, y: 4 }, facing: 'S', equipment: BLACK_MAGE_KIT,
-    secondary: 'chemist', reaction: 'absorb-mp', support: 'magick-attack-up',
-    personality: 'tactician', ct: 16,
-  },
-];
-
-const ORBONNE_REVENANTS: readonly UnitPlacement[] = [
-  {
-    id: 'e-garran', name: 'Garran', job: 'dragoon', gender: 'male', team: 'enemy',
-    level: 16, zodiac: 'capricorn', brave: 76, faith: 45,
-    at: { x: 4, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'knight', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
-    personality: 'aggressive', ct: 58,
-  },
-  {
-    id: 'e-mirelle', name: 'Mirelle', job: 'time-mage', gender: 'female', team: 'enemy',
-    level: 15, zodiac: 'libra', brave: 48, faith: 80,
-    at: { x: 5, y: 2 }, facing: 'S', equipment: TIME_MAGE_KIT,
-    secondary: 'white-mage', reaction: 'regenerator', support: 'half-mp',
-    personality: 'support', ct: 33,
-  },
-  {
-    id: 'e-cassian', name: 'Cassian', job: 'samurai', gender: 'male', team: 'enemy',
-    level: 16, zodiac: 'leo', brave: 82, faith: 50,
-    at: { x: 8, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'monk', reaction: 'brave-up', support: 'martial-arts',
-    personality: 'defensive', ct: 44,
-  },
-  {
-    id: 'e-yseult', name: 'Yseult', job: 'mystic', gender: 'female', team: 'enemy',
-    level: 15, zodiac: 'pisces', brave: 52, faith: 82,
-    at: { x: 9, y: 2 }, facing: 'S', equipment: BLACK_MAGE_KIT,
-    secondary: 'black-mage', reaction: 'absorb-mp', support: 'magick-attack-up',
-    personality: 'tactician', ct: 27,
-  },
-  {
-    id: 'e-bors', name: 'Bors', job: 'knight', gender: 'male', team: 'enemy',
-    level: 16, zodiac: 'cancer', brave: 74, faith: 46,
-    at: { x: 4, y: 1 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'squire', reaction: 'counter', support: 'defense-up',
-    personality: 'defensive', ct: 36,
-  },
-];
-
-const MANDALIA_AMBUSHERS: readonly UnitPlacement[] = [
-  {
-    id: 'e-rusk', name: 'Rusk', job: 'ninja', gender: 'male', team: 'enemy',
-    level: 17, zodiac: 'gemini', brave: 78, faith: 42,
-    at: { x: 12, y: 2 }, facing: 'S', equipment: THIEF_KIT,
-    secondary: 'thief', reaction: 'sunken-state', support: 'concentrate', movement: 'move-plus-3',
-    personality: 'assassin', ct: 72,
-  },
-  {
-    id: 'e-senna', name: 'Senna', job: 'summoner', gender: 'female', team: 'enemy',
-    level: 17, zodiac: 'aquarius', brave: 44, faith: 84,
-    at: { x: 13, y: 3 }, facing: 'S', equipment: BLACK_MAGE_KIT,
-    secondary: 'time-mage', reaction: 'absorb-mp', support: 'half-mp',
-    personality: 'tactician', ct: 18,
-  },
-  {
-    id: 'e-holt', name: 'Holt', job: 'dragoon', gender: 'male', team: 'enemy',
-    level: 18, zodiac: 'taurus', brave: 82, faith: 40,
-    at: { x: 11, y: 3 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'knight', reaction: 'counter', support: 'defense-up',
-    personality: 'aggressive', ct: 49,
-  },
-  {
-    id: 'e-avelin', name: 'Avelin', job: 'white-mage', gender: 'female', team: 'enemy',
-    level: 16, zodiac: 'virgo', brave: 52, faith: 86,
-    at: { x: 12, y: 4 }, facing: 'S', equipment: WHITE_MAGE_KIT,
-    secondary: 'chemist', reaction: 'regenerator', support: 'half-mp',
-    personality: 'support', ct: 31,
-  },
-  {
-    id: 'e-dain', name: 'Dain', job: 'archer', gender: 'male', team: 'enemy',
-    level: 17, zodiac: 'sagittarius', brave: 72, faith: 48,
-    at: { x: 13, y: 5 }, facing: 'S', equipment: HUNTER_KIT,
-    secondary: 'thief', reaction: 'arrow-guard', support: 'concentrate',
-    personality: 'assassin', ct: 56,
-  },
-];
-
-const ORBONNE_OCCUPIERS: readonly UnitPlacement[] = [
-  {
-    id: 'e-judas', name: 'Judas', job: 'dark-knight', gender: 'male', team: 'enemy',
-    level: 20, zodiac: 'serpentarius', brave: 88, faith: 62,
-    at: { x: 4, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'knight', reaction: 'counter', support: 'defense-up', movement: 'move-plus-2',
-    personality: 'aggressive', ct: 76,
-  },
-  {
-    id: 'e-sybil', name: 'Sybil', job: 'summoner', gender: 'female', team: 'enemy',
-    level: 19, zodiac: 'scorpio', brave: 48, faith: 88,
-    at: { x: 5, y: 2 }, facing: 'S', equipment: BLACK_MAGE_KIT,
-    secondary: 'black-mage', reaction: 'absorb-mp', support: 'magick-attack-up',
-    personality: 'tactician', ct: 35,
-  },
-  {
-    id: 'e-roderic', name: 'Roderic', job: 'samurai', gender: 'male', team: 'enemy',
-    level: 19, zodiac: 'leo', brave: 86, faith: 42,
-    at: { x: 8, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'monk', reaction: 'brave-up', support: 'martial-arts',
-    personality: 'defensive', ct: 60,
-  },
-  {
-    id: 'e-nyx', name: 'Nyx', job: 'ninja', gender: 'female', team: 'enemy',
-    level: 19, zodiac: 'gemini', brave: 84, faith: 40,
-    at: { x: 9, y: 2 }, facing: 'S', equipment: CUTPURSE_KIT,
-    secondary: 'thief', reaction: 'sunken-state', support: 'concentrate', movement: 'move-plus-3',
-    personality: 'assassin', ct: 82,
-  },
-  {
-    id: 'e-celia', name: 'Celia', job: 'white-mage', gender: 'female', team: 'enemy',
-    level: 18, zodiac: 'virgo', brave: 55, faith: 90,
-    at: { x: 4, y: 1 }, facing: 'S', equipment: WHITE_MAGE_KIT,
-    secondary: 'time-mage', reaction: 'regenerator', support: 'half-mp',
-    personality: 'support', ct: 42,
-  },
-  {
-    id: 'e-voss', name: 'Voss', job: 'dragoon', gender: 'male', team: 'enemy',
-    level: 20, zodiac: 'aries', brave: 86, faith: 38,
-    at: { x: 7, y: 1 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
-    secondary: 'knight', reaction: 'counter', support: 'defense-up',
-    personality: 'aggressive', ct: 68,
-  },
-];
-
-export const ENCOUNTERS: Readonly<Record<string, Encounter>> = {
-  'cloister-trainees': {
-    id: 'cloister-trainees',
-    enemies: CLOISTER_TRAINEES,
-    objective: { kind: 'defeat-all' },
-    rewards: { exp: 15, jp: 25 },
-  },
-  'orbonne-vanguard': {
-    id: 'orbonne-vanguard',
-    enemies: ORBONNE_VANGUARD,
-    objective: { kind: 'defeat-all' },
-    rewards: { exp: 25, jp: 40 },
-  },
-  'mandalia-scouts': {
-    id: 'mandalia-scouts',
-    enemies: MANDALIA_SCOUTS,
-    objective: { kind: 'defeat-all' },
-    rewards: { exp: 30, jp: 45 },
-  },
-  'orbonne-revenants': {
-    id: 'orbonne-revenants',
-    enemies: ORBONNE_REVENANTS,
-    objective: { kind: 'defeat-all' },
-    rewards: { exp: 35, jp: 55 },
-  },
-  'mandalia-ambushers': {
-    id: 'mandalia-ambushers',
-    enemies: MANDALIA_AMBUSHERS,
-    objective: { kind: 'defeat-all' },
-    rewards: { exp: 40, jp: 65 },
-  },
-  'orbonne-occupiers': {
-    id: 'orbonne-occupiers',
-    enemies: ORBONNE_OCCUPIERS,
-    objective: { kind: 'defeat-all' },
-    rewards: { exp: 55, jp: 90 },
-  },
-};
+export const ENCOUNTERS: Readonly<Record<string, Encounter>> = AUTHORED_ENCOUNTERS;
 
 export function getEncounter(id: string | null | undefined): Encounter | undefined {
-  return id ? ENCOUNTERS[id] : undefined;
+  return findEncounter(id);
 }
+
+const BATTLE_OPEN_ENCOUNTER = ENCOUNTERS['orbonne-vanguard']!;
+const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
+  ...STARTER_PLAYER_UNITS,
+  ...BATTLE_OPEN_ENCOUNTER.enemies,
+];
 
 const BATTLE_OPEN: Scenario = {
   id: 'battle-open',
@@ -1015,23 +687,11 @@ const BATTLE_OPEN: Scenario = {
   // this lands the frame at meanLuma 45.8 and darkShare 0.42 - inside the night
   // band on both - instead of ~69 with clipped highlights.
   post: { exposure: 1.94, dof: 1.0, vignette: 1.0 },
-  encounterId: 'orbonne-vanguard',
-  objective: { kind: 'defeat-all' },
+  encounterId: BATTLE_OPEN_ENCOUNTER.id,
+  objective: BATTLE_OPEN_ENCOUNTER.objective,
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,
   banner: { title: 'Orbonne Monastery', subtitle: 'The cloister garden' },
-};
-
-const FIRST_LESSON: Scenario = {
-  ...BATTLE_OPEN,
-  id: 'first-lesson',
-  name: 'Orbonne Monastery — First Watch',
-  blurb: 'A short first engagement: close the distance, strike from behind, and read the forecast.',
-  seed: 20260728,
-  encounterId: 'cloister-trainees',
-  objective: ENCOUNTERS['cloister-trainees']!.objective,
-  units: [...STARTER_PLAYER_UNITS, ...CLOISTER_TRAINEES],
-  banner: { title: 'First Watch', subtitle: 'Break the novice guard' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1103,65 +763,42 @@ const MANDALIA: Scenario = {
   })),
 };
 
-const MANDALIA_PLAYER_UNITS: readonly UnitPlacement[] = STARTER_PLAYER_UNITS.map((unit, index) => {
-  const starts = [
-    { x: 2, y: 11 },
-    { x: 3, y: 11 },
-    { x: 2, y: 12 },
-    { x: 3, y: 12 },
-    { x: 1, y: 12 },
-    { x: 2, y: 13 },
-  ] as const;
-  return { ...unit, at: starts[index] ?? starts[0], facing: 'N' as Facing };
-});
+function scenarioPlayers(mapId: string): readonly UnitPlacement[] {
+  if (mapId === 'orbonne-courtyard') return STARTER_PLAYER_UNITS;
+  const starts = getMapDef(mapId)?.playerStarts ?? [];
+  return STARTER_PLAYER_UNITS.map((unit, index) => ({
+    ...unit,
+    at: starts[index] ?? unit.at,
+    facing: 'N' as Facing,
+  }));
+}
 
-const MANDALIA_SKIRMISH: Scenario = {
-  ...MANDALIA,
-  id: 'mandalia-skirmish',
-  name: 'Mandalia Plains — Scout Line',
-  blurb: 'A light enemy screen holds the ford while the company learns the open ground.',
-  seed: 20260729,
-  encounterId: 'mandalia-scouts',
-  objective: ENCOUNTERS['mandalia-scouts']!.objective,
-  units: [...MANDALIA_PLAYER_UNITS, ...MANDALIA_SCOUTS],
-  banner: { title: 'Mandalia Plains', subtitle: 'Break the scout line' },
-};
+function scenarioFromEncounter(encounter: Encounter): Scenario {
+  return {
+    id: encounter.id,
+    name: encounter.name,
+    blurb: encounter.blurb,
+    mapId: encounter.mapId,
+    seed: encounter.seed,
+    lighting: encounter.lighting,
+    ...(encounter.lightingTune ? { lightingTune: encounter.lightingTune } : {}),
+    grade: encounter.grade,
+    layers: { terrain: true, sprites: true, ui: true, post: true, highlights: true },
+    camera: encounter.camera ?? { yawIndex: 0, frameField: true },
+    ...(encounter.post ? { post: encounter.post } : {}),
+    encounterId: encounter.id,
+    objective: encounter.objective,
+    units: [...scenarioPlayers(encounter.mapId), ...encounter.enemies],
+    openCommandMenu: true,
+    banner: encounter.banner,
+  };
+}
 
-const ORBONNE_RETURN: Scenario = {
-  ...BATTLE_OPEN,
-  id: 'orbonne-return',
-  name: 'Orbonne Monastery — Ashen Cloister',
-  blurb: 'A veteran company has occupied the terraces and turned the garden into a redoubt.',
-  seed: 20260730,
-  encounterId: 'orbonne-revenants',
-  objective: ENCOUNTERS['orbonne-revenants']!.objective,
-  units: [...STARTER_PLAYER_UNITS, ...ORBONNE_REVENANTS],
-  banner: { title: 'Return to Orbonne', subtitle: 'Clear the ashen cloister' },
-};
-
-const MANDALIA_AMBUSH: Scenario = {
-  ...MANDALIA,
-  id: 'mandalia-ambush',
-  name: 'Mandalia Plains — River Ambush',
-  blurb: 'Fast blades close from the ridge while spellcasters command the river crossing.',
-  seed: 20260731,
-  encounterId: 'mandalia-ambushers',
-  objective: ENCOUNTERS['mandalia-ambushers']!.objective,
-  units: [...MANDALIA_PLAYER_UNITS, ...MANDALIA_AMBUSHERS],
-  banner: { title: 'Mandalia Ambush', subtitle: 'Take back the crossing' },
-};
-
-const ORBONNE_RECLAMATION: Scenario = {
-  ...BATTLE_OPEN,
-  id: 'orbonne-reclamation',
-  name: 'Orbonne Monastery — Reclamation',
-  blurb: 'The occupiers make their final stand across every height of the cloister.',
-  seed: 20260801,
-  encounterId: 'orbonne-occupiers',
-  objective: ENCOUNTERS['orbonne-occupiers']!.objective,
-  units: [...STARTER_PLAYER_UNITS, ...ORBONNE_OCCUPIERS],
-  banner: { title: 'Orbonne Reclamation', subtitle: 'End the occupation' },
-};
+const CAMPAIGN_SCENARIOS: Readonly<Record<string, Scenario>> = Object.fromEntries(
+  Object.values(ENCOUNTERS)
+    .filter((encounter) => encounter.id !== BATTLE_OPEN_ENCOUNTER.id)
+    .map((encounter) => [encounter.id, scenarioFromEncounter(encounter)]),
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry
@@ -1169,15 +806,11 @@ const ORBONNE_RECLAMATION: Scenario = {
 
 export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   'battle-open': BATTLE_OPEN,
-  'first-lesson': FIRST_LESSON,
   'terrain-only': TERRAIN_ONLY,
   'sprites-only': SPRITES_ONLY,
   'ui-only': UI_ONLY,
   'mandalia-ford': MANDALIA,
-  'mandalia-skirmish': MANDALIA_SKIRMISH,
-  'orbonne-return': ORBONNE_RETURN,
-  'mandalia-ambush': MANDALIA_AMBUSH,
-  'orbonne-reclamation': ORBONNE_RECLAMATION,
+  ...CAMPAIGN_SCENARIOS,
 };
 
 export const DEFAULT_SCENARIO: ScenarioId = 'battle-open';

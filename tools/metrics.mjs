@@ -41,8 +41,14 @@ const mimeOf = (p) => {
 };
 const dataUri = (p) => `data:image/${mimeOf(p)};base64,${readFileSync(p).toString('base64')}`;
 
-const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 480, height: 270 } });
+const cdpEndpoint = process.env.EVERTACTICS_CDP_ENDPOINT;
+const browser = cdpEndpoint
+  ? await chromium.connectOverCDP(cdpEndpoint)
+  : await chromium.launch();
+const page = cdpEndpoint
+  ? await browser.contexts()[0].newPage()
+  : await browser.newPage({ viewport: { width: 480, height: 270 } });
+if (cdpEndpoint) await page.setViewportSize({ width: 480, height: 270 });
 
 /**
  * All metrics are computed on a fixed 480x270 draw so two images of different

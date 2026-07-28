@@ -18,9 +18,9 @@ export interface WorldNode {
 }
 
 /**
- * A short v0.1 arc over the two authored maps. Battle scenarios reuse those maps
- * with distinct encounter data; towns and events are travel beats that make the
- * chapter path legible without pretending more maps exist.
+ * The v0.1 two-chapter arc. Battles alternate terrain problems so progression
+ * asks the company to learn a new tactical answer rather than replaying the
+ * same fight on a different palette.
  */
 export const WORLD_NODES: readonly WorldNode[] = [
   {
@@ -58,20 +58,55 @@ export const WORLD_NODES: readonly WorldNode[] = [
     chapter: 1,
   },
   {
-    id: 'orbonne-return',
-    name: 'Return to Orbonne',
+    id: 'gariland-bridge',
+    name: 'Gariland Bridge',
     kind: 'battle',
-    scenarioId: 'orbonne-return',
-    position: { x: 0.63, y: 0.34 },
+    scenarioId: 'gariland-bridge',
+    position: { x: 0.59, y: 0.61 },
     requires: ['crossroads-oath'],
+    chapter: 1,
+  },
+  {
+    id: 'zeirchele-charge',
+    name: 'Zeirchele Charge',
+    kind: 'battle',
+    scenarioId: 'zeirchele-charge',
+    position: { x: 0.7, y: 0.72 },
+    requires: ['gariland-bridge'],
+    chapter: 1,
+  },
+  {
+    id: 'chapter-two',
+    name: 'The Lion Banner',
+    kind: 'event',
+    position: { x: 0.75, y: 0.48 },
+    requires: ['zeirchele-charge'],
     chapter: 2,
   },
   {
-    id: 'merchant-road',
-    name: 'Merchant Road',
+    id: 'lionel-gate',
+    name: 'Lionel Gate',
+    kind: 'battle',
+    scenarioId: 'lionel-gate',
+    position: { x: 0.82, y: 0.31 },
+    requires: ['chapter-two'],
+    chapter: 2,
+  },
+  {
+    id: 'dorter-storehouse',
+    name: 'Dorter Storehouse',
+    kind: 'battle',
+    scenarioId: 'dorter-storehouse',
+    position: { x: 0.68, y: 0.25 },
+    requires: ['lionel-gate'],
+    chapter: 2,
+  },
+  {
+    id: 'dorter-market',
+    name: 'Dorter Market',
     kind: 'town',
-    position: { x: 0.72, y: 0.51 },
-    requires: ['orbonne-return'],
+    position: { x: 0.56, y: 0.39 },
+    requires: ['dorter-storehouse'],
     chapter: 2,
   },
   {
@@ -79,17 +114,34 @@ export const WORLD_NODES: readonly WorldNode[] = [
     name: 'Mandalia Ambush',
     kind: 'battle',
     scenarioId: 'mandalia-ambush',
-    position: { x: 0.82, y: 0.66 },
-    requires: ['merchant-road'],
+    position: { x: 0.45, y: 0.58 },
+    requires: ['dorter-market'],
     chapter: 2,
   },
   {
-    id: 'orbonne-reclamation',
-    name: 'Orbonne Reclamation',
+    id: 'orbonne-return',
+    name: 'Return to Orbonne',
     kind: 'battle',
-    scenarioId: 'orbonne-reclamation',
-    position: { x: 0.91, y: 0.3 },
+    scenarioId: 'orbonne-return',
+    position: { x: 0.31, y: 0.37 },
     requires: ['mandalia-ambush'],
+    chapter: 2,
+  },
+  {
+    id: 'merchant-road',
+    name: 'Merchant Road',
+    kind: 'town',
+    position: { x: 0.45, y: 0.2 },
+    requires: ['orbonne-return'],
+    chapter: 2,
+  },
+  {
+    id: 'lionel-reckoning',
+    name: 'Lionel Reckoning',
+    kind: 'battle',
+    scenarioId: 'lionel-reckoning',
+    position: { x: 0.91, y: 0.16 },
+    requires: ['merchant-road'],
     chapter: 2,
   },
 ];
