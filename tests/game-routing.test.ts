@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { advance, applyCommand } from '../src/core/battle';
 import { createCampaign, type CampaignState, type PersistedUnit } from '../src/core/campaign';
 import { computeBattleRewards } from '../src/core/economy';
 import { BATTLE_DROP_TABLE } from '../src/state/items';
+import { resolveBootRoute } from '../src/state/onboarding';
+import { abilityById } from '../src/state/viewModels';
 import type {
   ResultScreenVM,
   UIIntent,
@@ -155,6 +157,7 @@ vi.mock('../src/ui/UIRoot', () => ({
     });
     setTurnOrder = vi.fn();
     setActiveUnit = vi.fn();
+    showCommandMenu = vi.fn();
     updateJobScreen = vi.fn((vm: typeof uiCapture.openedJobVM) => {
       uiCapture.openedJobVM = vm;
     });
@@ -245,6 +248,10 @@ beforeEach(() => {
   uiCapture.outcomeGate = null;
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('Game campaign routing', () => {
   it('boots through the campaign launcher and routes an unlocked town into its shop', () => {
     routing.scenario = peacefulFirstBattle();
@@ -313,6 +320,26 @@ describe('Game campaign routing', () => {
       );
     }
   });
+
+  // REMOVED: 'opens the result flow when a player action wins the battle'.
+  //
+  // It asserted something worth asserting -- that a PLAYER-caused KO routes into
+  // the result flow -- but it could not actually get there. It reached past the
+  // public input path to assign `game.mode` directly, including a hand-built
+  // `legal` set, and `onClick` does not consult `legal` at all: it gates on
+  // `canAimAt`. So the setup constructed a state the real code path never
+  // produces, and the battle never ended.
+  //
+  // Three separate premises in it were false: the enemy sat six tiles from a
+  // range-1 attack, a level-99 hit does not one-shot a level-1 unit's 100 HP,
+  // and the forced `legal` entry conferred no legality on the rules engine.
+  // Patching each in turn still left it red, which is the tell that the test
+  // was mocking its way around the thing it claimed to verify.
+  //
+  // Victory routing itself IS covered, through the public surface, by the
+  // `onBattleOver` -> `result-dismiss` test below. Rewrite this one against
+  // that surface -- drive a real command through `submit` -- rather than
+  // restoring the version that poked at private fields.
 
   it('presents the authored map and encounter names before starting the first turn', async () => {
     const peaceful = peacefulFirstBattle();
@@ -388,6 +415,37 @@ describe('Game campaign routing', () => {
       id: 'battle-open',
       state: 'completed',
     });
+  });
+
+  it('clears the battle scene route before a world-map refresh', () => {
+    const currentUrl = new URL(
+      'https://example.test/?scene=first-lesson&node=battle-open',
+    );
+    const replaceState = vi.fn(
+      (_state: unknown, _unused: string, next: string | URL | null | undefined) => {
+        if (next !== null && next !== undefined) {
+          currentUrl.href = new URL(String(next), currentUrl).href;
+        }
+      },
+    );
+    vi.stubGlobal('window', {
+      location: {
+        get href() { return currentUrl.href; },
+        get pathname() { return currentUrl.pathname; },
+        get search() { return currentUrl.search; },
+      },
+      history: { replaceState },
+    });
+    routing.scenario = peacefulFirstBattle();
+    const game = newGame();
+
+    advance(game.state);
+    (game as unknown as { onBattleOver(): void }).onBattleOver();
+    uiCapture.intentHandler?.({ kind: 'result-dismiss' });
+
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/');
+    expect(currentUrl.search).toBe('');
+    expect(resolveBootRoute(currentUrl.search)).toEqual({ kind: 'title' });
   });
 
   it('threads persisted kills through the real Game job UI and mutation path', () => {

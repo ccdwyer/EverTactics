@@ -1400,6 +1400,20 @@ export class Game {
   private enterWorldMap(campaign: CampaignState): void {
     this.campaign = campaign;
     this.appSurface = 'world-map';
+    // Battles launch through a scene query, but the campaign map is the normal
+    // app route. Leaving that query in place makes a refresh relaunch the battle
+    // the player just finished instead of returning to Title -> Continue.
+    if (!this.shot && typeof window !== 'undefined') {
+      const currentUrl = new URL(window.location.href);
+      const debug = currentUrl.searchParams.has('debug');
+      currentUrl.search = '';
+      if (debug) currentUrl.searchParams.set('debug', '1');
+      window.history.replaceState(
+        null,
+        '',
+        `${currentUrl.pathname}${currentUrl.search}`,
+      );
+    }
     this.ui.closeScreen();
     this.showWorldMap();
   }
@@ -1833,9 +1847,11 @@ export class Game {
     if (this.appSurface === 'world-map' && this.pendingWorldNode?.scenarioId) {
       const scenario = getScenario(this.pendingWorldNode.scenarioId);
       const url = new URL(window.location.href);
+      const debug = url.searchParams.has('debug');
       url.search = '';
       url.searchParams.set('scene', scenario.id);
       url.searchParams.set('node', this.pendingWorldNode.id);
+      if (debug) url.searchParams.set('debug', '1');
       window.location.assign(url.toString());
       return;
     }

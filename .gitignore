@@ -17,3 +17,4 @@ tools/_delegate/
 # macOS Finder metadata; was tracked and kept tripping the delegate dirty-tree guard
 .DS_Store
 **/.DS_Store
+!shots/v01-acceptance/
