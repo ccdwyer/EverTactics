@@ -24,6 +24,7 @@ import { FormationScreen } from './screens/FormationScreen';
 import { JobScreen } from './screens/JobScreen';
 import { ResultScreen } from './screens/ResultScreen';
 import { RosterScreen } from './screens/RosterScreen';
+import { WorldMapScreen } from './screens/WorldMapScreen';
 import type {
   AbilityItemVM,
   CommandItemVM,
@@ -39,6 +40,7 @@ import type {
   UIIntent,
   UIOptions,
   UnitVM,
+  WorldMapScreenVM,
 } from './types';
 
 /** Default hint rail for normal field play. */
@@ -84,6 +86,7 @@ export class UIRoot {
   private readonly formationScreen: FormationScreen;
   private readonly rosterScreen: RosterScreen;
   private readonly resultScreen: ResultScreen;
+  private readonly worldMapScreen: WorldMapScreen;
 
   /** Base layer: owns the camera keybinds and the "cancel with nothing open" case. */
   private readonly fieldLayer: FocusLayer;
@@ -159,6 +162,7 @@ export class UIRoot {
     this.formationScreen = new FormationScreen(emit);
     this.rosterScreen = new RosterScreen(emit);
     this.resultScreen = new ResultScreen(emit);
+    this.worldMapScreen = new WorldMapScreen(emit);
 
     add(this.root, this.hud, this.floats.root, this.banners.root);
     mount.appendChild(this.root);
@@ -363,6 +367,15 @@ export class UIRoot {
     this.presentScreen('job', this.jobScreen);
   }
 
+  openWorldMapScreen(vm: WorldMapScreenVM): void {
+    this.worldMapScreen.set(vm);
+    this.presentScreen('world', this.worldMapScreen);
+  }
+
+  updateWorldMapScreen(vm: WorldMapScreenVM): void {
+    this.worldMapScreen.set(vm);
+  }
+
   /** Push new data into an already-open job screen (after learning, job change…). */
   updateJobScreen(vm: JobScreenVM): void {
     this.jobScreen.set(vm);
@@ -406,7 +419,10 @@ export class UIRoot {
     this.hints.set(FIELD_HINTS);
   }
 
-  private presentScreen(name: ScreenName, screen: JobScreen | FormationScreen | RosterScreen | ResultScreen): void {
+  private presentScreen(
+    name: ScreenName,
+    screen: WorldMapScreen | JobScreen | FormationScreen | RosterScreen | ResultScreen,
+  ): void {
     if (this.openScreen && this.openScreen !== name) this.closeScreen();
     screen.show(this.root, () => {
       this.emit({ kind: 'close-screen', screen: name });
@@ -423,8 +439,11 @@ export class UIRoot {
     ]);
   }
 
-  private screenFor(name: ScreenName): JobScreen | FormationScreen | RosterScreen | ResultScreen {
+  private screenFor(
+    name: ScreenName,
+  ): WorldMapScreen | JobScreen | FormationScreen | RosterScreen | ResultScreen {
     switch (name) {
+      case 'world': return this.worldMapScreen;
       case 'job': return this.jobScreen;
       case 'formation': return this.formationScreen;
       case 'roster': return this.rosterScreen;

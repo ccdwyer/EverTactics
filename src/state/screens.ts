@@ -25,6 +25,7 @@ import { jobLevelOf, unlockStatus, type UnlockContext } from '@core/jobs/tree';
 import { canEquipItem, canSwitchToJob, EQUIP_SLOT_ORDER, type EquipSlot } from '@core/party';
 import { jobProgress } from '@core/unit';
 import type { Ability, AbilitySetId, BattleState, Job, JobId, Unit, UnitId } from '@core/types';
+import { WORLD_NODES, isUnlocked, nextObjective } from '@core/world';
 import type {
   AbilitySlotVM,
   FormationScreenVM,
@@ -35,6 +36,7 @@ import type {
   RosterEquipSlotVM,
   RosterScreenVM,
   RosterUnitEditVM,
+  WorldMapScreenVM,
 } from '@ui/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -428,6 +430,45 @@ export function campaignFormationScreenVM(
     slots,
     roster,
     maxDeployed: max,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// World map
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function worldMapScreenVM(campaign: CampaignState): WorldMapScreenVM {
+  const completed = new Set(campaign.progress.completed);
+  const objective = nextObjective(campaign);
+  return {
+    title: 'The Lion War',
+    subtitle: objective
+      ? `Chapter ${objective.chapter} · ${objective.name}`
+      : 'The v0.1 campaign is complete',
+    nodes: WORLD_NODES.map((node) => ({
+      id: node.id,
+      name: node.name,
+      kind: node.kind,
+      chapter: node.chapter,
+      position: { ...node.position },
+      requires: [...node.requires],
+      state: completed.has(node.id)
+        ? 'completed'
+        : isUnlocked(node, campaign)
+          ? 'available'
+          : 'locked',
+    })),
+    ...(objective
+      ? {
+          objective: {
+            id: objective.id,
+            name: objective.name,
+            kind: objective.kind,
+            chapter: objective.chapter,
+          },
+        }
+      : {}),
+    gil: campaign.gil,
   };
 }
 

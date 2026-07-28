@@ -258,6 +258,29 @@ export interface FormationScreenVM {
   maxDeployed: number;
 }
 
+export interface WorldNodeVM {
+  id: string;
+  name: string;
+  kind: 'battle' | 'town' | 'event';
+  chapter: number;
+  position: { x: number; y: number };
+  requires: readonly string[];
+  state: 'locked' | 'available' | 'completed';
+}
+
+export interface WorldMapScreenVM {
+  title: string;
+  subtitle?: string;
+  nodes: readonly WorldNodeVM[];
+  objective?: {
+    id: string;
+    name: string;
+    kind: WorldNodeVM['kind'];
+    chapter: number;
+  };
+  gil: number;
+}
+
 export type EquipSlotName =
   | 'rightHand'
   | 'leftHand'
@@ -364,6 +387,12 @@ export type UIIntent =
   | { kind: 'formation-assign'; index: number; unitId: string | null }
   /** Formation screen: confirm and start. */
   | { kind: 'formation-confirm' }
+  /** World map: travel to an unlocked destination. */
+  | { kind: 'world-node-select'; nodeId: string }
+  /** World map: open the first roster member's job and JP screen. */
+  | { kind: 'world-open-jobs' }
+  /** World map: open the company roster. */
+  | { kind: 'world-open-roster' }
   /** Roster screen: open the job screen for a unit. */
   | { kind: 'open-job-screen'; unitId: string }
   /** Roster: equip an inventory item onto a unit. */
@@ -383,7 +412,7 @@ export type UIIntent =
   /** Battle results acknowledged. */
   | { kind: 'result-dismiss' };
 
-export type ScreenName = 'job' | 'formation' | 'roster' | 'result';
+export type ScreenName = 'world' | 'job' | 'formation' | 'roster' | 'result';
 
 export type IntentHandler = (intent: UIIntent) => void;
 

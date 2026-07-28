@@ -25,7 +25,7 @@ const arg = (n, d) => {
   return i >= 0 && argv[i + 1] !== undefined ? argv[i + 1] : d;
 };
 
-const scene = arg('scene', 'battle-open');
+const scene = arg('scene', null);
 const outDir = resolve(arg('out', 'shots/play'));
 const port = Number(arg('port', 5173));
 const width = Number(arg('w', 1600));
@@ -53,7 +53,7 @@ async function serverUp() {
 
 let child = null;
 if (!(await serverUp())) {
-  child = spawn('npx', ['vite', '--port', String(port), '--strictPort'], {
+  child = spawn('npx', ['vite', 'preview', '--port', String(port), '--strictPort'], {
     cwd: resolve(dirname(new URL(import.meta.url).pathname), '..'),
     stdio: 'ignore',
   });
@@ -83,10 +83,11 @@ page.on('pageerror', (e) => errors.push(String(e)));
 
 mkdirSync(outDir, { recursive: true });
 
-// `scene=` (as opposed to `shot=`) boots a live, interactive battle rather than a
-// posed screenshot frame. `debug=1` exposes window.__EVERTACTICS__ so each step
-// can report what the game thought was happening, not just what it looked like.
-const url = `http://localhost:${port}/?scene=${encodeURIComponent(scene)}&debug=1`;
+// `scene=` opts into a live battle. With no explicit scene the normal app route
+// boots the campaign world map. `debug=1` exposes state for the step report.
+const query = new URLSearchParams({ debug: '1' });
+if (scene) query.set('scene', scene);
+const url = `http://localhost:${port}/?${query}`;
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
 let booted = true;

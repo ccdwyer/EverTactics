@@ -28,6 +28,7 @@ const shotScenario = params.get('shot');
 const sceneScenario = params.get('scene');
 const scenarioId = shotScenario ?? sceneScenario ?? DEFAULT_SCENARIO;
 const shotMode = shotScenario !== null;
+const worldMapMode = shotScenario === null && sceneScenario === null;
 
 function hideBootSplash(): void {
   const boot = document.getElementById('boot');
@@ -59,7 +60,7 @@ function showFatal(error: unknown): void {
 async function main(): Promise<void> {
   bootstrapContent();
   const summary = contentSummary();
-  const game = new Game({ scenarioId, shot: shotMode, params });
+  const game = new Game({ scenarioId, shot: shotMode, worldMap: worldMapMode, params });
 
   console.info(
     `[evertactics] ${game.scenario.name} · ${game.state.units.size} units · ` +
@@ -74,7 +75,7 @@ async function main(): Promise<void> {
 
   // Hand the turn over once the opening frame has converged, so the first thing
   // a player sees is the same composed frame the critic loop grades.
-  if (!shotMode) {
+  if (!shotMode && !game.showingWorldMap) {
     game.stage.onConverged(() => {
       void game.beginTurn();
     });

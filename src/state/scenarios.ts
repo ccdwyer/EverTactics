@@ -125,6 +125,18 @@ export interface UnitPlacement {
   ct?: number;
 }
 
+/** Campaign-owned opposition and rewards, independent of map presentation. */
+export interface Encounter {
+  readonly id: string;
+  readonly enemies: readonly UnitPlacement[];
+  readonly objective: Objective;
+  readonly rewards: {
+    readonly gil: number;
+    readonly exp: number;
+    readonly jp: number;
+  };
+}
+
 /**
  * Per-scenario post tuning. `PostStack` tone maps and exposes on its own, so the
  * lighting preset's `exposure` field never reaches the renderer — the value is
@@ -158,6 +170,8 @@ export interface Scenario {
   readonly layers: ScenarioLayers;
   readonly camera: ScenarioCamera;
   readonly post?: ScenarioPost;
+  /** Campaign battles resolve their opposition and rewards through this record. */
+  readonly encounterId?: string;
   readonly objective: Objective;
   readonly units: readonly UnitPlacement[];
   /**
@@ -444,7 +458,15 @@ export function campaignToBattle(
   // hardcoded cast positions (those exist for the diagnostic buildScenario path).
   const mapDef = getMapDef(scenario.mapId);
   const startTiles = mapDef?.playerStarts ?? [];
-  const nonPlayerPlacements = scenario.units.filter((u) => u.team !== 'player');
+  const encounter = getEncounter(scenario.encounterId);
+  if (scenario.encounterId !== undefined && encounter === undefined) {
+    throw new Error(`scenario: unknown encounter "${scenario.encounterId}"`);
+  }
+  const authoredOpposition = scenario.units.filter((u) => u.team !== 'player');
+  // Tests and one-off tools may deliberately derive a peaceful scenario by
+  // removing every authored enemy. Preserve that explicit empty override.
+  const activeEncounter = authoredOpposition.length > 0 ? encounter : undefined;
+  const nonPlayerPlacements = activeEncounter?.enemies ?? authoredOpposition;
   // Facing / CT hints from the scenario's player slots when counts match.
   const playerHints = scenario.units.filter((u) => u.team === 'player');
 
@@ -506,7 +528,7 @@ export function campaignToBattle(
     tick: 0,
     rngState: createRng(battleSeed ^ 0x5f3759df).state(),
     log: [],
-    objective: scenario.objective,
+    objective: activeEncounter?.objective ?? scenario.objective,
     inventories: new Map([['player', playerStock]]),
   };
 
@@ -664,6 +686,198 @@ const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
   },
 ];
 
+const STARTER_PLAYER_UNITS = BATTLE_OPEN_UNITS.filter((unit) => unit.team === 'player');
+const ORBONNE_VANGUARD = BATTLE_OPEN_UNITS.filter((unit) => unit.team === 'enemy');
+
+const MANDALIA_SCOUTS: readonly UnitPlacement[] = [
+  {
+    id: 'e-merek', name: 'Merek', job: 'knight', gender: 'male', team: 'enemy',
+    level: 12, zodiac: 'taurus', brave: 70, faith: 48,
+    at: { x: 12, y: 2 }, facing: 'S', equipment: KNIGHT_KIT,
+    secondary: 'squire', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
+    personality: 'defensive', ct: 38,
+  },
+  {
+    id: 'e-linnet', name: 'Linnet', job: 'archer', gender: 'female', team: 'enemy',
+    level: 11, zodiac: 'sagittarius', brave: 68, faith: 52,
+    at: { x: 13, y: 3 }, facing: 'S', equipment: ARCHER_KIT,
+    secondary: 'squire', reaction: 'arrow-guard', support: 'concentrate',
+    personality: 'assassin', ct: 22,
+  },
+  {
+    id: 'e-osric', name: 'Osric', job: 'monk', gender: 'male', team: 'enemy',
+    level: 11, zodiac: 'aries', brave: 78, faith: 42,
+    at: { x: 11, y: 3 }, facing: 'S', equipment: MONK_KIT,
+    secondary: 'squire', reaction: 'brave-up', support: 'martial-arts',
+    personality: 'aggressive', ct: 51,
+  },
+  {
+    id: 'e-vara', name: 'Vara', job: 'black-mage', gender: 'female', team: 'enemy',
+    level: 11, zodiac: 'scorpio', brave: 46, faith: 78,
+    at: { x: 12, y: 4 }, facing: 'S', equipment: BLACK_MAGE_KIT,
+    secondary: 'chemist', reaction: 'absorb-mp', support: 'magick-attack-up',
+    personality: 'tactician', ct: 16,
+  },
+];
+
+const ORBONNE_REVENANTS: readonly UnitPlacement[] = [
+  {
+    id: 'e-garran', name: 'Garran', job: 'dragoon', gender: 'male', team: 'enemy',
+    level: 16, zodiac: 'capricorn', brave: 76, faith: 45,
+    at: { x: 4, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+    secondary: 'knight', reaction: 'counter', support: 'defense-up', movement: 'move-plus-1',
+    personality: 'aggressive', ct: 58,
+  },
+  {
+    id: 'e-mirelle', name: 'Mirelle', job: 'time-mage', gender: 'female', team: 'enemy',
+    level: 15, zodiac: 'libra', brave: 48, faith: 80,
+    at: { x: 5, y: 2 }, facing: 'S', equipment: TIME_MAGE_KIT,
+    secondary: 'white-mage', reaction: 'regenerator', support: 'half-mp',
+    personality: 'support', ct: 33,
+  },
+  {
+    id: 'e-cassian', name: 'Cassian', job: 'samurai', gender: 'male', team: 'enemy',
+    level: 16, zodiac: 'leo', brave: 82, faith: 50,
+    at: { x: 8, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+    secondary: 'monk', reaction: 'brave-up', support: 'martial-arts',
+    personality: 'defensive', ct: 44,
+  },
+  {
+    id: 'e-yseult', name: 'Yseult', job: 'mystic', gender: 'female', team: 'enemy',
+    level: 15, zodiac: 'pisces', brave: 52, faith: 82,
+    at: { x: 9, y: 2 }, facing: 'S', equipment: BLACK_MAGE_KIT,
+    secondary: 'black-mage', reaction: 'absorb-mp', support: 'magick-attack-up',
+    personality: 'tactician', ct: 27,
+  },
+  {
+    id: 'e-bors', name: 'Bors', job: 'knight', gender: 'male', team: 'enemy',
+    level: 16, zodiac: 'cancer', brave: 74, faith: 46,
+    at: { x: 4, y: 1 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+    secondary: 'squire', reaction: 'counter', support: 'defense-up',
+    personality: 'defensive', ct: 36,
+  },
+];
+
+const MANDALIA_AMBUSHERS: readonly UnitPlacement[] = [
+  {
+    id: 'e-rusk', name: 'Rusk', job: 'ninja', gender: 'male', team: 'enemy',
+    level: 17, zodiac: 'gemini', brave: 78, faith: 42,
+    at: { x: 12, y: 2 }, facing: 'S', equipment: THIEF_KIT,
+    secondary: 'thief', reaction: 'sunken-state', support: 'concentrate', movement: 'move-plus-3',
+    personality: 'assassin', ct: 72,
+  },
+  {
+    id: 'e-senna', name: 'Senna', job: 'summoner', gender: 'female', team: 'enemy',
+    level: 17, zodiac: 'aquarius', brave: 44, faith: 84,
+    at: { x: 13, y: 3 }, facing: 'S', equipment: BLACK_MAGE_KIT,
+    secondary: 'time-mage', reaction: 'absorb-mp', support: 'half-mp',
+    personality: 'tactician', ct: 18,
+  },
+  {
+    id: 'e-holt', name: 'Holt', job: 'dragoon', gender: 'male', team: 'enemy',
+    level: 18, zodiac: 'taurus', brave: 82, faith: 40,
+    at: { x: 11, y: 3 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+    secondary: 'knight', reaction: 'counter', support: 'defense-up',
+    personality: 'aggressive', ct: 49,
+  },
+  {
+    id: 'e-avelin', name: 'Avelin', job: 'white-mage', gender: 'female', team: 'enemy',
+    level: 16, zodiac: 'virgo', brave: 52, faith: 86,
+    at: { x: 12, y: 4 }, facing: 'S', equipment: WHITE_MAGE_KIT,
+    secondary: 'chemist', reaction: 'regenerator', support: 'half-mp',
+    personality: 'support', ct: 31,
+  },
+  {
+    id: 'e-dain', name: 'Dain', job: 'archer', gender: 'male', team: 'enemy',
+    level: 17, zodiac: 'sagittarius', brave: 72, faith: 48,
+    at: { x: 13, y: 5 }, facing: 'S', equipment: HUNTER_KIT,
+    secondary: 'thief', reaction: 'arrow-guard', support: 'concentrate',
+    personality: 'assassin', ct: 56,
+  },
+];
+
+const ORBONNE_OCCUPIERS: readonly UnitPlacement[] = [
+  {
+    id: 'e-judas', name: 'Judas', job: 'dark-knight', gender: 'male', team: 'enemy',
+    level: 20, zodiac: 'serpentarius', brave: 88, faith: 62,
+    at: { x: 4, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+    secondary: 'knight', reaction: 'counter', support: 'defense-up', movement: 'move-plus-2',
+    personality: 'aggressive', ct: 76,
+  },
+  {
+    id: 'e-sybil', name: 'Sybil', job: 'summoner', gender: 'female', team: 'enemy',
+    level: 19, zodiac: 'scorpio', brave: 48, faith: 88,
+    at: { x: 5, y: 2 }, facing: 'S', equipment: BLACK_MAGE_KIT,
+    secondary: 'black-mage', reaction: 'absorb-mp', support: 'magick-attack-up',
+    personality: 'tactician', ct: 35,
+  },
+  {
+    id: 'e-roderic', name: 'Roderic', job: 'samurai', gender: 'male', team: 'enemy',
+    level: 19, zodiac: 'leo', brave: 86, faith: 42,
+    at: { x: 8, y: 2 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+    secondary: 'monk', reaction: 'brave-up', support: 'martial-arts',
+    personality: 'defensive', ct: 60,
+  },
+  {
+    id: 'e-nyx', name: 'Nyx', job: 'ninja', gender: 'female', team: 'enemy',
+    level: 19, zodiac: 'gemini', brave: 84, faith: 40,
+    at: { x: 9, y: 2 }, facing: 'S', equipment: CUTPURSE_KIT,
+    secondary: 'thief', reaction: 'sunken-state', support: 'concentrate', movement: 'move-plus-3',
+    personality: 'assassin', ct: 82,
+  },
+  {
+    id: 'e-celia', name: 'Celia', job: 'white-mage', gender: 'female', team: 'enemy',
+    level: 18, zodiac: 'virgo', brave: 55, faith: 90,
+    at: { x: 4, y: 1 }, facing: 'S', equipment: WHITE_MAGE_KIT,
+    secondary: 'time-mage', reaction: 'regenerator', support: 'half-mp',
+    personality: 'support', ct: 42,
+  },
+  {
+    id: 'e-voss', name: 'Voss', job: 'dragoon', gender: 'male', team: 'enemy',
+    level: 20, zodiac: 'aries', brave: 86, faith: 38,
+    at: { x: 7, y: 1 }, facing: 'S', equipment: VETERAN_KNIGHT_KIT,
+    secondary: 'knight', reaction: 'counter', support: 'defense-up',
+    personality: 'aggressive', ct: 68,
+  },
+];
+
+export const ENCOUNTERS: Readonly<Record<string, Encounter>> = {
+  'orbonne-vanguard': {
+    id: 'orbonne-vanguard',
+    enemies: ORBONNE_VANGUARD,
+    objective: { kind: 'defeat-all' },
+    rewards: { gil: 720, exp: 25, jp: 40 },
+  },
+  'mandalia-scouts': {
+    id: 'mandalia-scouts',
+    enemies: MANDALIA_SCOUTS,
+    objective: { kind: 'defeat-all' },
+    rewards: { gil: 840, exp: 30, jp: 45 },
+  },
+  'orbonne-revenants': {
+    id: 'orbonne-revenants',
+    enemies: ORBONNE_REVENANTS,
+    objective: { kind: 'defeat-all' },
+    rewards: { gil: 980, exp: 35, jp: 55 },
+  },
+  'mandalia-ambushers': {
+    id: 'mandalia-ambushers',
+    enemies: MANDALIA_AMBUSHERS,
+    objective: { kind: 'defeat-all' },
+    rewards: { gil: 1120, exp: 40, jp: 65 },
+  },
+  'orbonne-occupiers': {
+    id: 'orbonne-occupiers',
+    enemies: ORBONNE_OCCUPIERS,
+    objective: { kind: 'defeat-all' },
+    rewards: { gil: 1500, exp: 55, jp: 90 },
+  },
+};
+
+export function getEncounter(id: string | null | undefined): Encounter | undefined {
+  return id ? ENCOUNTERS[id] : undefined;
+}
+
 const BATTLE_OPEN: Scenario = {
   id: 'battle-open',
   name: 'Orbonne Monastery — Cloister Garden',
@@ -764,6 +978,7 @@ const BATTLE_OPEN: Scenario = {
   // this lands the frame at meanLuma 45.8 and darkShare 0.42 - inside the night
   // band on both - instead of ~69 with clipped highlights.
   post: { exposure: 1.94, dof: 1.0, vignette: 1.0 },
+  encounterId: 'orbonne-vanguard',
   objective: { kind: 'defeat-all' },
   units: BATTLE_OPEN_UNITS,
   openCommandMenu: true,
@@ -839,6 +1054,66 @@ const MANDALIA: Scenario = {
   })),
 };
 
+const MANDALIA_PLAYER_UNITS: readonly UnitPlacement[] = STARTER_PLAYER_UNITS.map((unit, index) => {
+  const starts = [
+    { x: 2, y: 11 },
+    { x: 3, y: 11 },
+    { x: 2, y: 12 },
+    { x: 3, y: 12 },
+    { x: 1, y: 12 },
+    { x: 2, y: 13 },
+  ] as const;
+  return { ...unit, at: starts[index] ?? starts[0], facing: 'N' as Facing };
+});
+
+const MANDALIA_SKIRMISH: Scenario = {
+  ...MANDALIA,
+  id: 'mandalia-skirmish',
+  name: 'Mandalia Plains — Scout Line',
+  blurb: 'A light enemy screen holds the ford while the company learns the open ground.',
+  seed: 20260729,
+  encounterId: 'mandalia-scouts',
+  objective: ENCOUNTERS['mandalia-scouts']!.objective,
+  units: [...MANDALIA_PLAYER_UNITS, ...MANDALIA_SCOUTS],
+  banner: { title: 'Mandalia Plains', subtitle: 'Break the scout line' },
+};
+
+const ORBONNE_RETURN: Scenario = {
+  ...BATTLE_OPEN,
+  id: 'orbonne-return',
+  name: 'Orbonne Monastery — Ashen Cloister',
+  blurb: 'A veteran company has occupied the terraces and turned the garden into a redoubt.',
+  seed: 20260730,
+  encounterId: 'orbonne-revenants',
+  objective: ENCOUNTERS['orbonne-revenants']!.objective,
+  units: [...STARTER_PLAYER_UNITS, ...ORBONNE_REVENANTS],
+  banner: { title: 'Return to Orbonne', subtitle: 'Clear the ashen cloister' },
+};
+
+const MANDALIA_AMBUSH: Scenario = {
+  ...MANDALIA,
+  id: 'mandalia-ambush',
+  name: 'Mandalia Plains — River Ambush',
+  blurb: 'Fast blades close from the ridge while spellcasters command the river crossing.',
+  seed: 20260731,
+  encounterId: 'mandalia-ambushers',
+  objective: ENCOUNTERS['mandalia-ambushers']!.objective,
+  units: [...MANDALIA_PLAYER_UNITS, ...MANDALIA_AMBUSHERS],
+  banner: { title: 'Mandalia Ambush', subtitle: 'Take back the crossing' },
+};
+
+const ORBONNE_RECLAMATION: Scenario = {
+  ...BATTLE_OPEN,
+  id: 'orbonne-reclamation',
+  name: 'Orbonne Monastery — Reclamation',
+  blurb: 'The occupiers make their final stand across every height of the cloister.',
+  seed: 20260801,
+  encounterId: 'orbonne-occupiers',
+  objective: ENCOUNTERS['orbonne-occupiers']!.objective,
+  units: [...STARTER_PLAYER_UNITS, ...ORBONNE_OCCUPIERS],
+  banner: { title: 'Orbonne Reclamation', subtitle: 'End the occupation' },
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -849,6 +1124,10 @@ export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   'sprites-only': SPRITES_ONLY,
   'ui-only': UI_ONLY,
   'mandalia-ford': MANDALIA,
+  'mandalia-skirmish': MANDALIA_SKIRMISH,
+  'orbonne-return': ORBONNE_RETURN,
+  'mandalia-ambush': MANDALIA_AMBUSH,
+  'orbonne-reclamation': ORBONNE_RECLAMATION,
 };
 
 export const DEFAULT_SCENARIO: ScenarioId = 'battle-open';

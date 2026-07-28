@@ -29,6 +29,8 @@ import { JOBS } from './jobs';
 import {
   createUnit,
   EXP_PER_LEVEL,
+  gainExp,
+  gainJp,
   MAX_JOB_LEVEL,
   MAX_LEVEL,
   refreshDerived,
@@ -113,6 +115,12 @@ export interface CampaignState {
   /** Epoch ms; always passed in, never read from the clock in core. */
   createdAt: number;
   updatedAt: number;
+}
+
+export interface BattleRewards {
+  readonly gil: number;
+  readonly exp: number;
+  readonly jp: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -930,11 +938,12 @@ export function beginScenario(
 }
 
 /**
- * Fold a finished (or abandoned) battle back into the campaign.
+ * Fold a finished battle back into the campaign.
  *
- * Writes: exp, JP, levels, learned abilities, equipment, support slots, raw stats,
- * party inventory stock, and — on victory — `progress.current` into
- * `progress.completed`. Does not mutate `campaign` or `battle`; returns a new state.
+ * Victory writes exp, JP, levels, learned abilities, equipment, support slots,
+ * raw stats, party inventory stock, rewards, and `progress.current` into
+ * `progress.completed`. Defeat preserves the pre-battle durable state so the
+ * encounter can be retried. Does not mutate `campaign` or `battle`.
  *
  * Scenario identity comes only from `campaign.progress.current`. Launch via
  * {@link campaignToBattle} pins `current` on the *caller's* campaign object, so
@@ -949,7 +958,27 @@ export function battleToCampaign(
   campaign: CampaignState,
   battle: BattleState,
   timestamp: number,
+  rewards?: BattleRewards,
 ): CampaignState {
+  // A failed attempt leaves the durable company exactly as it entered. The
+  // launched node stays current and available for a retry, but battle-earned
+  // stats, spent stock, and completion are not written back.
+  if (battle.phase !== 'victory') {
+    return {
+      ...campaign,
+      roster: campaign.roster.map(structuredClonePersisted),
+      inventory: { ...campaign.inventory },
+      formation: campaign.formation.map((entry) => ({ ...entry })),
+      progress: {
+        completed: [...campaign.progress.completed],
+        ...(campaign.progress.current !== undefined
+          ? { current: campaign.progress.current }
+          : {}),
+      },
+      updatedAt: timestamp,
+    };
+  }
+
   const nextRoster: PersistedUnit[] = [];
 
   // Preserve roster order; update any unit that fought, keep bench units as-is.
@@ -969,9 +998,26 @@ export function battleToCampaign(
       ? stockToRecord(battleStock)
       : { ...campaign.inventory };
 
+  if (rewards !== undefined) {
+    for (let i = 0; i < nextRoster.length; i++) {
+      const persisted = nextRoster[i];
+      if (!persisted) continue;
+      const participant = battle.units.get(persisted.id);
+      if (!participant || participant.team !== 'player') continue;
+      const rewarded = unitFromPersisted(persisted, {
+        team: 'player',
+        pos: participant.pos,
+        facing: participant.facing,
+      });
+      gainExp(rewarded, rewards.exp);
+      gainJp(rewarded, rewards.jp);
+      nextRoster[i] = unitToPersisted(rewarded);
+    }
+  }
+
   const completed = [...campaign.progress.completed];
   const current = campaign.progress.current;
-  if (battle.phase === 'victory' && current !== undefined) {
+  if (current !== undefined) {
     if (!completed.includes(current)) {
       completed.push(current);
     }
@@ -985,7 +1031,7 @@ export function battleToCampaign(
   return {
     version: CAMPAIGN_VERSION,
     seed: campaign.seed,
-    gil: campaign.gil,
+    gil: campaign.gil + Math.max(0, Math.floor(rewards?.gil ?? 0)),
     roster: nextRoster,
     inventory,
     // Formation is a pre-battle choice; write-back leaves it alone.

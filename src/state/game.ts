@@ -45,9 +45,11 @@ import {
 import {
   buildScenario,
   campaignToBattle,
+  getEncounter,
   getScenario,
   isDiagnosticScenario,
   launchCampaignBattle,
+  newGameCampaign,
   overrideScenario,
   scenarioMapDef,
   type BuiltScenario,
@@ -57,6 +59,7 @@ import {
   campaignFormationScreenVM,
   campaignJobScreenVM,
   campaignRosterScreenVM,
+  worldMapScreenVM,
 } from './screens';
 import { loadCampaign, saveCampaign } from './save';
 
@@ -69,6 +72,7 @@ import {
   type FormationEntry,
 } from '@core/campaign';
 import { stockAwareWorld } from '@core/inventory';
+import { WORLD_NODES, completeTravelNode, isUnlocked, type WorldNode } from '@core/world';
 import { IllegalCommandError, advance, affectedTiles, applyCommand } from '@core/battle';
 import {
   buildOccupancy,
@@ -129,6 +133,8 @@ type Mode =
 
 export interface GameOptions {
   scenarioId?: string;
+  /** Normal app boot: show campaign navigation instead of entering a battle. */
+  worldMap?: boolean;
   /** Container for the WebGL canvas. Defaults to `#app`. */
   container?: HTMLElement;
   /** Container for the DOM UI. Defaults to `#ui`. */
@@ -178,6 +184,8 @@ export class Game {
 
   private mode: Mode = { kind: 'idle' };
   private readonly shot: boolean;
+  private readonly worldMapMode: boolean;
+  private pendingWorldNode: WorldNode | null = null;
   private busy = false;
   private queue: Promise<void> = Promise.resolve();
   private hoverTile: Vec3 | null = null;
@@ -194,11 +202,31 @@ export class Game {
     const base = getScenario(options.scenarioId);
     this.scenario = options.params ? overrideScenario(base, options.params) : base;
     this.shot = options.shot ?? false;
+    this.worldMapMode = options.worldMap ?? false;
 
     // Diagnostic scenes alone keep the hardcoded cast. Every real battle,
     // including non-diagnostic screenshot scenes, selects a campaign first and
     // then enters through campaignToBattle.
-    if (isDiagnosticScenario(this.scenario.id)) {
+    if (this.worldMapMode) {
+      const loaded = loadCampaign();
+      this.campaign =
+        loaded !== null && loaded.roster.length > 0
+          ? loaded
+          : newGameCampaign(getScenario('battle-open'), Date.now());
+      // The map is a full-screen UI surface. Keep a real, deterministic field
+      // behind it so renderer boot and tooling globals retain their normal shape,
+      // but do not enter campaignToBattle or pin an unchosen destination.
+      const backdrop: Scenario = {
+        ...this.scenario,
+        layers: { ...this.scenario.layers, sprites: false, highlights: false },
+        units: [],
+        openCommandMenu: false,
+      };
+      this.built = buildScenario(backdrop);
+      this.state = this.built.state;
+      this.battleOver = true;
+      saveCampaign(this.campaign);
+    } else if (isDiagnosticScenario(this.scenario.id)) {
       this.built = buildScenario(this.scenario);
       this.state = this.built.state;
       this.campaign = this.seedCampaignFromField({ persist: false });
@@ -258,6 +286,10 @@ export class Game {
     if (!this.scenario.layers.ui) this.ui.setHudVisible(false);
   }
 
+  get showingWorldMap(): boolean {
+    return this.worldMapMode;
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Boot
   // ───────────────────────────────────────────────────────────────────────────
@@ -292,6 +324,12 @@ export class Game {
     this.stage.resize();
     this.frameCamera();
     this.stage.start();
+
+    if (this.worldMapMode) {
+      this.showWorldMap();
+      release();
+      return;
+    }
 
     // Run the clock to the first turn before releasing the convergence barrier,
     // so a screenshot never catches the field mid-deploy.
@@ -683,11 +721,14 @@ export class Game {
     this.battleOver = true;
 
     const victory = this.state.phase === 'victory';
+    const rewards = victory ? getEncounter(this.scenario.encounterId)?.rewards : undefined;
     this.setMode({ kind: 'idle' });
     this.ui.closeMenus();
     // Fold field progress (JP, exp, inventory stock) back into the campaign so
     // a refresh mid-result still keeps what was earned.
-    this.persistCampaign(battleToCampaign(this.campaign, this.state, Date.now()));
+    this.persistCampaign(
+      battleToCampaign(this.campaign, this.state, Date.now(), rewards),
+    );
     this.ui.banner(victory ? 'Victory' : 'Defeat', {
       subtitle: victory ? 'The field is yours.' : 'The company is broken.',
       tone: victory ? 'victory' : 'defeat',
@@ -702,17 +743,21 @@ export class Game {
       const unit = this.state.units.get(id);
       if (!unit || unit.team !== 'player') continue;
       const after = jobProgress(unit, unit.currentJob);
+      const persisted = this.campaign.roster.find((candidate) => candidate.id === id);
+      const persistedJob = persisted?.jobs[persisted.currentJob];
       units.push({
         unitId: unit.id,
         name: unit.name,
         portrait: portraitFor(unit),
         job: getJob(unit.currentJob).name,
-        expGained: Math.max(0, unit.exp + (unit.level - before.level) * 100 - before.exp),
-        jpGained: Math.max(0, after.totalJp - before.totalJp),
+        expGained:
+          Math.max(0, unit.exp + (unit.level - before.level) * 100 - before.exp) +
+          (rewards?.exp ?? 0),
+        jpGained: Math.max(0, after.totalJp - before.totalJp) + (rewards?.jp ?? 0),
         levelBefore: before.level,
-        levelAfter: unit.level,
+        levelAfter: persisted?.level ?? unit.level,
         jobLevelBefore: before.jobLevel,
-        jobLevelAfter: after.level,
+        jobLevelAfter: persistedJob?.level ?? after.level,
         ...(isKO(unit) || unit.removed ? { incapacitated: true } : {}),
       });
     }
@@ -725,7 +770,7 @@ export class Game {
         subtitle: this.scenario.name,
         units,
         turns: Math.max(1, Math.round(this.state.tick / 100)),
-        ...(victory ? { gil: 600 + units.length * 90 } : {}),
+        ...(rewards ? { gil: rewards.gil } : {}),
       });
     }, 1400);
   }
@@ -1006,6 +1051,7 @@ export class Game {
 
       case 'result-dismiss': {
         this.ui.closeScreen();
+        if (!this.shot) this.returnToWorldMap();
         break;
       }
 
@@ -1019,6 +1065,28 @@ export class Game {
         if (active && active.team === 'player' && this.mode.kind === 'command') {
           this.enterCommandMode(active);
         }
+        if (this.worldMapMode) this.showWorldMap();
+        break;
+      }
+
+      case 'world-node-select': {
+        this.onWorldNodeSelect(intent.nodeId);
+        break;
+      }
+
+      case 'world-open-jobs': {
+        const unitId = this.campaign.roster[0]?.id;
+        if (unitId) this.openJobScreenById(unitId);
+        break;
+      }
+
+      case 'world-open-roster': {
+        this.ui.openRosterScreen(
+          campaignRosterScreenVM(this.campaign, {
+            title: 'Company Roster',
+            editable: true,
+          }),
+        );
         break;
       }
 
@@ -1139,6 +1207,51 @@ export class Game {
   /** Unit the job screen is currently showing, and the tree node it is focused on. */
   private screenUnit: UnitId | null = null;
   private screenJob: JobId | null = null;
+
+  private showWorldMap(): void {
+    if (!this.worldMapMode || this.disposed) return;
+    this.pendingWorldNode = null;
+    this.ui.setHudVisible(false);
+    this.ui.openWorldMapScreen(worldMapScreenVM(this.campaign));
+  }
+
+  private onWorldNodeSelect(nodeId: string): void {
+    if (!this.worldMapMode) return;
+    const node = WORLD_NODES.find((candidate) => candidate.id === nodeId);
+    if (
+      !node ||
+      this.campaign.progress.completed.includes(node.id) ||
+      !isUnlocked(node, this.campaign)
+    ) {
+      this.ui.sound('error');
+      return;
+    }
+
+    if (node.kind !== 'battle') {
+      const progressed = completeTravelNode(this.campaign, node, Date.now());
+      this.persistCampaign(progressed);
+      this.ui.updateWorldMapScreen(worldMapScreenVM(this.campaign));
+      this.ui.banner(node.name, {
+        subtitle: node.kind === 'town' ? 'The company makes camp.' : 'The road opens ahead.',
+        tone: 'victory',
+        duration: 1800,
+      });
+      return;
+    }
+
+    if (!node.scenarioId || !getScenario(node.scenarioId)) {
+      this.ui.sound('error');
+      return;
+    }
+    this.pendingWorldNode = node;
+    this.openFormationScreen();
+  }
+
+  private returnToWorldMap(): void {
+    const url = new URL(window.location.href);
+    url.search = '';
+    window.location.assign(url.toString());
+  }
 
   private installScreenKeys(): void {
     const onKey = (ev: KeyboardEvent): void => {
@@ -1343,17 +1456,24 @@ export class Game {
 
   /** Map-authored deploy tiles — not the scenario cast's combat positions. */
   private playerStartTiles(): { x: number; y: number }[] {
-    const def = getMapDef(this.scenario.mapId) ?? scenarioMapDef(this.scenario);
+    const scenario = this.formationScenario();
+    const def = getMapDef(scenario.mapId) ?? scenarioMapDef(scenario);
     if (def && def.playerStarts.length > 0) {
       return def.playerStarts.map((p) => ({ x: p.x, y: p.y }));
     }
     // Fallback for maps without authored starts (tests / stubs).
-    return this.scenario.units
+    return scenario.units
       .filter((u) => u.team === 'player')
       .map((u) => ({ x: u.at.x, y: u.at.y }));
   }
 
+  private formationScenario(): Scenario {
+    const scenarioId = this.pendingWorldNode?.scenarioId;
+    return scenarioId ? getScenario(scenarioId) : this.scenario;
+  }
+
   private openFormationScreen(): void {
+    const scenario = this.formationScenario();
     const startTiles = this.playerStartTiles();
     this.formationDraft = (this.campaign.formation ?? []).map((e) => ({ ...e }));
     // If the slate is empty, seed from currently deployed player units / roster.
@@ -1378,7 +1498,7 @@ export class Game {
       campaignFormationScreenVM(this.campaign, {
         startTiles,
         formation: this.formationDraft,
-        subtitle: this.scenario.name,
+        subtitle: scenario.name,
         maxDeployed: startTiles.length,
         editable: this.partyEditingAllowed(),
       }),
@@ -1386,12 +1506,13 @@ export class Game {
   }
 
   private pushFormationScreen(): void {
+    const scenario = this.formationScenario();
     const startTiles = this.playerStartTiles();
     this.ui.updateFormationScreen(
       campaignFormationScreenVM(this.campaign, {
         startTiles,
         formation: this.formationDraft,
-        subtitle: this.scenario.name,
+        subtitle: scenario.name,
         maxDeployed: startTiles.length,
         editable: this.partyEditingAllowed(),
       }),
@@ -1444,6 +1565,15 @@ export class Game {
     this.persistCampaign(result.campaign);
     this.ui.sound('confirm');
     this.ui.closeScreen();
+    if (this.worldMapMode && this.pendingWorldNode?.scenarioId) {
+      const scenario = getScenario(this.pendingWorldNode.scenarioId);
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('scene', scenario.id);
+      url.searchParams.set('node', this.pendingWorldNode.id);
+      window.location.assign(url.toString());
+      return;
+    }
     // Between battles: launch the next fight from the saved formation.
     void this.relaunchFromCampaign();
   }
