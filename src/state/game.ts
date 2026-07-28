@@ -120,12 +120,14 @@ import {
   type PartyMutationIntent,
 } from './partyEdit';
 
+import { AbilityCameraDirector } from '@render/abilityCamera';
+import { signatureAbilityPresentation } from '@render/abilityPresentation';
 import { IsoCamera, TILE_SIZE } from '@render/camera';
 import { LightingRig } from '@render/lighting';
 import { SpriteLayer, type UnitSprite } from '@render/sprites';
 import { Stage } from '@render/stage';
 import { Terrain, buildTerrain, tileWorldPosition } from '@render/terrain';
-import { VFX_KEYS, VfxSystem } from '@render/vfx';
+import { VFX_KEYS, VfxSystem, type ChargeHandle } from '@render/vfx';
 import { UIRoot } from '@ui/UIRoot';
 import { createBattleAudioObserver } from '@ui/battleAudio';
 import type {
@@ -189,6 +191,7 @@ const SPRITE_ANIM_FOR_FORMULA: Readonly<Record<string, 'attack' | 'cast' | 'item
 export class Game {
   readonly stage: Stage;
   readonly camera: IsoCamera;
+  readonly abilityCamera: AbilityCameraDirector;
   readonly lighting: LightingRig;
   readonly sprites = new SpriteLayer();
   readonly vfx: VfxSystem;
@@ -213,6 +216,7 @@ export class Game {
   private busy = false;
   private queue: Promise<void> = Promise.resolve();
   private readonly battleAudio = createBattleAudioObserver();
+  private readonly chargeVfx = new Map<UnitId, ChargeHandle>();
   private battleStarted = false;
   private hoverTile: Vec3 | null = null;
   private disposed = false;
@@ -300,6 +304,10 @@ export class Game {
       camOptions.pitchDegrees = this.scenario.camera.pitchDegrees;
     }
     this.camera = new IsoCamera(camOptions);
+    this.abilityCamera = new AbilityCameraDirector(
+      this.camera,
+      typeof window === 'undefined' ? new EventTarget() : window,
+    );
     this.stage.setCamera(this.camera);
     // Sprites live on their own Layers channel so post can isolate them; the
     // camera has to be told to render it or the field is empty.
@@ -996,7 +1004,11 @@ export class Game {
         const ability = abilityById(event.ability);
         if (sprite) sprite.play('charge');
         if (ability && unit) {
-          this.vfx.beginCharge(this.worldOf(unit.pos), ability.element);
+          this.chargeVfx.get(event.unit)?.cancel();
+          this.chargeVfx.set(
+            event.unit,
+            this.vfx.beginCharge(this.worldOf(unit.pos), ability.element),
+          );
         }
         break;
       }
@@ -1008,15 +1020,25 @@ export class Game {
           const anim = SPRITE_ANIM_FOR_FORMULA[ability.formula] ?? 'attack';
           void sprite.playOnce(anim);
         }
+        this.chargeVfx.get(event.unit)?.release();
+        this.chargeVfx.delete(event.unit);
         const origin = unit ? this.worldOf(unit.pos) : this.worldOf(event.target);
+        const target = this.worldOf(event.target);
         const impacts = this.impactPoints(unit, ability, event.target);
-        await this.vfx.play(resolveVfxKey(ability), {
-          origin,
-          target: this.worldOf(event.target),
-          targets: impacts,
-          element: ability.element,
-          power: powerOf(ability),
-        });
+        const playEffect = (): Promise<void> =>
+          this.vfx.play(resolveVfxKey(ability), {
+            origin,
+            target,
+            targets: impacts,
+            element: ability.element,
+            power: powerOf(ability),
+          });
+        const presentation = signatureAbilityPresentation(ability.id);
+        if (presentation) {
+          await this.abilityCamera.present(presentation.camera, target, playEffect);
+        } else {
+          await playEffect();
+        }
         break;
       }
 
@@ -1064,6 +1086,8 @@ export class Game {
       }
 
       case 'knockdown': {
+        this.chargeVfx.get(event.unit)?.cancel();
+        this.chargeVfx.delete(event.unit);
         if (sprite) {
           sprite.setKnockedOut(true);
           void sprite.playOnce('ko');
@@ -2281,6 +2305,9 @@ export class Game {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.camera.cancelCinematic();
+    for (const charge of this.chargeVfx.values()) charge.cancel();
+    this.chargeVfx.clear();
     for (const off of this.disposers) off();
     this.disposers.length = 0;
     this.ui.dispose();

@@ -93,7 +93,17 @@ if (build.ok) {
     }
 
     process.stderr.write('render... ');
-    const shot = run('node', ['tools/shoot.mjs', '--scene', 'battle-open', '--port', String(PORT), '--out', 'shots/verify.png']);
+    const shot = run('node', [
+      'tools/shoot.mjs',
+      '--scene',
+      'battle-open',
+      '--port',
+      String(PORT),
+      '--out',
+      'shots/verify.png',
+      '--wait',
+      '60000',
+    ]);
     let shotJson = null;
     try {
       shotJson = JSON.parse(shot.out.slice(shot.out.indexOf('{'), shot.out.lastIndexOf('}') + 1));
@@ -127,5 +137,7 @@ appendFileSync('docs/metrics-history.jsonl', JSON.stringify(result) + '\n');
 console.log(JSON.stringify(result, null, 2));
 
 const green =
-  result.typecheck.pass && result.tests.pass && (quick || (result.build.pass && result.render?.pass));
+  result.typecheck.pass
+  && result.tests.pass
+  && (quick || (result.build.pass && result.render?.pass && result.gatesPass === true));
 process.exit(green ? 0 : 1);

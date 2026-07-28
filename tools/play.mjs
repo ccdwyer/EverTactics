@@ -41,6 +41,16 @@ const stepDelay = Number(arg('delay', 700));
 const cdpPort = Number(arg('cdp', 0));
 const verbose = argv.includes('--verbose');
 const origin = `http://${host}:${port}`;
+const SIGNATURE_CAPTURE_ABILITIES = new Set([
+  'flare',
+  'bahamut',
+  'holy',
+  'curaja',
+  'dragon-dive',
+  'slow',
+  'firaja',
+  'drain-life',
+]);
 
 // A scripted opening turn: open the command menu, walk it, pick Move, cancel, pick Act.
 const DEFAULT_KEYS = [
@@ -111,6 +121,7 @@ const page = cdpContext
     )
   : await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
 if (cdpPort > 0) await page.setViewportSize({ width, height });
+if (cdpPort > 0) await page.bringToFront();
 
 const consoleErrors = [];
 const pageErrors = [];
@@ -141,7 +152,7 @@ const url = `${origin}/?${query}`;
 
 const waitForBoot = async () => {
   try {
-    await page.waitForFunction(() => window.__EVERTACTICS_READY__ === true, null, { timeout: 40000 });
+    await page.waitForFunction(() => window.__EVERTACTICS_READY__ === true, null, { timeout: 60000 });
     // Same trap `shoot.mjs` hit: READY fires on renderer convergence, but the
     // opaque #boot splash is removed on a later event. Waiting only on READY
     // captures a black rectangle and reports booted:true with zero errors.
@@ -153,7 +164,7 @@ const waitForBoot = async () => {
         return style.display === 'none' || Number(style.opacity) < 0.02;
       },
       null,
-      { timeout: 40000 },
+      { timeout: 60000 },
     );
     return true;
   } catch {
@@ -247,6 +258,7 @@ const parsed = stepSpec
   : keys.map((k) => `key:${k}`);
 
 let shotIndex = 0;
+let activeCastLabel = '';
 const capture = async (label) => {
   shotIndex += 1;
   const safeLabel = label.replace(/[^a-z0-9_.-]+/gi, '-');
@@ -455,12 +467,60 @@ for (const spec of parsed) {
   const separator = spec.indexOf(':');
   const [kind, valueRaw] = spec === 'reload'
     ? ['reload', '']
-    : ['title-new', 'clear-formation', 'autoplay'].includes(spec)
+    : ['title-new', 'clear-formation', 'autoplay', 'wait-cast'].includes(spec)
     ? [spec, '']
     : separator >= 0
     ? [spec.slice(0, separator), spec.slice(separator + 1)]
     : ['key', spec];
   const value = valueRaw ?? '';
+
+  if (kind === 'cast') {
+    if (!SIGNATURE_CAPTURE_ABILITIES.has(value)) {
+      throw new Error(`Unknown signature capture ability "${value}"`);
+    }
+    const posed = await page.evaluate((abilityId) => {
+      const game = window.__EVERTACTICS__;
+      const state = game?.state;
+      if (!game || !state) return null;
+      const units = [...state.units.values()].filter((unit) => !unit.removed);
+      const active = state.active === undefined ? undefined : state.units.get(state.active);
+      const actor = active ?? units[0];
+      if (!actor) return null;
+      const beneficial = abilityId === 'curaja';
+      const targetUnit = beneficial
+        ? actor
+        : units.find((unit) => unit.team !== actor.team) ?? actor;
+      const target = { ...targetUnit.pos };
+
+      window.__EVERTACTICS_CAPTURE_CAST_DONE__ = false;
+      window.__EVERTACTICS_CAPTURE_CAST__ = { ability: abilityId, unit: actor.id, target };
+      void game
+        .play([{ kind: 'cast-fire', unit: actor.id, ability: abilityId, target }])
+        .finally(() => {
+          window.__EVERTACTICS_CAPTURE_CAST_DONE__ = true;
+        });
+      return { ability: abilityId, actor: actor.name, target: targetUnit.name };
+    }, value);
+    if (!posed) throw new Error(`Unable to pose cast for "${value}"`);
+    activeCastLabel = value;
+    await page.waitForTimeout(80);
+    steps.push({
+      action: spec,
+      shot: await capture(`${value}-cast`),
+      state: { ...(await probe()), posed },
+    });
+    continue;
+  }
+
+  if (kind === 'wait-cast') {
+    await page.waitForFunction(
+      () => window.__EVERTACTICS_CAPTURE_CAST_DONE__ === true,
+      null,
+      { timeout: 120000 },
+    );
+    await page.waitForTimeout(120);
+    continue;
+  }
 
   if (kind === 'title-new') {
     const newGame = page.getByText('New Game', { exact: true });
@@ -556,7 +616,10 @@ for (const spec of parsed) {
     const [n, gap] = value.split('x').map(Number);
     for (let j = 0; j < (n || 8); j++) {
       await page.waitForTimeout(gap || 100);
-      steps.push({ action: `burst${j}`, shot: await capture(`burst${String(j).padStart(2, '0')}`) });
+      const label = activeCastLabel
+        ? `${activeCastLabel}-burst${String(j).padStart(2, '0')}`
+        : `burst${String(j).padStart(2, '0')}`;
+      steps.push({ action: `burst${j}`, shot: await capture(label) });
     }
     continue;
   }

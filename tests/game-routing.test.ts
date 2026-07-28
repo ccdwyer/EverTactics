@@ -8,6 +8,10 @@ import { resolveBootRoute } from '../src/state/onboarding';
 import { abilityById } from '../src/state/viewModels';
 import { WORLD_NODES } from '../src/core/world';
 import type {
+  BattleEvent,
+  BattleState,
+} from '../src/core/types';
+import type {
   ResultScreenVM,
   UIIntent,
   WorldMapScreenVM,
@@ -81,8 +85,12 @@ vi.mock('../src/render/camera', () => ({
   TILE_SIZE: 1,
   IsoCamera: class {
     camera = { layers: { enable: vi.fn() } };
+    devicePixelsPerTexel = 3;
     focusTile = vi.fn();
     worldToScreen = vi.fn(() => ({ x: 0, y: 0, depth: 0, visible: true }));
+    cinematic = vi.fn(async () => undefined);
+    endCinematic = vi.fn(async () => undefined);
+    cancelCinematic = vi.fn();
   },
 }));
 
@@ -121,10 +129,10 @@ vi.mock('../src/render/terrain', () => ({
 }));
 
 vi.mock('../src/render/vfx', () => ({
-  VFX_KEYS: [],
+  VFX_KEYS: ['black/flare'],
   VfxSystem: class {
     addTo = vi.fn();
-    beginCharge = vi.fn();
+    beginCharge = vi.fn(() => ({ release: vi.fn(), cancel: vi.fn() }));
     play = vi.fn(async () => undefined);
     playHitSpark = vi.fn();
     playBloodBurst = vi.fn();
@@ -292,6 +300,14 @@ function renderFacingCast(state: Game['state']) {
   }));
 }
 
+function battleStateBytes(state: BattleState): string {
+  return JSON.stringify(state, (_key, value: unknown) => {
+    if (value instanceof Map) return [...value.entries()];
+    if (value instanceof Set) return [...value.values()];
+    return value;
+  });
+}
+
 beforeEach(() => {
   routing.scenario = null;
   routing.buildCalls.length = 0;
@@ -375,6 +391,31 @@ describe('Game campaign routing', () => {
     expect(game.campaign.progress.current).toBe(previousNode.id);
     expect(game.state.campaignNodeId).toBeUndefined();
     expect(saves.written.at(-1)?.progress.current).toBe(previousNode.id);
+  });
+
+  it('plays signature presentation from the event stream without changing state or event bytes', async () => {
+    routing.scenario = peacefulFirstBattle();
+    const game = newGame();
+    const actor = [...game.state.units.values()][0]!;
+    const event: BattleEvent = {
+      kind: 'cast-fire',
+      unit: actor.id,
+      ability: 'flare',
+      target: { ...actor.pos },
+    };
+    const stateBefore = battleStateBytes(game.state);
+    const eventsBefore = JSON.stringify([event]);
+
+    await game.play([event]);
+
+    expect(battleStateBytes(game.state)).toBe(stateBefore);
+    expect(JSON.stringify([event])).toBe(eventsBefore);
+    expect(game.camera.cinematic).toHaveBeenCalledOnce();
+    expect(game.camera.endCinematic).toHaveBeenCalledOnce();
+    expect(game.vfx.play).toHaveBeenCalledWith(
+      'black/flare',
+      expect.objectContaining({ power: expect.any(Number) }),
+    );
   });
 
   it('records a victory in the first battle without assigning BattleState fields', () => {

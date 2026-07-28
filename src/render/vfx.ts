@@ -4176,6 +4176,743 @@ const genericBurst: EffectBuilder = (sys, tl, o) => {
 };
 
 const EFFECTS: Record<string, EffectBuilder> = {
+  // ── Signature abilities ────────────────────────────────────────────────
+  'black/flare': (sys, tl, o) => {
+    const centre = o.target.clone().setY(o.target.y + 0.9 * sys.scale);
+    const power = o.power ?? 1;
+
+    sys.spawnMagicCircle(o.target, tl, {
+      radius: 1.8,
+      color: new Color(1.4, 0.22, 1.8),
+      accent: new Color(4.8, 1.5, 0.55),
+      growAt: 0,
+      holdUntil: 1.1,
+      spin: -0.7,
+      runes: 18,
+    });
+
+    tl.at(0.18, () => {
+      sys.emit({
+        count: 52,
+        position: centre,
+        shape: 'ring',
+        radius: 2.2,
+        speed: [0.15, 0.35],
+        drag: 1.8,
+        size: [0.34, 0.05],
+        life: [0.9, 1.2],
+        color0: [4.8, 1.1, 0.45, 0.95],
+        color1: [0.8, 0.05, 1.4, 0],
+        sprite: [SPR.spark, SPR.star4],
+        orbit: { omega: -2.2, radial: -1.7 },
+        fadeIn: 0.12,
+        fadeOut: 0.5,
+      });
+      for (let i = 0; i < 3; i++) {
+        sys.emit({
+          count: 1,
+          position: centre,
+          size: [1.2 + i * 0.8, 0.2],
+          life: [0.9, 0.9],
+          color0: [5.8 - i, 2.0 - i * 0.3, 0.8 + i * 0.8, 0.82],
+          color1: [0.6, 0.04, 1.0, 0],
+          sprite: i === 0 ? SPR.star6 : SPR.halo,
+          spin: [-1.4, 1.4],
+          fadeIn: 0.2 + i * 0.08,
+          fadeOut: 0.34,
+        });
+      }
+    });
+
+    tl.at(0.92, () => {
+      sys.emit({
+        count: 86,
+        position: centre,
+        shape: 'sphere',
+        radius: 0.18,
+        speed: [4.5, 10],
+        drag: 3.2,
+        size: [0.24, 0.025],
+        life: [0.38, 0.78],
+        color0: [6.2, 3.0, 1.1, 1],
+        color1: [0.7, 0.04, 1.2, 0],
+        sprite: SPR.streak,
+        stretch: 2.8,
+        fadeIn: 0.03,
+        fadeOut: 0.45,
+      });
+      sys.emit({
+        count: 7,
+        position: o.target,
+        shape: 'ring',
+        radius: 0.2,
+        speed: [4.8, 7.2],
+        size: [1.5, 7.5],
+        life: [0.48, 0.75],
+        color0: [5.4, 1.6, 0.65, 0.75],
+        color1: [0.5, 0.04, 0.9, 0],
+        sprite: SPR.ring,
+        fadeIn: 0.04,
+        fadeOut: 0.34,
+      });
+      sys.impactPunch(o.target, power, 'none');
+      sys.time.stop(0.08, 0.02);
+      o.onImpact?.(0, o.target);
+    });
+    tl.hold(2.15);
+  },
+
+  'summon/bahamut': (sys, tl, o) => {
+    const centre = o.target;
+    const crown = centre.clone().setY(centre.y + 2.3 * sys.scale);
+    const leftWing = crown.clone().add(new Vector3(-4.2, 1.6, 0).multiplyScalar(sys.scale));
+    const rightWing = crown.clone().add(new Vector3(4.2, 1.6, 0).multiplyScalar(sys.scale));
+    const sky = centre.clone().setY(centre.y + 10.5 * sys.scale);
+    const power = o.power ?? 1;
+
+    sys.spawnMagicCircle(centre, tl, {
+      radius: 3.8,
+      color: new Color(0.52, 0.18, 1.4),
+      accent: new Color(2.7, 1.2, 4.8),
+      growAt: 0,
+      holdUntil: 2.1,
+      spin: 0.16,
+      runes: 32,
+    });
+    sys.spawnSlashArc(crown, tl, {
+      at: 0.42,
+      duration: 1.05,
+      radius: 3.9,
+      arc: Math.PI * 0.92,
+      tilt: 0.38,
+      width: 0.8,
+      color: new Color(3.8, 1.4, 5.8),
+    });
+    sys.spawnSlashArc(crown, tl, {
+      at: 0.42,
+      duration: 1.05,
+      radius: 3.9,
+      arc: Math.PI * 0.92,
+      tilt: -0.38,
+      width: 0.8,
+      color: new Color(3.8, 1.4, 5.8),
+    });
+
+    tl.at(0.36, () => {
+      for (const wing of [leftWing, rightWing]) {
+        sys.emit({
+          count: 28,
+          position: crown,
+          positionTo: wing,
+          shape: 'line',
+          radius: 0.08,
+          speed: [0, 0],
+          size: [0.42, 0.22],
+          life: [1.15, 1.15],
+          color0: [3.2, 1.0, 5.2, 0.82],
+          color1: [0.35, 0.05, 0.8, 0],
+          sprite: [SPR.streak, SPR.runeD],
+          fadeIn: 0.18,
+          fadeOut: 0.35,
+        });
+      }
+    });
+
+    sys.spawnBolt(sky, centre, tl, {
+      at: 1.35,
+      duration: 0.72,
+      width: 0.78,
+      branches: 4,
+      jag: 0.38,
+      core: new Color(6.2, 5.2, 7.5),
+      edge: new Color(1.2, 0.35, 2.8),
+    });
+    sys.spawnPillar(centre, tl, {
+      at: 1.42,
+      rise: 0.12,
+      hold: 0.52,
+      fall: 0.58,
+      radius: 2.0,
+      height: 12.5,
+      core: new Color(6.0, 4.8, 7.2),
+      edge: new Color(1.15, 0.28, 2.2),
+      rays: 17,
+      scroll: 0.72,
+    });
+
+    tl.at(1.55, () => {
+      sys.emit({
+        count: 94,
+        position: centre,
+        shape: 'disc',
+        radius: 3.2,
+        speed: [3.0, 8.5],
+        direction: new Vector3(0, 1, 0),
+        spread: 0.65,
+        drag: 1.5,
+        size: [0.38, 0.04],
+        life: [0.7, 1.35],
+        color0: [5.2, 3.4, 7.2, 0.9],
+        color1: [0.4, 0.04, 0.85, 0],
+        sprite: [SPR.spark, SPR.star6, SPR.runeA],
+        stretch: 1.2,
+      });
+      sys.impactPunch(centre, power, 'none');
+      sys.time.stop(0.11, 0.025);
+      o.onImpact?.(0, centre);
+    });
+    tl.hold(3.25);
+  },
+
+  'white/holy': (sys, tl, o) => {
+    const centre = o.target.clone().setY(o.target.y + 1.6 * sys.scale);
+    const power = o.power ?? 0.85;
+
+    sys.spawnMagicCircle(o.target, tl, {
+      radius: 2.0,
+      color: new Color(2.0, 1.75, 0.85),
+      accent: new Color(4.8, 4.3, 2.5),
+      growAt: 0,
+      holdUntil: 1.3,
+      spin: 0.18,
+      runes: 24,
+    });
+    sys.spawnPillar(o.target, tl, {
+      at: 0.32,
+      rise: 0.14,
+      hold: 0.72,
+      fall: 0.5,
+      radius: 1.2,
+      height: 9.5,
+      core: new Color(6.4, 5.9, 3.8),
+      edge: new Color(1.8, 1.45, 0.65),
+      rays: 12,
+      scroll: 0.22,
+    });
+
+    tl.at(0.38, () => {
+      const horizontalA = centre.clone().add(new Vector3(-2.2, 0, 0).multiplyScalar(sys.scale));
+      const horizontalB = centre.clone().add(new Vector3(2.2, 0, 0).multiplyScalar(sys.scale));
+      const verticalA = centre.clone().add(new Vector3(0, -1.6, 0).multiplyScalar(sys.scale));
+      const verticalB = centre.clone().add(new Vector3(0, 2.6, 0).multiplyScalar(sys.scale));
+      for (const [from, to] of [
+        [horizontalA, horizontalB],
+        [verticalA, verticalB],
+      ] as const) {
+        sys.emit({
+          count: 28,
+          position: from,
+          positionTo: to,
+          shape: 'line',
+          radius: 0.025,
+          speed: [0, 0],
+          size: [0.34, 0.18],
+          life: [0.9, 0.9],
+          color0: [6.0, 5.4, 3.1, 0.86],
+          color1: [1.0, 0.75, 0.25, 0],
+          sprite: SPR.streak,
+          fadeIn: 0.12,
+          fadeOut: 0.32,
+        });
+      }
+      sys.emit({
+        count: 1,
+        position: centre,
+        size: [2.1, 4.8],
+        life: [0.9, 0.9],
+        color0: [6.5, 6.0, 4.2, 0.9],
+        color1: [1.2, 0.9, 0.35, 0],
+        sprite: SPR.star4,
+        fadeIn: 0.12,
+        fadeOut: 0.36,
+      });
+    });
+
+    tl.at(0.72, () => {
+      sys.emit({
+        count: 38,
+        position: o.target,
+        shape: 'ring',
+        radius: 1.25,
+        speed: [1.2, 2.6],
+        direction: new Vector3(0, 1, 0),
+        spread: 0.22,
+        drag: 1.0,
+        size: [0.24, 0.04],
+        life: [0.8, 1.2],
+        color0: [5.4, 4.8, 2.8, 0.92],
+        color1: [0.8, 0.55, 0.18, 0],
+        sprite: [SPR.star6, SPR.spark],
+        orbit: { omega: 1.5, radial: -0.25 },
+      });
+      sys.impactPunch(o.target, power, 'holy');
+      o.onImpact?.(0, o.target);
+    });
+    tl.hold(2.25);
+  },
+
+  'white/cure-4': (sys, tl, o) => {
+    const pts = impactPoints(o);
+    for (const pt of pts) {
+      sys.spawnMagicCircle(pt, tl, {
+        radius: 1.35,
+        color: new Color(0.42, 1.8, 0.95),
+        accent: new Color(2.3, 4.6, 2.7),
+        growAt: 0,
+        holdUntil: 1.2,
+        spin: 0.32,
+        runes: 12,
+      });
+    }
+
+    tl.at(0.2, () => {
+      for (const pt of pts) {
+        for (let layer = 0; layer < 3; layer++) {
+          sys.emit({
+            count: 8,
+            position: pt.clone().setY(pt.y + (0.25 + layer * 0.5) * sys.scale),
+            shape: 'ring',
+            radius: 0.65 + layer * 0.24,
+            speed: [0.25, 0.6],
+            direction: new Vector3(0, 1, 0),
+            spread: 0.12,
+            drag: 1.2,
+            size: [0.82 - layer * 0.08, 0.28],
+            life: [1.0, 1.35],
+            color0: [1.4, 4.2, 2.2, 0.78],
+            color1: [0.18, 0.85, 0.42, 0],
+            sprite: SPR.petal,
+            orbit: { omega: layer % 2 === 0 ? 1.2 : -1.2, radial: -0.12 },
+            spin: [-1.0, 1.0],
+            fadeIn: 0.18,
+            fadeOut: 0.42,
+          });
+        }
+        sys.emit({
+          count: 1,
+          position: pt.clone().setY(pt.y + 1.2 * sys.scale),
+          size: [1.3, 3.6],
+          life: [1.05, 1.05],
+          color0: [3.5, 6.0, 3.8, 0.8],
+          color1: [0.5, 1.1, 0.55, 0],
+          sprite: SPR.star6,
+          spin: [-0.4, 0.4],
+          fadeIn: 0.18,
+          fadeOut: 0.38,
+        });
+      }
+    });
+
+    tl.at(0.72, () => {
+      pts.forEach((pt, i) => {
+        sys.emit({
+          count: 5,
+          position: pt,
+          shape: 'ring',
+          radius: 0.3,
+          speed: [1.5, 2.4],
+          size: [0.8, 3.2],
+          life: [0.55, 0.8],
+          color0: [1.3, 3.8, 2.0, 0.62],
+          color1: [0.2, 0.8, 0.35, 0],
+          sprite: SPR.ring,
+          fadeIn: 0.06,
+          fadeOut: 0.35,
+        });
+        o.onImpact?.(i, pt);
+      });
+    });
+    tl.hold(2.1);
+  },
+
+  'jump/dive': (sys, tl, o) => {
+    const pts = impactPoints(o);
+    const centre = o.target.clone().setY(o.target.y + 0.8 * sys.scale);
+    const sky = centre.clone().setY(centre.y + 8.5 * sys.scale);
+    const power = o.power ?? 0.9;
+
+    tl.at(0.12, () => {
+      sys.emit({
+        count: 42,
+        position: sky,
+        positionTo: centre,
+        shape: 'line',
+        radius: 0.08,
+        speed: [0, 0],
+        size: [0.28, 0.08],
+        life: [0.62, 0.62],
+        color0: [4.8, 5.2, 4.5, 0.9],
+        color1: [0.7, 1.0, 0.65, 0],
+        sprite: SPR.streak,
+        stretch: 2.4,
+        fadeIn: 0.06,
+        fadeOut: 0.28,
+      });
+    });
+    sys.spawnSlashArc(centre, tl, {
+      at: 0.46,
+      duration: 0.46,
+      radius: 2.2,
+      arc: Math.PI * 0.9,
+      tilt: 0.78,
+      width: 0.72,
+      color: new Color(4.2, 4.8, 3.7),
+    });
+    sys.spawnSlashArc(centre, tl, {
+      at: 0.46,
+      duration: 0.46,
+      radius: 2.2,
+      arc: Math.PI * 0.9,
+      tilt: -0.78,
+      width: 0.72,
+      color: new Color(4.2, 4.8, 3.7),
+    });
+
+    tl.at(0.5, () => {
+      sys.spawnSpikes(o.target, 11, 1.8);
+      sys.playLandingDust(o.target, 1);
+      const impact = o.target.clone().setY(o.target.y + 0.18 * sys.scale);
+      const diagonals = [
+        [
+          impact.clone().add(new Vector3(-2.2, 0, -2.2).multiplyScalar(sys.scale)),
+          impact.clone().add(new Vector3(2.2, 0, 2.2).multiplyScalar(sys.scale)),
+        ],
+        [
+          impact.clone().add(new Vector3(-2.2, 0, 2.2).multiplyScalar(sys.scale)),
+          impact.clone().add(new Vector3(2.2, 0, -2.2).multiplyScalar(sys.scale)),
+        ],
+      ] as const;
+      for (const [from, to] of diagonals) {
+        sys.emit({
+          count: 34,
+          position: from,
+          positionTo: to,
+          shape: 'line',
+          radius: 0.04,
+          speed: [0, 0],
+          size: [0.38, 0.16],
+          life: [0.95, 0.95],
+          color0: [3.7, 4.8, 2.2, 0.85],
+          color1: [0.35, 0.55, 0.18, 0],
+          sprite: SPR.streak,
+          fadeIn: 0.06,
+          fadeOut: 0.34,
+        });
+      }
+      sys.emit({
+        count: 1,
+        position: impact,
+        size: [4.4, 6.2],
+        life: [0.92, 0.92],
+        color0: [2.8, 3.6, 1.8, 0.68],
+        color1: [0.3, 0.45, 0.16, 0],
+        sprite: SPR.ring,
+        fadeIn: 0.05,
+        fadeOut: 0.38,
+      });
+      for (const pt of pts) {
+        sys.emit({
+          count: 30,
+          position: pt,
+          shape: 'disc',
+          radius: 0.35,
+          speed: [4.0, 8.0],
+          drag: 2.2,
+          gravity: -6,
+          size: [0.2, 0.035],
+          life: [0.35, 0.7],
+          color0: [3.8, 4.4, 3.4, 0.9],
+          color1: [0.45, 0.65, 0.38, 0],
+          sprite: [SPR.splinter, SPR.streak],
+          stretch: 1.8,
+        });
+        sys.impactPunch(pt, power, 'wind');
+      }
+      pts.forEach((pt, i) => o.onImpact?.(i, pt));
+    });
+    tl.hold(1.7);
+  },
+
+  'time/slow': (sys, tl, o) => {
+    const pts = impactPoints(o);
+    for (const pt of pts) {
+      const face = pt.clone().setY(pt.y + 3.2 * sys.scale);
+      sys.spawnMagicCircle(pt, tl, {
+        radius: 1.55,
+        color: new Color(0.55, 0.65, 2.2),
+        accent: new Color(1.8, 1.1, 3.8),
+        growAt: 0,
+        holdUntil: 1.25,
+        spin: -0.08,
+        runes: 12,
+      });
+
+      tl.at(0.2, () => {
+        sys.emit({
+          count: 1,
+          position: face,
+          size: [4.4, 4.4],
+          life: [1.2, 1.2],
+          color0: [0.9, 0.2, 1.9, 0.9],
+          color1: [0.14, 0.035, 0.42, 0],
+          sprite: SPR.ring,
+          fadeIn: 0.12,
+          fadeOut: 0.32,
+        });
+        for (let hour = 0; hour < 12; hour++) {
+          const angle = (hour / 12) * Math.PI * 2;
+          const tick = face.clone().add(
+            new Vector3(Math.sin(angle) * 1.72, Math.cos(angle) * 1.72, 0)
+              .multiplyScalar(sys.scale),
+          );
+          sys.emit({
+            count: 1,
+            position: tick,
+            speed: [0, 0],
+            size: [0.38, 0.2],
+            life: [1.15, 1.15],
+            color0: [1.4, 0.48, 2.6, 0.92],
+            color1: [0.18, 0.045, 0.52, 0],
+            sprite: SPR.star4,
+            fadeIn: 0.14,
+            fadeOut: 0.32,
+          });
+        }
+        const longHand = face.clone().add(new Vector3(1.25, 1.1, 0).multiplyScalar(sys.scale));
+        const shortHand = face.clone().add(new Vector3(-0.9, 0.25, 0).multiplyScalar(sys.scale));
+        for (const hand of [longHand, shortHand]) {
+          sys.emit({
+            count: 24,
+            position: face,
+            positionTo: hand,
+            shape: 'line',
+            radius: 0.01,
+            speed: [0, 0],
+            size: [0.24, 0.16],
+            life: [1.05, 1.05],
+            color0: [1.0, 0.22, 2.1, 0.94],
+            color1: [0.14, 0.035, 0.42, 0],
+            sprite: SPR.streak,
+            fadeIn: 0.1,
+            fadeOut: 0.3,
+          });
+          sys.emit({
+            count: 18,
+            position: face,
+            positionTo: hand,
+            shape: 'line',
+            radius: 0.008,
+            speed: [0, 0],
+            size: [0.12, 0.09],
+            life: [1.05, 1.05],
+            color0: [3.0, 1.1, 4.5, 0.9],
+            color1: [0.28, 0.08, 0.72, 0],
+            sprite: SPR.streak,
+            fadeIn: 0.1,
+            fadeOut: 0.3,
+          });
+        }
+        sys.emit({
+          count: 1,
+          position: face,
+          size: [0.48, 0.9],
+          life: [1.05, 1.05],
+          color0: [2.4, 0.8, 3.8, 0.92],
+          color1: [0.24, 0.06, 0.62, 0],
+          sprite: SPR.star4,
+          fadeIn: 0.12,
+          fadeOut: 0.34,
+        });
+      });
+    }
+    tl.at(0.78, () => {
+      pts.forEach((pt, i) => o.onImpact?.(i, pt));
+    });
+    tl.hold(1.8);
+  },
+
+  'black/fire-4': (sys, tl, o) => {
+    const centre = o.target;
+    const power = o.power ?? 1;
+
+    sys.spawnMagicCircle(centre, tl, {
+      radius: 2.7,
+      color: new Color(2.4, 0.42, 0.06),
+      accent: new Color(5.2, 1.8, 0.18),
+      growAt: 0,
+      holdUntil: 1.35,
+      spin: 0.48,
+      runes: 20,
+    });
+
+    tl.at(0.34, () => {
+      sys.emit({
+        count: 72,
+        position: centre,
+        shape: 'ring',
+        radius: 2.25,
+        speed: [1.1, 2.8],
+        direction: new Vector3(0, 1, 0),
+        spread: 0.28,
+        drag: 2.0,
+        gravity: 2.0,
+        size: [1.25, 0.34],
+        life: [1.15, 1.7],
+        color0: [5.8, 1.35, 0.12, 0.62],
+        color1: [0.8, 0.06, 0.01, 0],
+        sprite: SPR.flame,
+        spin: [-1.0, 1.0],
+        delay: [0, 0.18],
+        fadeIn: 0.1,
+        fadeOut: 0.4,
+      });
+      sys.emit({
+        count: 38,
+        position: centre,
+        shape: 'ring',
+        radius: 2.45,
+        speed: [2.0, 4.5],
+        drag: 1.6,
+        gravity: -5.2,
+        size: [0.16, 0.025],
+        life: [0.7, 1.25],
+        color0: [5.2, 1.6, 0.2, 0.95],
+        color1: [0.75, 0.08, 0.01, 0],
+        sprite: SPR.ember,
+        stretch: 1.5,
+      });
+    });
+
+    tl.at(0.72, () => {
+      const pts = impactPoints(o);
+      for (const pt of pts) {
+        sys.emit({
+          count: 24,
+          position: pt,
+          shape: 'column',
+          radius: 0.45,
+          height: 1.8,
+          speed: [1.4, 3.6],
+          direction: new Vector3(0, 1, 0),
+          spread: 0.44,
+          drag: 2.3,
+          gravity: 1.2,
+          size: [0.9, 0.22],
+          life: [0.6, 1.05],
+          color0: [5.6, 1.45, 0.12, 0.6],
+          color1: [0.7, 0.05, 0.01, 0],
+          sprite: [SPR.flame, SPR.wisp],
+          spin: [-1.4, 1.4],
+          fadeIn: 0.08,
+          fadeOut: 0.42,
+        });
+        sys.impactPunch(pt, power * 0.8, 'fire');
+      }
+      pts.forEach((pt, i) => o.onImpact?.(i, pt));
+    });
+
+    tl.at(1.05, () => {
+      sys.emit({
+        count: 26,
+        position: centre,
+        shape: 'disc',
+        radius: 2.4,
+        speed: [0.2, 0.8],
+        direction: new Vector3(0, 1, 0),
+        spread: 0.35,
+        drag: 1.0,
+        size: [1.5, 2.8],
+        life: [1.0, 1.6],
+        color0: [0.32, 0.08, 0.03, 0.52],
+        color1: [0.08, 0.02, 0.01, 0],
+        sprite: SPR.smoke,
+        additive: false,
+        spin: [-0.7, 0.7],
+        fadeIn: 0.18,
+        fadeOut: 0.36,
+      });
+    });
+    tl.hold(2.45);
+  },
+
+  'dot/drain-life': (sys, tl, o) => {
+    const source = o.target.clone().setY(o.target.y + 1.0 * sys.scale);
+    const sink = o.origin.clone().setY(o.origin.y + 1.0 * sys.scale);
+    const direction = sink.clone().sub(source).normalize();
+    const power = o.power ?? 0.65;
+
+    sys.spawnMagicCircle(o.target, tl, {
+      radius: 1.25,
+      color: new Color(0.75, 0.04, 0.5),
+      accent: new Color(2.2, 0.18, 1.2),
+      growAt: 0,
+      holdUntil: 1.25,
+      spin: -0.42,
+      runes: 13,
+    });
+    sys.spawnBolt(source, sink, tl, {
+      at: 0.24,
+      duration: 1.08,
+      width: 0.36,
+      branches: 2,
+      jag: 0.18,
+      core: new Color(3.8, 0.45, 1.7),
+      edge: new Color(0.32, 0.02, 0.18),
+    });
+
+    tl.at(0.2, () => {
+      sys.emit({
+        count: 68,
+        position: source,
+        positionTo: sink,
+        shape: 'line',
+        radius: 0.16,
+        speed: [1.2, 2.4],
+        direction,
+        spread: 0.15,
+        drag: 0.4,
+        size: [0.26, 0.05],
+        life: [0.8, 1.2],
+        color0: [3.6, 0.32, 1.4, 0.9],
+        color1: [0.25, 0.03, 0.18, 0],
+        sprite: [SPR.droplet, SPR.wisp, SPR.spark],
+        stretch: 1.4,
+        delay: [0, 0.35],
+        fadeIn: 0.08,
+        fadeOut: 0.38,
+      });
+      sys.emit({
+        count: 1,
+        position: source,
+        size: [2.2, 0.35],
+        life: [1.0, 1.0],
+        color0: [1.8, 0.08, 0.75, 0.82],
+        color1: [0.2, 0.01, 0.12, 0],
+        sprite: SPR.halo,
+        fadeIn: 0.1,
+        fadeOut: 0.34,
+      });
+      sys.emit({
+        count: 1,
+        position: sink,
+        size: [1.2, 2.8],
+        life: [1.0, 1.0],
+        color0: [2.4, 1.2, 2.0, 0.72],
+        color1: [0.2, 0.18, 0.25, 0],
+        sprite: SPR.star6,
+        spin: [-1.0, 1.0],
+        fadeIn: 0.18,
+        fadeOut: 0.35,
+      });
+    });
+
+    tl.at(0.72, () => {
+      sys.impactPunch(o.target, power * 0.55, 'dark');
+      o.onImpact?.(0, o.target);
+    });
+    tl.hold(1.85);
+  },
+
   // ── Fire ────────────────────────────────────────────────────────────────
   'fire-burst': (sys, tl, o) => {
     const p = ELEMENT_COLORS.fire;

@@ -91,6 +91,7 @@ const page = cdpEndpoint
       deviceScaleFactor: Number(arg('dpr', 1)),
     });
 if (cdpEndpoint) await page.setViewportSize({ width, height });
+if (cdpEndpoint) await page.bringToFront();
 
 const errors = [];
 page.on('console', (m) => {

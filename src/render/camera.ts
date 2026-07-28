@@ -889,8 +889,12 @@ export class IsoCamera {
   async endCinematic(duration = 0.5): Promise<void> {
     const saved = this.cinematicSaved;
     this.cinematicActive = false;
-    this.cinematicSaved = null;
     if (!saved) return;
+    if (duration <= 0) {
+      this.cinematicSaved = null;
+      this.restoreCinematicNow(saved);
+      return;
+    }
 
     this.focus(saved.focus, { tau: duration * 0.35 });
     this.finishZoomTween();
@@ -909,12 +913,40 @@ export class IsoCamera {
     ];
     this.basePixelScale = saved.pixelScale;
     await Promise.all(jobs);
+    // A skip during the return resolves both tweens and restores synchronously.
+    // Do not let this older async continuation touch a newer or cancelled rig.
+    if (this.cinematicSaved !== saved) return;
+    this.cinematicSaved = null;
+    // Zoom and pitch have explicit tween endpoints; damped focus otherwise
+    // approaches its target asymptotically. Land it exactly before resolving so
+    // repeated casts cannot accumulate sub-texel framing drift.
+    this.focus(saved.focus, { immediate: true });
+  }
+
+  /** Skip the current ability framing and restore the saved rig synchronously. */
+  cancelCinematic(): void {
+    const saved = this.cinematicSaved;
+    this.cinematicActive = false;
+    this.cinematicSaved = null;
+    if (!saved) return;
+    this.restoreCinematicNow(saved);
+  }
+
+  private restoreCinematicNow(
+    saved: { pixelScale: number; pitch: number; focus: Vector3 },
+  ): void {
+    this.finishZoomTween();
+    this.finishPitchTween();
+    this.pixelScale = saved.pixelScale;
+    this.basePixelScale = saved.pixelScale;
+    this.pitch = saved.pitch;
+    this.basePitch = saved.pitch;
+    this.followSnap = this.yawTween === null && this.pitchTween === null;
+    this.focus(saved.focus, { immediate: true });
   }
 
   private tweenPitch(to: number, duration: number): Promise<void> {
-    const tw = this.pitchTween;
-    this.pitchTween = null;
-    tw?.resolve?.();
+    this.finishPitchTween();
     if (!this.cinematicActive) this.basePitch = to;
     return new Promise<void>((resolve) => {
       this.pitchTween = {
@@ -926,6 +958,12 @@ export class IsoCamera {
         resolve,
       };
     });
+  }
+
+  private finishPitchTween(): void {
+    const tw = this.pitchTween;
+    this.pitchTween = null;
+    tw?.resolve?.();
   }
 
   // ── per-frame ─────────────────────────────────────────────────────────────
