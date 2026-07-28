@@ -417,6 +417,14 @@ export function campaignToBattle(
 ): CampaignBuiltScenario {
   bootstrapContent();
 
+  const rosterIds = new Set<UnitId>();
+  for (const unit of campaign.roster) {
+    if (rosterIds.has(unit.id)) {
+      throw new Error(`campaignToBattle: duplicate roster id "${unit.id}"`);
+    }
+    rosterIds.add(unit.id);
+  }
+
   // Pin on the caller's object. battleToCampaign(campaign, battle, ts) must
   // record completion without requiring the caller to keep built.campaign.
   campaign.progress.current = scenario.id;

@@ -16,6 +16,7 @@ import {
   defaultAnimationSet,
   SEQ_ANIM_INDEX,
   ShpLibrary,
+  SpriteAnimator,
   type DecodedAnimations,
 } from '../src/render/animation';
 
@@ -298,5 +299,19 @@ describe('decodedAnimationSet', () => {
 
   it('keeps every AnimName present', () => {
     expect(Object.keys(merged).sort()).toEqual(Object.keys(fallback).sort());
+  });
+});
+
+describe('procedural idle', () => {
+  it('keeps an idle unit planted for a complete cycle', () => {
+    const animator = new SpriteAnimator(defaultAnimationSet());
+    const offsets = new Set<number>();
+
+    for (let frame = 0; frame < 10; frame++) {
+      animator.update(0.09);
+      offsets.add(animator.pose().offsetY);
+    }
+
+    expect([...offsets]).toEqual([0]);
   });
 });

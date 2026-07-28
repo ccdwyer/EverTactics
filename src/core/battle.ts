@@ -55,7 +55,7 @@ import {
 import { inventoryOf, isConsumable } from './inventory';
 import { restoreRng } from './rng';
 import { deriveStats, effectiveRange, gainExp, gainJp, getAbility, getItem } from './unit';
-import { isAbilityInRange } from './targeting';
+import { abilityTargetsTiles, isAbilityInRange } from './targeting';
 
 import {
   areHostile,
@@ -930,14 +930,6 @@ function checkTargetLegality(state: BattleState, actor: Unit, ability: Ability, 
   return resolved;
 }
 
-/** Mirrors `state/targeting.ts:abilityTargetsTiles` without importing UI state. */
-function abilityTargetsTiles(ability: Ability): boolean {
-  if (ability.targetsTiles === true) return true;
-  if (ability.targetsTiles === false) return false;
-  if (ability.range.self) return false;
-  return (ability.range.radius ?? 0) > 0;
-}
-
 function performAction(
   state: BattleState,
   actor: Unit,
@@ -948,6 +940,26 @@ function performAction(
   targetUnit?: UnitId,
 ): void {
   const resolved = checkTargetLegality(state, actor, ability, target);
+  const tileAimed = abilityTargetsTiles(ability);
+  const lockedUnit = tileAimed
+    ? undefined
+    : livingUnitAt(state, resolved.x, resolved.y);
+
+  // Commands are an external boundary: never trust a supplied unit id to match
+  // the panel that passed range validation. Otherwise a caller can aim at a
+  // nearby occupant while making a charged spell track any unit on the board.
+  if (
+    ability.ct > 0 &&
+    !tileAimed &&
+    !ability.range.self &&
+    targetUnit !== undefined &&
+    lockedUnit?.id !== targetUnit
+  ) {
+    fail(
+      `act: ${ability.name} target unit "${targetUnit}" is not on ` +
+      `(${resolved.x},${resolved.y})`,
+    );
+  }
 
   if (ability.mp > 0 && hasStatus(actor, 'silence')) fail(`act: ${actor.name} is silenced`);
   if (ability.mp > 0 && actor.stats.mp < ability.mp) {
@@ -973,11 +985,7 @@ function performAction(
 
     // Tile-targeted: store the panel. Unit-targeted: lock onto the victim so the
     // resolve follows them if they walk between cast and fire.
-    const tileAimed = abilityTargetsTiles(ability);
-    const locked =
-      !tileAimed
-        ? (targetUnit ?? livingUnitAt(state, resolved.x, resolved.y)?.id)
-        : undefined;
+    const locked = lockedUnit?.id;
     pushCharge(state, {
       unit: actor.id,
       ability: ability.id,

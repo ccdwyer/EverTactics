@@ -548,7 +548,15 @@ function requireProgress(raw: object): CampaignProgress {
 }
 
 function requireRoster(raw: unknown[]): PersistedUnit[] {
-  return raw.map((entry, index) => requirePersistedUnit(entry, index));
+  const roster = raw.map((entry, index) => requirePersistedUnit(entry, index));
+  const ids = new Set<UnitId>();
+  for (const unit of roster) {
+    if (ids.has(unit.id)) {
+      throw new Error(`campaign migrate: duplicate roster id "${unit.id}"`);
+    }
+    ids.add(unit.id);
+  }
+  return roster;
 }
 
 function requirePersistedUnit(raw: unknown, index: number): PersistedUnit {
@@ -747,10 +755,8 @@ function requireJobs(
 function requireEquipment(raw: Record<string, unknown>, path: string): Equipment {
   rejectUnknownKeys(raw, EQUIPMENT_SLOT_KEYS, `${path}.equipment`);
   const equipment: Equipment = {};
-  const slots = ['rightHand', 'leftHand', 'head', 'body', 'accessory'] as const;
-  for (const slot of slots) {
+  for (const slot of Object.keys(raw) as (keyof Equipment)[]) {
     const v = raw[slot];
-    if (v === undefined) continue;
     if (typeof v !== 'string') {
       throw new Error(`campaign migrate: ${path}.equipment.${slot} must be a string`);
     }

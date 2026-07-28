@@ -2087,7 +2087,12 @@ export class Game {
         continue;
       }
       if (other.id === caster.id) {
-        sprite.setSelection('active');
+        // Keep the turn marker, but do not hide friendly fire behind the generic
+        // active-unit gold: a caster standing in their own footprint is an
+        // affected ally and must read blue like every other ally.
+        sprite.setSelection(
+          coveredKeys.has(tileKey(other.pos.x, other.pos.y)) ? 'ally-aoe' : 'active',
+        );
         sprite.setTurnMarker(true);
         continue;
       }

@@ -204,6 +204,26 @@ describe('campaign serialize / deserialize', () => {
     expect(restored.roster[0]!.jobs.squire!.learned).toEqual(['throw-stone', 'accumulate']);
   });
 
+  it('rejects a hand-written current-version save with duplicate roster ids', () => {
+    const first = validPersistedUnit({ id: 'same-id', name: 'First' });
+    const second = validPersistedUnit({ id: 'same-id', name: 'Second' });
+    const blob = JSON.stringify(validV1Shell({ roster: [first, second] }));
+
+    expect(() => deserialize(blob)).toThrow(/duplicate roster id "same-id"/);
+  });
+
+  it('preserves current-version equipment key order on deserialize/reserialize', () => {
+    const campaign = campaignFromBattleOpen();
+    campaign.roster[0]!.equipment = {
+      accessory: 'small-mantle',
+      rightHand: 'dagger',
+      head: 'leather-cap',
+    };
+    const blob = serialize(campaign);
+
+    expect(serialize(deserialize(blob))).toBe(blob);
+  });
+
   it('migrate upgrades a hand-written v0 blob without throwing', () => {
     // v0 shape: no version field, `gold` instead of `gil`, flat raw stats, incomplete progress.
     const v0 = {
@@ -664,6 +684,20 @@ describe('save / load (localStorage)', () => {
     clearCampaign();
     expect(storage.getItem('unrelated.user-data')).toBe('keep-me');
     expect(storage.getItem(CAMPAIGN_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe('campaign roster identity', () => {
+  it('campaignToBattle rejects duplicate roster ids instead of deploying N-1 units', () => {
+    const campaign = campaignFromBattleOpen();
+    const duplicated = campaign.roster[0]!;
+    campaign.roster.push({
+      ...duplicated,
+      name: `${duplicated.name} Duplicate`,
+    });
+
+    expect(() => campaignToBattle(campaign, getScenario('battle-open')))
+      .toThrow(/duplicate roster id "p-aldric"/);
   });
 });
 

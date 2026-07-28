@@ -283,11 +283,8 @@ export function defaultAnimationSet(
     durations: [900],
     loop: true,
     procedural: true,
-    // Sub-texel breath, rounded once at draw time: peaks at ±1 sprite pixel and
-    // sits at 0 for most of the cycle. Larger amplitudes read as Levitate.
-    pose: (t, out) => {
-      out.offsetY = Math.sin(t * TWO_PI) * 0.45;
-    },
+    // Keep the body planted. Even a one-texel idle lift reads as Levitate when
+    // every unit repeats it in sync; locomotion clips still carry real motion.
   };
 
   const walk: AnimClip = {

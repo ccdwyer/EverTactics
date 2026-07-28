@@ -2266,6 +2266,12 @@ const SELECTION_COLORS: Readonly<Record<Exclude<SelectionState, 'none'>, number>
   'enemy-aoe': 0xff4a3a,
 };
 
+/** Body tints reinforce the ground ring on units inside the aimed footprint. */
+const SELECTION_BODY_TINTS: Readonly<Partial<Record<SelectionState, THREE.Color>>> = {
+  'ally-aoe': new THREE.Color(0x86caff),
+  'enemy-aoe': new THREE.Color(0xff8275),
+};
+
 /**
  * One unit on the field: a Y-locked billboard quad plus its ground decals, turn
  * marker, status strip and floating text.
@@ -2351,6 +2357,7 @@ export class UnitSprite {
   private walkOnStep: ((index: number) => void) | null = null;
 
   private selection: SelectionState = 'none';
+  private readonly baseTint = new THREE.Color(0xffffff);
   private ringPulse = 0;
   private markerVisible = false;
   private markerPhase = 0;
@@ -2625,7 +2632,8 @@ export class UnitSprite {
 
   /** Multiplicative tint, e.g. poison green while the status is up. */
   setTint(color: THREE.ColorRepresentation): void {
-    this.bundle.uniforms.uTint.value.set(color);
+    this.baseTint.set(color);
+    this.applySelectionBodyTint();
   }
 
   setOpacity(value: number): void {
@@ -2683,12 +2691,19 @@ export class UnitSprite {
 
   setSelection(state: SelectionState): void {
     this.selection = state;
+    this.applySelectionBodyTint();
     if (state === 'none') {
       this.ring.visible = false;
       return;
     }
     this.ring.visible = true;
     this.ring.material.color.set(SELECTION_COLORS[state]);
+  }
+
+  private applySelectionBodyTint(): void {
+    const tint = this.bundle.uniforms.uTint.value.copy(this.baseTint);
+    const selectionTint = SELECTION_BODY_TINTS[this.selection];
+    if (selectionTint) tint.multiply(selectionTint);
   }
 
   setTurnMarker(visible: boolean): void {

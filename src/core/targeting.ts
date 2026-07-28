@@ -6,7 +6,7 @@
  */
 
 import { facingBetween, isInRange } from './grid';
-import type { AbilityRange, Battlefield, Facing, Vec3 } from './types';
+import type { Ability, AbilityRange, Battlefield, Facing, Vec3 } from './types';
 
 const RANGE_OPTIONS: Readonly<Record<Facing, { facing: Facing }>> = {
   N: { facing: 'N' },
@@ -14,6 +14,21 @@ const RANGE_OPTIONS: Readonly<Record<Facing, { facing: Facing }>> = {
   S: { facing: 'S' },
   W: { facing: 'W' },
 };
+
+/**
+ * Whether an ability lands on a tile or follows a selected unit.
+ *
+ * Authored data normally carries an explicit value. The fallback keeps older
+ * or hand-written ability objects compatible: self skills follow the caster,
+ * bursts land on their aimed tile, and radius-zero skills follow a unit.
+ */
+export function abilityTargetsTiles(
+  ability: Pick<Ability, 'targetsTiles' | 'range'>,
+): boolean {
+  if (ability.targetsTiles !== undefined) return ability.targetsTiles;
+  if (ability.range.self) return false;
+  return (ability.range.radius ?? 0) > 0;
+}
 
 /**
  * Whether an ability may be aimed at `target` from `origin`.

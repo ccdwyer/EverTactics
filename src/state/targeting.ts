@@ -22,7 +22,7 @@
  */
 
 import { tileKey, tilesInBurst } from '@core/grid';
-import { isAbilityInRange } from '@core/targeting';
+import { abilityTargetsTiles, isAbilityInRange } from '@core/targeting';
 import { effectiveRange } from '@core/unit';
 import type { Ability, BattleState, Unit, Vec3 } from '@core/types';
 
@@ -99,20 +99,7 @@ export function primaryTargetAt(
   return undefined;
 }
 
-/**
- * Whether an ability aims at a **tile** (lands where you point; hits whoever is
- * there at resolution) or at a **unit** (follows the selected unit).
- *
- * Prefers the authored `Ability.targetsTiles` flag; when absent, treats any
- * non-self ability with a burst radius as tile-aimed (Fire, Cure splash, etc.)
- * and everything else as unit-aimed (Steal, single-target buffs, Holy).
- */
-export function abilityTargetsTiles(ability: Ability): boolean {
-  if (ability.targetsTiles === true) return true;
-  if (ability.targetsTiles === false) return false;
-  if (ability.range.self) return false;
-  return (ability.range.radius ?? 0) > 0;
-}
+export { abilityTargetsTiles } from '@core/targeting';
 
 /**
  * Whether the reducer will accept an `act` aimed here — the last gate before a
@@ -128,5 +115,12 @@ export function canAimAt(
 ): boolean {
   if (!targets.keys.has(tileKey(target.x, target.y))) return false;
   if (abilityTargetsTiles(ability)) return true;
-  return primaryTargetAt(state, unit, ability, target) !== undefined;
+  // Unit mode means the selected panel itself must be occupied. Looking at the
+  // rest of a radius here makes an empty panel appear clickable even though the
+  // reducer correctly rejects it.
+  for (const other of state.units.values()) {
+    if (other.removed) continue;
+    if (other.pos.x === target.x && other.pos.y === target.y) return true;
+  }
+  return false;
 }

@@ -39,6 +39,7 @@ import {
   legalTargets,
   primaryTargetAt,
 } from '../src/state/targeting';
+import { ACTION_ABILITIES } from '../src/core/abilities/sets';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -122,7 +123,16 @@ const STRIKE = ability({
   targetsTiles: false,
 });
 
-const ABILITIES: Ability[] = [FIRE_TILE, HEX_UNIT, STRIKE];
+/** Explicit unit lock with a burst, to catch aim-tile vs footprint confusion. */
+const HEX_BURST_UNIT = ability({
+  id: 'hex-burst-unit',
+  name: 'Hex Burst Unit',
+  formula: 'magical',
+  range: { range: 5, radius: 1, vertical: 4, los: false },
+  targetsTiles: false,
+});
+
+const ABILITIES: Ability[] = [FIRE_TILE, HEX_UNIT, STRIKE, HEX_BURST_UNIT];
 
 function flatField(width = 8, height = 8): Battlefield {
   const tiles: Tile[] = [];
@@ -264,6 +274,13 @@ describe('abilityTargetsTiles', () => {
     });
     expect(abilityTargetsTiles(single)).toBe(false);
   });
+
+  it('authors radius-0 Holy and Flare as unit spells while Fire remains tile-aimed', () => {
+    const authored = new Map(ACTION_ABILITIES.map((entry) => [entry.id, entry]));
+    expect(authored.get('holy')?.targetsTiles).toBe(false);
+    expect(authored.get('flare')?.targetsTiles).toBe(false);
+    expect(authored.get('fire')?.targetsTiles).toBe(true);
+  });
 });
 
 describe('canAimAt — tile vs unit modes', () => {
@@ -278,6 +295,13 @@ describe('canAimAt — tile vs unit modes', () => {
     const { state, caster, foe } = setup();
     expect(canAimAt(state, caster, HEX_UNIT, foe.pos)).toBe(true);
     expect(canAimAt(state, caster, STRIKE, { x: 3, y: 2, z: 0 })).toBe(false);
+  });
+
+  it('does not accept an empty aim tile just because a unit is inside the footprint', () => {
+    const { state, caster, foe } = setup();
+    const emptyBesideFoe: Vec3 = { x: foe.pos.x + 1, y: foe.pos.y, z: 0 };
+    expect(canAimAt(state, caster, HEX_BURST_UNIT, emptyBesideFoe)).toBe(false);
+    expect(canAimAt(state, caster, HEX_BURST_UNIT, foe.pos)).toBe(true);
   });
 
   it('coveredTiles matches the burst the reducer will use', () => {
@@ -406,6 +430,23 @@ describe('charged unit-targeted ability', () => {
         target: { x: 5, y: 2, z: 0 },
       }),
     ).toThrow(IllegalCommandError);
+  });
+
+  it('rejects a targetUnit that does not occupy the validated target tile', () => {
+    const { state, caster, foe, ally } = setup();
+    advance(state);
+
+    expect(() =>
+      applyCommand(state, {
+        kind: 'act',
+        unit: caster.id,
+        ability: HEX_UNIT.id,
+        target: foe.pos,
+        targetUnit: ally.id,
+      }),
+    ).toThrow(/target unit "ally" is not on/);
+    expect(getPendingCharges(state)).toHaveLength(0);
+    expect(caster.turn.acted).toBe(false);
   });
 
   it('fizzles when the tracked unit is removed before resolution', () => {

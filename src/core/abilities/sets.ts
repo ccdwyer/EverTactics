@@ -24,6 +24,7 @@ import type {
   StatusId,
   StatusInfliction,
 } from '../types';
+import { abilityTargetsTiles } from '../targeting';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Authoring helpers
@@ -83,28 +84,13 @@ export const VERY_LONG = 64;
  *   - explicit author flag wins
  *   - self-only abilities are not tile-aimed
  *   - any burst (radius > 0) aims at a panel (Fire, Cure splash, summons)
- *   - panel-landed formulas (magical, summon, move, percent-hp) aim at a tile even
- *     at radius 0 (Holy, Flare, Teleport)
- *   - everything else (physical singles, heals/buffs/status on one body, Steal)
- *     locks onto a unit so a charged cast tracks them
+ *   - radius-0 abilities lock onto a unit unless the author explicitly marks
+ *     them as panel-landed (Jump, Teleport, totems, corpse-tile summons)
+ *
+ * Formula is deliberately not part of the fallback. Holy, Flare, curses and
+ * other single-target magic follow a unit just as physical attacks, heals,
+ * buffs, Steal and Talk Skill do.
  */
-function defaultTargetsTiles(s: AbilitySpec): boolean {
-  if (s.targetsTiles !== undefined) return s.targetsTiles;
-  const range = s.range ?? MELEE;
-  if (range.self) return false;
-  if ((range.radius ?? 0) > 0) return true;
-  const formula = s.formula ?? 'physical';
-  if (
-    formula === 'magical' ||
-    formula === 'summon' ||
-    formula === 'move' ||
-    formula === 'percent-hp'
-  ) {
-    return true;
-  }
-  return false;
-}
-
 export function defineAbilities(
   set: AbilitySetId,
   slot: AbilitySlot,
@@ -125,7 +111,10 @@ export function defineAbilities(
     accuracy: s.accuracy ?? 100,
     inflicts: s.inflicts,
     cures: s.cures,
-    targetsTiles: defaultTargetsTiles(s),
+    targetsTiles: abilityTargetsTiles({
+      targetsTiles: s.targetsTiles,
+      range: s.range ?? MELEE,
+    }),
     vfx: s.vfx,
     sfx: s.sfx,
     castAnim: s.castAnim,
