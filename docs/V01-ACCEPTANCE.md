@@ -49,3 +49,35 @@ with "dev server did not start" while `curl` to the same port returned 200. Defa
 
 Driving a battle to victory through the UI, then checking gil/JP/learned abilities/completed nodes
 across a refresh. That is the remaining gap between "the loop is reachable" and "the loop closes".
+
+---
+
+## Second walk — resolution attempt, and a finding
+
+Drove 90 consecutive turns through real input (634 steps, `shots/acc-outcome/`), passing every turn
+via the command menu's WAIT.
+
+**Result: 0 console errors, 0 rejected commands across 634 steps.** Seven units cycled through the
+turn order correctly. That is the strongest evidence yet against the reported lockup: the exact
+input path that produced it now runs for 90 turns clean, and `play.mjs` exits 5 the moment a
+rejected command appears.
+
+**Neither victory nor defeat was reachable this way**, which is a scenario-balance fact rather than
+a defect: a level-13/14 company cannot be killed by the level-3 opening encounter no matter how
+long it stands still, and passing turns never kills anything. Driving to victory needs scripted
+ATTACK + target clicks, which is the remaining piece of work.
+
+### Finding: `progress.current` has two writers using different id spaces
+
+- `src/state/scenarios.ts:430` — `campaign.progress.current = scenario.id` (a **scenario** id)
+- `src/state/game.ts:282` — `this.campaign.progress.current = routedNode.id` (a **world-node** id)
+
+Observed live after launching the first battle from the world map: `current: 'battle-open'` — a
+scenario id, and not even the scenario that was launched.
+
+This matters because `battleToCampaign` reads `progress.current` to decide what to mark completed.
+That field was introduced precisely to remove a "remember to pass the right argument" trap during
+step 1; it now carries values from two different id spaces depending on which path ran last, which
+is the same trap in a new shape. Not yet proven to mis-record a completion — the world map does
+unlock correctly on the paths walked — but it should be one type with one writer before recruitment
+and chapter 2 gating depend on it.
