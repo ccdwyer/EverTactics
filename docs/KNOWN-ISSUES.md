@@ -18,3 +18,14 @@ inputs the game currently produces, and persistence blocked the whole roadmap.
 
 Delivered and verified: campaigns save/load/survive refresh, progress records on victory, storage
 failures log rather than fail silently, 469 tests green, typecheck clean.
+
+## Step 3 residuals (reviewer-flagged, accepted)
+
+1. `tree.ts` reads only `ctx.kills`; `killCountOf(unit, ctx)` was removed. Production is fine
+   because `Game` always builds the context, but a core helper called with `{}` silently locks a
+   unit that has the kills. Same "nothing calls them" shape that cost step 2 four rounds —
+   restore the fallback if core helpers get used directly.
+2. The Dark Knight unlock test fixtures `kills: 20`, so it proves the ctx path, not "earn 20
+   knockdowns then unlock". Kill increment is tested separately.
+3. Status-tick KOs in `battle.ts` emit unattributed knockdowns, so those kills aren't credited.
+   Pre-existing.
