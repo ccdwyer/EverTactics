@@ -64,6 +64,11 @@ export interface PersistedUnit {
   exp: number;
   /** Lifetime exp total when tracked; optional for older saves. */
   totalExp: number;
+  /**
+   * Lifetime personal KOs credited to this unit. Gates Dark Knight / Death Knight.
+   * Optional on older saves — missing means 0.
+   */
+  kills?: number;
   currentJob: JobId;
   jobs: Record<JobId, PersistedJobProgress>;
   equipment: Equipment;
@@ -156,6 +161,7 @@ export function unitToPersisted(unit: Unit): PersistedUnit {
     level: unit.level,
     exp: unit.exp,
     totalExp: unit.totalExp ?? 0,
+    kills: unit.kills ?? 0,
     currentJob: unit.currentJob,
     jobs,
     equipment: { ...unit.equipment },
@@ -213,6 +219,7 @@ export function unitFromPersisted(p: PersistedUnit, opts: HydrateOpts): Unit {
   unit.level = p.level;
   unit.exp = p.exp;
   unit.totalExp = p.totalExp;
+  unit.kills = p.kills ?? 0;
   setRawStats(unit, { ...p.raw });
 
   unit.jobs.clear();
@@ -366,6 +373,7 @@ const PERSISTED_UNIT_KEYS: ReadonlySet<string> = new Set([
   'level',
   'exp',
   'totalExp',
+  'kills',
   'currentJob',
   'jobs',
   'equipment',
@@ -608,6 +616,15 @@ function requirePersistedUnit(raw: unknown, index: number): PersistedUnit {
   }
   const equipment = requireEquipment(u.equipment as Record<string, unknown>, path);
 
+  // kills is optional on older current-version saves; default 0 when absent.
+  let kills = 0;
+  if (u.kills !== undefined) {
+    if (!isFiniteNonNegInt(u.kills)) {
+      throw new Error(`campaign migrate: ${path}.kills invalid (must be non-negative integer)`);
+    }
+    kills = u.kills as number;
+  }
+
   const persisted: PersistedUnit = {
     id: u.id,
     name: u.name,
@@ -616,6 +633,7 @@ function requirePersistedUnit(raw: unknown, index: number): PersistedUnit {
     level: u.level as number,
     exp: u.exp as number,
     totalExp: u.totalExp as number,
+    kills,
     currentJob: u.currentJob,
     jobs,
     equipment,
@@ -803,6 +821,11 @@ function normalizePersistedUnit(raw: unknown, index: number): PersistedUnit {
       ? { ...(u.equipment as Equipment) }
       : {};
 
+  const kills =
+    typeof u.kills === 'number' && Number.isFinite(u.kills)
+      ? Math.max(0, Math.floor(u.kills))
+      : 0;
+
   const persisted: PersistedUnit = {
     id: u.id,
     name: u.name,
@@ -811,6 +834,7 @@ function normalizePersistedUnit(raw: unknown, index: number): PersistedUnit {
     level,
     exp,
     totalExp,
+    kills,
     currentJob: u.currentJob,
     jobs,
     equipment,
@@ -989,6 +1013,7 @@ function structuredClonePersisted(u: PersistedUnit): PersistedUnit {
     level: u.level,
     exp: u.exp,
     totalExp: u.totalExp,
+    kills: u.kills ?? 0,
     currentJob: u.currentJob,
     jobs: {},
     equipment: { ...u.equipment },

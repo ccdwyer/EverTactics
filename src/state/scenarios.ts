@@ -16,7 +16,9 @@ import { jobActions, jobSkillset } from './abilityIndex';
 import { bootstrapContent } from './content';
 
 import {
+  createCampaign,
   unitFromPersisted,
+  unitToPersisted,
   type CampaignState,
 } from '@core/campaign';
 import { getMapDef, generateMap, positionOn, tileKey } from '@core/grid';
@@ -41,6 +43,29 @@ import type {
 } from '@core/types';
 import type { PersonalityId } from '@core/ai';
 import type { LightingPreset, LightingPresetName } from '@render/lighting';
+
+/** Scenario ids that keep the hardcoded `buildScenario` cast for render tooling. */
+const DIAGNOSTIC_SCENARIO_IDS: ReadonlySet<string> = new Set([
+  'terrain-only',
+  'sprites-only',
+  'ui-only',
+]);
+
+/** True for screenshot/diagnostic scenes that must not go through the campaign. */
+export function isDiagnosticScenario(scenarioId: string): boolean {
+  return DIAGNOSTIC_SCENARIO_IDS.has(scenarioId);
+}
+
+/**
+ * Starter company stock for a brand-new game.
+ * Three Potions — not the battle-default eight from {@link STARTING_STOCK}.
+ */
+export const STARTER_CAMPAIGN_INVENTORY: Readonly<Record<string, number>> = {
+  'long-sword': 1,
+  rod: 1,
+  buckler: 1,
+  'use-potion': 3,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -304,6 +329,35 @@ export function buildScenario(scenario: Scenario): BuiltScenario {
   primeDerived(units.values());
 
   return { scenario, state, personalities };
+}
+
+/**
+ * A brand-new company seeded from the scenario's player cast.
+ *
+ * Production boot uses this (or a loaded save), then {@link campaignToBattle}.
+ * Does not launch a battle — inventory is the campaign starter stock (three
+ * Potions), not the eight-potion battle default from inventoryFor.
+ */
+export function newGameCampaign(scenario: Scenario, timestamp: number): CampaignState {
+  bootstrapContent();
+  const campaign = createCampaign(scenario.seed, timestamp);
+  for (const placement of scenario.units) {
+    if (placement.team !== 'player') continue;
+    // Placement tile is only used for unit construction; campaignToBattle
+    // repositions onto map playerStarts from the formation slate.
+    const unit = unitFromPlacement(placement, {
+      x: placement.at.x,
+      y: placement.at.y,
+      z: 0,
+    });
+    campaign.roster.push(unitToPersisted(unit));
+  }
+  campaign.formation = campaign.roster.map((u, i) => ({
+    unitId: u.id,
+    startIndex: i,
+  }));
+  campaign.inventory = { ...STARTER_CAMPAIGN_INVENTORY };
+  return campaign;
 }
 
 /**

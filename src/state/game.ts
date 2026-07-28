@@ -46,6 +46,8 @@ import {
   buildScenario,
   campaignToBattle,
   getScenario,
+  isDiagnosticScenario,
+  newGameCampaign,
   overrideScenario,
   scenarioMapDef,
   type BuiltScenario,
@@ -192,21 +194,25 @@ export class Game {
     this.scenario = options.params ? overrideScenario(base, options.params) : base;
     this.shot = options.shot ?? false;
 
-    // Production path: a saved company launches via campaignToBattle so the
-    // formation slate and roster are what the player actually deploys.
-    // Screenshot / diagnostic runs keep the hardcoded scenario cast so the
-    // render harness stays byte-stable.
-    const loaded = !this.shot ? loadCampaign() : null;
-    if (loaded && loaded.roster.length > 0) {
-      this.campaign = loaded;
-      this.built = campaignToBattle(this.campaign, this.scenario);
-      this.state = this.built.state;
-    } else {
+    // Production path: every real battle is campaign → campaignToBattle.
+    // Screenshot mode and diagnostic scenes keep the hardcoded cast so the
+    // render harness stays byte-stable (?shot= scenes must not drift).
+    if (this.shot || isDiagnosticScenario(this.scenario.id)) {
       this.built = buildScenario(this.scenario);
       this.state = this.built.state;
-      // Shot / first-boot: seed a company from the scenario cast. Only persist
-      // outside screenshot mode so the render harness never clobbers a save.
-      this.campaign = this.seedCampaignFromField({ persist: !this.shot });
+      this.campaign = this.seedCampaignFromField({ persist: false });
+    } else {
+      const loaded = loadCampaign();
+      if (loaded && loaded.roster.length > 0) {
+        this.campaign = loaded;
+      } else {
+        // Brand-new game: seed the company first, then launch through it.
+        // campaignToBattle pins progress.current so the first victory records.
+        this.campaign = newGameCampaign(this.scenario, Date.now());
+        saveCampaign(this.campaign);
+      }
+      this.built = campaignToBattle(this.campaign, this.scenario);
+      this.state = this.built.state;
     }
     this.snapshotProgress();
 
@@ -1202,12 +1208,25 @@ export class Game {
    * Route a party-screen UIIntent through the production dispatcher.
    * Mid-battle every mutation is refused; between battles the campaign updates.
    */
+  /** Unlock context from a roster member's persisted kill tally. */
+  private unlockCtxFor(unitId: UnitId): { kills: number } {
+    const kills = this.campaign.roster.find((u) => u.id === unitId)?.kills ?? 0;
+    return { kills };
+  }
+
   private applyPartyIntent(intent: PartyMutationIntent): boolean {
+    const unitId =
+      'unitId' in intent && typeof intent.unitId === 'string'
+        ? (intent.unitId as UnitId)
+        : this.screenUnit ?? undefined;
     const result = dispatchPartyIntent(
       this.campaign,
       this.isBattleLive(),
       intent,
-      { timestamp: Date.now() },
+      {
+        timestamp: Date.now(),
+        ...(unitId ? { unlockCtx: this.unlockCtxFor(unitId) } : {}),
+      },
     );
     if (!result.ok) {
       this.ui.sound('error');
@@ -1238,9 +1257,13 @@ export class Game {
     }
     this.screenUnit = unitId;
     this.screenJob = persisted.currentJob;
-    const vm = campaignJobScreenVM(this.campaign, unitId, persisted.currentJob, {}, {
-      editable: this.partyEditingAllowed(),
-    });
+    const vm = campaignJobScreenVM(
+      this.campaign,
+      unitId,
+      persisted.currentJob,
+      this.unlockCtxFor(unitId),
+      { editable: this.partyEditingAllowed() },
+    );
     if (!vm) {
       this.ui.sound('error');
       return;
@@ -1255,7 +1278,7 @@ export class Game {
       this.campaign,
       this.screenUnit,
       this.screenJob ?? undefined,
-      {},
+      this.unlockCtxFor(this.screenUnit),
       { editable: this.partyEditingAllowed() },
     );
     if (!vm) return;

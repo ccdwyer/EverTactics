@@ -314,6 +314,11 @@ export interface Unit {
   zodiac: Zodiac;
   level: number;
   exp: number;
+  /**
+   * Lifetime personal KOs. Campaign-persisted; gates Dark Knight / Death Knight.
+   * Optional so older fixtures and battle-only units still typecheck.
+   */
+  kills?: number;
 
   currentJob: JobId;
   /** Per-job mastery record. */

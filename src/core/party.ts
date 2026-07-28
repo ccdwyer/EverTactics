@@ -44,11 +44,9 @@ import {
 /**
  * True when the unit may switch into `jobId`.
  *
- * Uses {@link unlockStatus} as the canonical gate (job prereqs, gender locks,
- * kill conditions). Previously held jobs stay selectable so a scenario Knight
- * can leave and return without re-grinding Squire — but only for job-level
- * prereqs. Gender locks and kill/special conditions always bind: banked JP
- * must never open Dark Knight without kills, or Bard for a female unit.
+ * Exactly {@link unlockStatus} — one canonical predicate for the UI and the
+ * mutation. Banked JP is not a bypass: a monster cannot enter an ordinary job
+ * by holding a progress row, and kill/gender gates always bind.
  */
 export function canSwitchToJob(
   unit: Unit,
@@ -56,16 +54,7 @@ export function canSwitchToJob(
   ctx: UnlockContext = {},
 ): boolean {
   if (unit.currentJob === jobId) return true;
-  const status = unlockStatus(unit, jobId, ctx);
-  if (status.unlocked) return true;
-  // Gender-locked against this unit: never open, held-JP or not.
-  if (status.genderLocked !== undefined) return false;
-  // Kill gates / special conditions always bind — banked JP is not a bypass.
-  if (!status.specialMet) return false;
-  // Previously held (job-prereq shortfall only): any total JP banked keeps it
-  // selectable so a scenario Knight can leave and return without re-grinding.
-  const progress = unit.jobs.get(jobId);
-  return (progress?.totalJp ?? 0) > 0;
+  return unlockStatus(unit, jobId, ctx).unlocked;
 }
 
 export type { FormationEntry };
@@ -599,6 +588,7 @@ function structuredClonePersisted(u: PersistedUnit): PersistedUnit {
     level: u.level,
     exp: u.exp,
     totalExp: u.totalExp,
+    kills: u.kills ?? 0,
     currentJob: u.currentJob,
     jobs: {},
     equipment: { ...u.equipment },

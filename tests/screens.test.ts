@@ -239,9 +239,14 @@ describe('changing job', () => {
     expect(vm.unit.job).toBe(getJob('black-mage').name);
     expect(vm.unit.move).toBe(after.move);
     expect(vm.jobs.find((n) => n.current)?.id).toBe('black-mage');
-    // The job it just left stays open — a unit can never be stranded out of a
-    // job it has banked JP in, whatever the prerequisite table says.
-    const knight = vm.jobs.find((n) => n.id === 'knight');
+    // canSwitchToJob is exactly unlockStatus — banked JP alone does not re-open
+    // a job. Knight needs Squire Lv 2; grant it so the return path is real.
+    const squire = unit.jobs.get('squire') ?? { level: 1, jp: 0, totalJp: 0, learned: new Set() };
+    squire.level = 2;
+    squire.totalJp = Math.max(squire.totalJp, 100);
+    unit.jobs.set('squire', squire);
+    const vmAfter = jobScreenVM(state, unit);
+    const knight = vmAfter.jobs.find((n) => n.id === 'knight');
     expect(knight?.unlocked).toBe(true);
     expect(knight?.requirement).toBeUndefined();
   });

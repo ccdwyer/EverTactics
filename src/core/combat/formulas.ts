@@ -12,6 +12,7 @@
 import type {
   Ability, BattleEvent, BattleState, Element, Rng, Stats, StatusId, Unit, UnitId, Vec3,
 } from '../types';
+import { areHostile } from '../grid';
 import { deriveStats, isKO, isTargetable } from '../unit';
 import {
   applyStatus, breakOnAction, canApplyStatus, hasStatus, removeStatus, statusDef,
@@ -466,6 +467,10 @@ export function applyResolution(state: BattleState, res: AbilityResolution): Bat
         applyStatus(target, 'ko', { duration: -1, source: caster.id });
         events.push({ kind: 'status-add', unit: target.id, status: 'ko' });
         events.push({ kind: 'knockdown', unit: target.id });
+        // Personal kill credit — campaign-persisted via unitToPersisted.
+        if (areHostile(caster.team, target.team)) {
+          caster.kills = (caster.kills ?? 0) + 1;
+        }
       }
     }
   }
