@@ -70,3 +70,43 @@ Then prove it in a browser, against a static build (HMR reloads mid-capture):
 
 Read the PNGs and confirm the screen responds to input. Report the commands you ran and what they
 printed — not a description of what you changed.
+
+---
+
+## ROUND 4 — a design decision, not another objection list
+
+Three rounds have failed because of ONE root cause, and the other defects are symptoms of it:
+**the editors reach into live `BattleState` directly** (`state/game.ts:1352`, `:1581`), outside
+`applyCommand`. That violates the single architectural rule in CLAUDE.md, and it is why campaign and
+battle drift apart:
+
+- editing after acting overwrites the unit's `jobs` map and erases JP earned this battle
+- `syncBattleInventoryFromCampaign` overwrites live stock with campaign stock, resurrecting a
+  consumed Potion
+- and the test at `party.test.ts:316` rebuilds battle stock from campaign state, masking it
+
+Stop patching those individually. Adopt this rule instead:
+
+### THE CAMPAIGN IS THE ONLY THING PARTY EDITORS TOUCH
+
+1. **Party editing is not available while a battle is live.** Formation, Roster and Job screens
+   operate on `CampaignState` only. Open them between battles. If one is opened mid-battle, it is
+   read-only — display current state, refuse every mutation.
+2. **Delete `syncBattleInventoryFromCampaign` entirely.** Nothing writes into a live `BattleState`
+   from outside `applyCommand`. Campaign → battle happens once, at launch, via `campaignToBattle`.
+   Battle → campaign happens once, at the end, via `battleToCampaign`.
+3. That makes defects 1 and 2 structurally impossible rather than fixed. Do not add guards to
+   preserve mid-battle editing; remove the capability.
+
+### Job unlock rules
+`canSwitchToJob` (`core/party.ts:44`) calls `jobUnlocked`, which checks only job-level
+prerequisites. Use `unlockStatus` from `core/jobs/tree.ts:139` instead — it enforces the gender and
+kill gates too. A female unit must not be able to become a Bard. Both the UI predicate and the
+mutation must use the same canonical function, or they will disagree.
+
+### Tests
+Delete the test at `party.test.ts:316` that rebuilds battle stock from campaign state — it asserts
+the bug. Replace with: consume a Potion in battle, end the battle, and assert the campaign stock
+went DOWN by one. And assert that a party mutation attempted mid-battle is refused.
+
+Keep everything that works: 486 tests pass, tsc clean, no shader or randomness violations.

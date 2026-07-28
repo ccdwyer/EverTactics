@@ -84,6 +84,13 @@ export interface CampaignProgress {
   current?: string;
 }
 
+/** One roster member assigned to one scenario start-tile index. */
+export interface FormationEntry {
+  unitId: UnitId;
+  /** Index into the scenario's player start tiles (0-based). */
+  startIndex: number;
+}
+
 export interface CampaignState {
   version: number;
   /** Campaign-level seed so random encounters stay deterministic. */
@@ -92,6 +99,11 @@ export interface CampaignState {
   /** The player's company — not a BattleState. */
   roster: PersistedUnit[];
   inventory: Record<ItemId, number>;
+  /**
+   * Who deploys, and on which start-tile index, for the next battle.
+   * Empty means "first N roster members on start tiles 0..N-1" (legacy default).
+   */
+  formation: FormationEntry[];
   progress: CampaignProgress;
   /** Epoch ms; always passed in, never read from the clock in core. */
   createdAt: number;
@@ -113,6 +125,7 @@ export function createCampaign(seed: number, timestamp: number): CampaignState {
     gil: 0,
     roster: [],
     inventory: {},
+    formation: [],
     progress: { completed: [] },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -283,6 +296,7 @@ export function migrate(raw: unknown): CampaignState {
       gil: Math.max(0, Math.floor(gil)),
       roster,
       inventory,
+      formation: normalizeFormation(obj.formation),
       progress,
       createdAt,
       updatedAt,
@@ -336,6 +350,7 @@ const CAMPAIGN_KEYS: ReadonlySet<string> = new Set([
   'gil',
   'roster',
   'inventory',
+  'formation',
   'progress',
   'createdAt',
   'updatedAt',
@@ -418,16 +433,61 @@ function parseCurrentVersion(obj: Record<string, unknown>): CampaignState {
   }
 
   // Accept integers as-is — never floor fractions into a plausible save.
+  // `formation` is optional on disk for v1 saves written before party management;
+  // missing means an empty slate (roster-order deploy).
+  const formation =
+    obj.formation === undefined ? [] : requireFormation(obj.formation);
+
   return {
     version: CAMPAIGN_VERSION,
     seed: obj.seed as number,
     gil: obj.gil as number,
     roster: requireRoster(obj.roster),
     inventory: requireInventory(obj.inventory),
+    formation,
     progress: requireProgress(obj.progress),
     createdAt: obj.createdAt as number,
     updatedAt: obj.updatedAt as number,
   };
+}
+
+function requireFormation(raw: unknown): FormationEntry[] {
+  if (!Array.isArray(raw)) {
+    throw new Error('campaign migrate: formation must be an array');
+  }
+  const out: FormationEntry[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i];
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`campaign migrate: formation[${i}] is not an object`);
+    }
+    const e = entry as Record<string, unknown>;
+    if (typeof e.unitId !== 'string') {
+      throw new Error(`campaign migrate: formation[${i}].unitId must be a string`);
+    }
+    if (!isFiniteInt(e.startIndex) || (e.startIndex as number) < 0) {
+      throw new Error(
+        `campaign migrate: formation[${i}].startIndex must be a non-negative integer`,
+      );
+    }
+    out.push({ unitId: e.unitId, startIndex: e.startIndex as number });
+  }
+  return out;
+}
+
+/** Lenient formation parse for pre-v1 blobs — drop garbage, never throw. */
+function normalizeFormation(raw: unknown): FormationEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: FormationEntry[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.unitId !== 'string') continue;
+    if (typeof e.startIndex !== 'number' || !Number.isFinite(e.startIndex)) continue;
+    const startIndex = Math.max(0, Math.floor(e.startIndex));
+    out.push({ unitId: e.unitId, startIndex });
+  }
+  return out;
 }
 
 /**
@@ -836,6 +896,7 @@ export function beginScenario(
     ...campaign,
     roster: campaign.roster.map(structuredClonePersisted),
     inventory: { ...campaign.inventory },
+    formation: (campaign.formation ?? []).map((e) => ({ ...e })),
     progress: {
       completed: [...campaign.progress.completed],
       current: scenarioId,
@@ -903,6 +964,8 @@ export function battleToCampaign(
     gil: campaign.gil,
     roster: nextRoster,
     inventory,
+    // Formation is a pre-battle choice; write-back leaves it alone.
+    formation: (campaign.formation ?? []).map((e) => ({ ...e })),
     progress,
     createdAt: campaign.createdAt,
     updatedAt: timestamp,

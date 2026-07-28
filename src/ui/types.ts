@@ -253,6 +253,38 @@ export interface FormationScreenVM {
   maxDeployed: number;
 }
 
+export type EquipSlotName =
+  | 'rightHand'
+  | 'leftHand'
+  | 'head'
+  | 'body'
+  | 'accessory';
+
+export interface RosterEquipSlotVM {
+  slot: EquipSlotName;
+  label: string;
+  itemId?: string;
+  itemName?: string;
+}
+
+export interface RosterInventoryItemVM {
+  id: string;
+  name: string;
+  count: number;
+  /** True when the currently focused unit may equip this item. */
+  canEquip: boolean;
+}
+
+/** Per-unit gear and actions for the roster editor pane. */
+export interface RosterUnitEditVM {
+  unitId: string;
+  equipment: readonly RosterEquipSlotVM[];
+  /** Inventory rows with canEquip evaluated for this unit. */
+  inventory: readonly RosterInventoryItemVM[];
+  /** False when dismissing would empty the company. */
+  canDismiss: boolean;
+}
+
 export interface RosterScreenVM {
   title: string;
   units: readonly UnitVM[];
@@ -260,6 +292,11 @@ export interface RosterScreenVM {
   gil?: number;
   /** Optional per-unit footnote, keyed by unit id. */
   notes?: Readonly<Record<string, string>>;
+  /**
+   * Editable company data. When present the roster is a two-way editor
+   * (equip / unequip / rename / dismiss); when absent it is a read-only ledger.
+   */
+  edits?: Readonly<Record<string, RosterUnitEditVM>>;
 }
 
 export interface ResultUnitVM {
@@ -324,6 +361,18 @@ export type UIIntent =
   | { kind: 'formation-confirm' }
   /** Roster screen: open the job screen for a unit. */
   | { kind: 'open-job-screen'; unitId: string }
+  /** Roster: equip an inventory item onto a unit. */
+  | { kind: 'equip-item'; unitId: string; itemId: string }
+  /** Roster: strip an equipment slot back into inventory. */
+  | {
+      kind: 'unequip-item';
+      unitId: string;
+      slot: 'rightHand' | 'leftHand' | 'head' | 'body' | 'accessory';
+    }
+  /** Roster: rename a unit. */
+  | { kind: 'rename-unit'; unitId: string; name: string }
+  /** Roster: dismiss a unit (refused if it would empty the company). */
+  | { kind: 'dismiss-unit'; unitId: string }
   /** A full-screen panel was dismissed. */
   | { kind: 'close-screen'; screen: ScreenName }
   /** Battle results acknowledged. */

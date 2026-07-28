@@ -343,23 +343,46 @@ export function campaignToBattle(
   const personalities = new Map<UnitId, PersonalityId>();
   const taken = new Set<string>();
 
-  const playerPlacements = scenario.units.filter((u) => u.team === 'player');
+  // Legal deploy tiles come from the map's playerStarts, not the scenario's
+  // hardcoded cast positions (those exist for the diagnostic buildScenario path).
+  const mapDef = getMapDef(scenario.mapId);
+  const startTiles = mapDef?.playerStarts ?? [];
   const nonPlayerPlacements = scenario.units.filter((u) => u.team !== 'player');
+  // Facing / CT hints from the scenario's player slots when counts match.
+  const playerHints = scenario.units.filter((u) => u.team === 'player');
 
-  // Roster order → scenario start tiles. Extra roster members sit out; extra
-  // start tiles stay empty. Formation screen will choose the mapping later.
-  const deployCount = Math.min(campaign.roster.length, playerPlacements.length);
-  for (let i = 0; i < deployCount; i++) {
-    const placement = playerPlacements[i]!;
-    const persisted = campaign.roster[i]!;
-    const pos = resolvePlacement(field, placement.at, taken);
-    const unit = unitFromPersisted(persisted, {
-      team: 'player',
-      pos,
-      facing: placement.facing,
-    });
-    unit.ct = placement.ct ?? rng.int(40);
-    units.set(unit.id, unit);
+  const rosterById = new Map(campaign.roster.map((u) => [u.id, u]));
+  const formation = campaign.formation ?? [];
+  if (formation.length > 0) {
+    for (const entry of formation) {
+      const start = startTiles[entry.startIndex];
+      const persisted = rosterById.get(entry.unitId);
+      if (!start || !persisted) continue;
+      const hint = playerHints[entry.startIndex];
+      const pos = resolvePlacement(field, { x: start.x, y: start.y }, taken);
+      const unit = unitFromPersisted(persisted, {
+        team: 'player',
+        pos,
+        facing: hint?.facing ?? 'N',
+      });
+      unit.ct = hint?.ct ?? rng.int(40);
+      units.set(unit.id, unit);
+    }
+  } else {
+    const deployCount = Math.min(campaign.roster.length, startTiles.length);
+    for (let i = 0; i < deployCount; i++) {
+      const start = startTiles[i]!;
+      const persisted = campaign.roster[i]!;
+      const hint = playerHints[i];
+      const pos = resolvePlacement(field, { x: start.x, y: start.y }, taken);
+      const unit = unitFromPersisted(persisted, {
+        team: 'player',
+        pos,
+        facing: hint?.facing ?? 'N',
+      });
+      unit.ct = hint?.ct ?? rng.int(40);
+      units.set(unit.id, unit);
+    }
   }
 
   for (const placement of nonPlayerPlacements) {

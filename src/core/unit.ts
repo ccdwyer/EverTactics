@@ -638,6 +638,35 @@ function STATUS_EXISTS(id: StatusId): boolean {
   }
 }
 
+/**
+ * After equipment changes mid-battle, add newly gear-granted permanent statuses
+ * and drop ones that were only present because of the previous loadout.
+ *
+ * Battle-inflicted statuses (remaining >= 0) are left alone. Permanent statuses
+ * that did not come from the previous gear grant list are also left alone.
+ */
+export function reconcileGearStatuses(
+  unit: Unit,
+  previousGranted: readonly StatusId[],
+): void {
+  const nextGranted = equipmentMods(unit).granted;
+  const prev = new Set(previousGranted);
+  const next = new Set(nextGranted);
+
+  unit.statuses = unit.statuses.filter((s) => {
+    if (s.remaining !== -1) return true;
+    if (prev.has(s.status) && !next.has(s.status)) return false;
+    return true;
+  });
+
+  for (const status of next) {
+    if (!STATUS_EXISTS(status)) continue;
+    if (!unit.statuses.some((s) => s.status === status && s.remaining === -1)) {
+      unit.statuses.push({ status, remaining: -1 });
+    }
+  }
+}
+
 /** Refresh the cached `maxHp` / `maxMp` / `move` / `jump` mirrors on `unit.stats`. */
 export function refreshDerived(unit: Unit): Stats {
   const d = deriveStats(unit);

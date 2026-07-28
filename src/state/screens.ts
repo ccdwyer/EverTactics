@@ -14,13 +14,17 @@
  * anything the screen calls affordable really is purchasable.
  */
 
+import { findItem } from './items';
 import { unitVM } from './viewModels';
 
 import { ABILITY_SETS, getAbility } from '@core/abilities';
+import type { CampaignState, FormationEntry, PersistedUnit } from '@core/campaign';
+import { unitFromPersisted } from '@core/campaign';
 import { JOBS, allJobs, findJob } from '@core/jobs';
 import { jobLevelOf, unlockStatus, type UnlockContext } from '@core/jobs/tree';
+import { canEquipItem, canSwitchToJob, EQUIP_SLOT_ORDER, type EquipSlot } from '@core/party';
 import { jobProgress } from '@core/unit';
-import type { Ability, AbilitySetId, BattleState, Job, JobId, Unit } from '@core/types';
+import type { Ability, AbilitySetId, BattleState, Job, JobId, Unit, UnitId } from '@core/types';
 import type {
   AbilitySlotVM,
   FormationScreenVM,
@@ -28,7 +32,9 @@ import type {
   JobNodeVM,
   JobScreenVM,
   LearnableVM,
+  RosterEquipSlotVM,
   RosterScreenVM,
+  RosterUnitEditVM,
 } from '@ui/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,15 +114,10 @@ export function jobNodeVMs(unit: Unit, ctx: UnlockContext = {}): JobNodeVM[] {
   const out: JobNodeVM[] = [];
   for (const job of allJobs()) {
     const progress = unit.jobs.get(job.id);
-    const status = unlockStatus(unit, job.id, ctx);
-    // A unit standing in a job is in it whatever the requirement table says —
-    // scenario units are authored straight into Knight or Black Mage without
-    // ever having levelled the Squire the table asks for. A job it has *held*
-    // stays open for the same reason: otherwise a scenario Knight who tries out
-    // Monk can never go back, having no Squire levels to re-satisfy the gate.
+    // Must match `canSwitchToJob` in core/party.ts — UI and mutation gate must
+    // agree or the panel shows a job as open and changeJob silently refuses.
     const current = job.id === unit.currentJob;
-    const held = (progress?.totalJp ?? 0) > 0;
-    const unlocked = status.unlocked || current || held;
+    const unlocked = canSwitchToJob(unit, job.id);
     const requirement = unlocked ? undefined : requirementText(unit, job.id, ctx);
     const priced = pricedLearnables(job);
     out.push({
@@ -188,21 +189,29 @@ function learnedPassives(unit: Unit, slot: 'reaction' | 'support' | 'movement'):
 /**
  * Skillsets the unit may borrow as its secondary command.
  *
- * FFT's rule is "any job you have unlocked", which for a fresh recruit is Squire
- * and Chemist and for a veteran is most of the tree. Jobs the unit has already
- * banked JP in count too, since a scenario can drop a unit straight into one.
+ * Matches `canAssignSecondarySet` in core/party: only skillsets the unit has
+ * actually learned an ability from — not every unlocked or empty-banked job.
  */
 function secondaryOptions(
   unit: Unit,
-  ctx: UnlockContext,
+  _ctx: UnlockContext,
 ): { id: string; name: string; description: string }[] {
   const own = findJob(unit.currentJob)?.actionSet;
+  const learned = new Set<string>();
+  for (const progress of unit.jobs.values()) {
+    for (const id of progress.learned) learned.add(id);
+  }
+
   const seen = new Set<AbilitySetId>();
   const out: { id: string; name: string; description: string }[] = [];
   for (const job of allJobs()) {
     if (job.actionSet === own) continue;
     if (seen.has(job.actionSet)) continue;
-    if (!unlockStatus(unit, job.id, ctx).unlocked && !unit.jobs.has(job.id)) continue;
+    const setAbilities = [
+      ...job.learnable.map((l) => l.ability),
+      ...job.innate,
+    ];
+    if (!setAbilities.some((id) => learned.has(id))) continue;
     seen.add(job.actionSet);
     out.push({ id: job.actionSet, name: setName(job.actionSet), description: job.blurb });
   }
@@ -273,6 +282,23 @@ export function jobScreenVM(
   };
 }
 
+/**
+ * Job screen driven by the campaign roster — the durable source of truth for
+ * JP, learned abilities and loadout. Used when the unit may be benched (not on
+ * the current field) or when the live battle unit must not be the write target.
+ */
+export function campaignJobScreenVM(
+  campaign: CampaignState,
+  unitId: UnitId,
+  selectedJob?: JobId,
+  ctx: UnlockContext = {},
+): JobScreenVM | null {
+  const persisted = campaign.roster.find((u) => u.id === unitId);
+  if (!persisted) return null;
+  const unit = hydratePersisted(persisted);
+  return jobScreenVM(emptyBattleStub(), unit, selectedJob ?? unit.currentJob, ctx);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Roster
 // ─────────────────────────────────────────────────────────────────────────────
@@ -339,5 +365,173 @@ export function formationScreenVM(
     slots,
     roster: units.map((u) => unitVM(state, u)),
     maxDeployed: max,
+  };
+}
+
+/**
+ * Editable formation slate for the campaign company.
+ *
+ * `startTiles` are the scenario's player deployment positions; `formation` is
+ * the current assignment (slot index → unit). Empty slots stay open for fill.
+ */
+export function campaignFormationScreenVM(
+  campaign: CampaignState,
+  opts: {
+    startTiles: readonly { x: number; y: number }[];
+    formation?: readonly FormationEntry[];
+    title?: string;
+    subtitle?: string;
+    maxDeployed?: number;
+  },
+): FormationScreenVM {
+  const startTiles = opts.startTiles;
+  const max = opts.maxDeployed ?? startTiles.length;
+  const formation = opts.formation ?? campaign.formation ?? [];
+  const bySlot = new Map<number, UnitId>();
+  for (const entry of formation) {
+    if (entry.startIndex >= 0 && entry.startIndex < max) {
+      bySlot.set(entry.startIndex, entry.unitId);
+    }
+  }
+
+  const slots: FormationSlotVM[] = [];
+  for (let i = 0; i < max; i++) {
+    const tile = startTiles[i];
+    const unitId = bySlot.get(i);
+    slots.push({
+      index: i,
+      ...(unitId !== undefined ? { unitId } : {}),
+      ...(tile ? { tile: tileLabel(tile.x, tile.y) } : {}),
+    });
+  }
+
+  const stateStub = emptyBattleStub();
+  const roster = campaign.roster.map((p) => {
+    const live = unitFromPersisted(p, {
+      team: 'player',
+      pos: { x: 0, y: 0, z: 0 },
+      facing: 'S',
+    });
+    return unitVM(stateStub, live);
+  });
+
+  return {
+    title: opts.title ?? 'Formation',
+    ...(opts.subtitle !== undefined ? { subtitle: opts.subtitle } : {}),
+    slots,
+    roster,
+    maxDeployed: max,
+  };
+}
+
+const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
+  rightHand: 'Right Hand',
+  leftHand: 'Left Hand',
+  head: 'Head',
+  body: 'Body',
+  accessory: 'Accessory',
+};
+
+/** Company-wide roster ledger (every persisted member, not just those on the field). */
+export function campaignRosterScreenVM(
+  campaign: CampaignState,
+  opts: { title?: string } = {},
+): RosterScreenVM {
+  const stateStub = emptyBattleStub();
+  const units = campaign.roster.map((p) => unitVM(stateStub, hydratePersisted(p)));
+  const notes: Record<string, string> = {};
+  const edits: Record<string, RosterUnitEditVM> = {};
+  const canDismissAny = campaign.roster.length > 1;
+
+  for (const p of campaign.roster) {
+    const live = hydratePersisted(p);
+    const progress = jobProgress(live, live.currentJob);
+    notes[p.id] = `${progress.jp} JP · Job Lv ${jobLevelOf(live, live.currentJob)}`;
+    edits[p.id] = rosterUnitEdit(live, campaign.inventory, canDismissAny);
+  }
+
+  return {
+    title: opts.title ?? 'Roster',
+    units,
+    gil: campaign.gil,
+    notes,
+    edits,
+  };
+}
+
+function rosterUnitEdit(
+  unit: Unit,
+  inventory: Readonly<Record<string, number>>,
+  canDismiss: boolean,
+): RosterUnitEditVM {
+  const equipment: RosterEquipSlotVM[] = EQUIP_SLOT_ORDER.map((slot) => {
+    const itemId = unit.equipment[slot];
+    const item = itemId !== undefined ? findItem(itemId) : undefined;
+    return {
+      slot,
+      label: EQUIP_SLOT_LABELS[slot],
+      ...(itemId !== undefined ? { itemId } : {}),
+      ...(item ? { itemName: item.name } : {}),
+    };
+  });
+
+  const invRows = Object.entries(inventory)
+    .filter(([, n]) => n > 0)
+    .map(([id, count]) => {
+      const item = findItem(id);
+      return {
+        id,
+        name: item?.name ?? id,
+        count,
+        canEquip: canEquipItem(unit, id),
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    unitId: unit.id,
+    equipment,
+    inventory: invRows,
+    canDismiss,
+  };
+}
+
+function hydratePersisted(p: PersistedUnit): Unit {
+  return unitFromPersisted(p, {
+    team: 'player',
+    pos: { x: 0, y: 0, z: 0 },
+    facing: 'S',
+  });
+}
+
+/** Minimal battle shell so unitVM can run without a live fight. */
+function emptyBattleStub(): BattleState {
+  const tile = {
+    x: 0,
+    y: 0,
+    height: 0,
+    depth: Infinity,
+    surface: 'grass' as const,
+    slope: 'flat' as const,
+    passable: true,
+    submerged: false,
+  };
+  return {
+    field: {
+      width: 1,
+      height: 1,
+      tiles: [tile],
+      mapId: 'stub',
+      tileAt(x: number, y: number) {
+        return x === 0 && y === 0 ? tile : undefined;
+      },
+    },
+    units: new Map(),
+    order: [],
+    phase: 'deploy',
+    tick: 0,
+    rngState: 0,
+    log: [],
+    objective: { kind: 'defeat-all' },
   };
 }
