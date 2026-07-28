@@ -19,6 +19,7 @@ import {
   unitToPersisted,
 } from './campaign';
 import { allJobs } from './jobs';
+import { unlockStatus, type UnlockContext } from './jobs/tree';
 import type {
   AbilityId,
   AbilitySetId,
@@ -35,18 +36,34 @@ import {
   getItem,
   getJob,
   jobProgress,
-  jobUnlocked,
   learnAbility,
   refreshDerived,
   setJob,
 } from './unit';
 
-/** True when the unit may switch into `jobId` (prereqs met, currently in it, or held it). */
-export function canSwitchToJob(unit: Unit, jobId: JobId): boolean {
+/**
+ * True when the unit may switch into `jobId`.
+ *
+ * Uses {@link unlockStatus} as the canonical gate (job prereqs, gender locks,
+ * kill conditions). Previously held jobs stay selectable so a scenario Knight
+ * can leave and return without re-grinding Squire — but only for job-level
+ * prereqs. Gender locks and kill/special conditions always bind: banked JP
+ * must never open Dark Knight without kills, or Bard for a female unit.
+ */
+export function canSwitchToJob(
+  unit: Unit,
+  jobId: JobId,
+  ctx: UnlockContext = {},
+): boolean {
   if (unit.currentJob === jobId) return true;
-  if (jobUnlocked(unit, jobId)) return true;
-  // Previously held: any total JP banked in the job keeps it selectable, so a
-  // scenario Knight who tries Monk can return without re-satisfying Squire gates.
+  const status = unlockStatus(unit, jobId, ctx);
+  if (status.unlocked) return true;
+  // Gender-locked against this unit: never open, held-JP or not.
+  if (status.genderLocked !== undefined) return false;
+  // Kill gates / special conditions always bind — banked JP is not a bypass.
+  if (!status.specialMet) return false;
+  // Previously held (job-prereq shortfall only): any total JP banked keeps it
+  // selectable so a scenario Knight can leave and return without re-grinding.
   const progress = unit.jobs.get(jobId);
   return (progress?.totalJp ?? 0) > 0;
 }
@@ -433,6 +450,7 @@ export function changeJob(
   unitId: UnitId,
   jobId: JobId,
   timestamp: number,
+  ctx: UnlockContext = {},
 ): PartyMutateResult {
   const index = campaign.roster.findIndex((u) => u.id === unitId);
   if (index < 0) return { ok: false, reason: 'unknown-unit' };
@@ -441,7 +459,7 @@ export function changeJob(
   if (unit.currentJob === jobId) {
     return { ok: true, campaign };
   }
-  if (!canSwitchToJob(unit, jobId)) {
+  if (!canSwitchToJob(unit, jobId, ctx)) {
     return { ok: false, reason: 'job-locked' };
   }
 

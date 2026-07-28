@@ -234,6 +234,11 @@ export interface JobScreenVM {
   slots: readonly AbilitySlotVM[];
   /** Job id the panel is focused on. */
   selectedJob: string;
+  /**
+   * When false the screen is a mid-battle viewer: job change, learn and slot
+   * assign intents are not emitted. Omitted / true means editable.
+   */
+  editable?: boolean;
 }
 
 export interface FormationSlotVM {

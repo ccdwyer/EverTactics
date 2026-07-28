@@ -72,8 +72,11 @@ export class FormationScreen extends Screen {
     this.buildSlate();
     this.rosterList.setItems(vm.roster, true);
     const used = vm.slots.filter((s) => s.unitId).length;
+    const locked = vm.slots.length > 0 && vm.slots.every((s) => s.locked === true);
     this.counter.textContent = `${used} / ${vm.maxDeployed} deployed`;
-    this.confirmBtn.disabled = used === 0;
+    // Mid-battle viewer: every slot is locked — confirm is not available.
+    this.confirmBtn.disabled = used === 0 || locked;
+    this.confirmBtn.textContent = locked ? 'View Only' : 'Begin Battle';
     this.applyPane();
   }
 

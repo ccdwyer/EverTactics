@@ -62,7 +62,6 @@ import { createAiWorld, decideTurn, type AiWorld } from '@core/ai';
 import {
   battleToCampaign,
   createCampaign,
-  unitFromPersisted,
   unitToPersisted,
   type CampaignState,
   type FormationEntry,
@@ -81,36 +80,26 @@ import {
 } from '@core/grid';
 import { getJob } from '@core/jobs';
 import {
-  assignAbilitySlot,
-  changeJob,
-  dismissUnit,
-  equipItem,
-  renameUnit,
-  setFormation,
-  spendJpToLearn,
-  unequipItem,
-} from '@core/party';
-import {
   deriveStats,
   effectiveRange,
-  equipmentMods,
   isKO,
   jobProgress,
-  reconcileGearStatuses,
-  refreshDerived,
-  setRawStats,
 } from '@core/unit';
 import type {
   Ability,
   BattleEvent,
   BattleState,
   Command,
-  ItemId,
   JobId,
   Unit,
   UnitId,
   Vec3,
 } from '@core/types';
+import {
+  dispatchPartyIntent,
+  partyEditAllowed,
+  type PartyMutationIntent,
+} from './partyEdit';
 
 import { IsoCamera, TILE_SIZE } from '@render/camera';
 import { LightingRig } from '@render/lighting';
@@ -1153,15 +1142,15 @@ export class Game {
       // While a screen is up it owns the keyboard; `UIRoot`'s own focus stack
       // handles navigation and Escape.
       if (this.ui.currentScreen !== null) return;
-      if (!this.scenario.layers.ui || this.battleOver) return;
-      // Formation / roster / job all mutate campaign (and can relaunch the
-      // field). Never open them under AI, animations, or targeting.
-      if (!this.canOpenPartyScreen()) return;
+      if (!this.scenario.layers.ui) return;
+      // Mid-battle: open only during the player's command prompt (read-only).
+      // Between battles (`battleOver`): always open (editable).
+      if (!this.battleOver && !this.canOpenPartyScreenMidBattle()) return;
 
       switch (ev.code) {
         case 'KeyJ': {
-          const unit = this.screenSubject();
-          if (unit) this.openJobScreen(unit);
+          const unitId = this.screenSubjectId();
+          if (unitId) this.openJobScreenById(unitId);
           break;
         }
         case 'KeyF':
@@ -1169,7 +1158,10 @@ export class Game {
           break;
         case 'KeyP':
           this.ui.openRosterScreen(
-            campaignRosterScreenVM(this.campaign, { title: 'Company Roster' }),
+            campaignRosterScreenVM(this.campaign, {
+              title: 'Company Roster',
+              editable: this.partyEditingAllowed(),
+            }),
           );
           break;
         default:
@@ -1182,36 +1174,62 @@ export class Game {
   }
 
   /**
-   * Party meta-screens (job / formation / roster) only open while the player
-   * holds the command prompt and nothing is resolving. Formation confirm
-   * relaunches the battle; equip rewrites loadouts — both are unsafe under AI,
-   * targeting, or mid-animation.
+   * Mid-battle: party screens open only while the player holds the command
+   * prompt and nothing is resolving. After the battle ends they open freely
+   * (and are editable).
    */
-  private canOpenPartyScreen(): boolean {
-    if (this.busy || this.battleOver) return false;
+  private canOpenPartyScreenMidBattle(): boolean {
+    if (this.busy) return false;
     if (this.mode.kind !== 'command') return false;
     const unit = this.activeUnit();
     return unit !== undefined && unit.team === 'player';
   }
 
   /**
-   * Whose sheet `J` opens.
-   *
-   * Only while the player actually holds the turn and nothing is resolving: the
-   * screen mutates the unit (job, learned abilities, loadout) and doing that
-   * underneath a running animation or a half-chosen target would desynchronise
-   * the field from the state the reducer is about to validate against.
+   * True while a fight is in progress. Party editors refuse every mutation
+   * until victory/defeat folds the battle back into the campaign.
    */
-  private screenSubject(): Unit | undefined {
-    if (!this.canOpenPartyScreen()) return undefined;
-    return this.activeUnit();
+  private isBattleLive(): boolean {
+    return !this.battleOver;
   }
 
-  private openJobScreen(unit: Unit): void {
-    this.openJobScreenById(unit.id);
+  /** Between battles only — the campaign is the sole write target. */
+  private partyEditingAllowed(): boolean {
+    return partyEditAllowed(this.isBattleLive());
   }
 
-  /** Open the job tree for a roster member — works for benched units too. */
+  /**
+   * Route a party-screen UIIntent through the production dispatcher.
+   * Mid-battle every mutation is refused; between battles the campaign updates.
+   */
+  private applyPartyIntent(intent: PartyMutationIntent): boolean {
+    const result = dispatchPartyIntent(
+      this.campaign,
+      this.isBattleLive(),
+      intent,
+      { timestamp: Date.now() },
+    );
+    if (!result.ok) {
+      this.ui.sound('error');
+      return false;
+    }
+    this.persistCampaign(result.campaign);
+    this.ui.sound('confirm');
+    return true;
+  }
+
+  /**
+   * Whose sheet `J` opens — active unit mid-battle, or first roster member
+   * between battles.
+   */
+  private screenSubjectId(): UnitId | undefined {
+    if (this.battleOver) {
+      return this.campaign.roster[0]?.id;
+    }
+    if (!this.canOpenPartyScreenMidBattle()) return undefined;
+    return this.activeUnit()?.id;
+  }
+
   private openJobScreenById(unitId: UnitId): void {
     const persisted = this.campaign.roster.find((u) => u.id === unitId);
     if (!persisted) {
@@ -1220,7 +1238,9 @@ export class Game {
     }
     this.screenUnit = unitId;
     this.screenJob = persisted.currentJob;
-    const vm = campaignJobScreenVM(this.campaign, unitId, persisted.currentJob);
+    const vm = campaignJobScreenVM(this.campaign, unitId, persisted.currentJob, {}, {
+      editable: this.partyEditingAllowed(),
+    });
     if (!vm) {
       this.ui.sound('error');
       return;
@@ -1235,56 +1255,22 @@ export class Game {
       this.campaign,
       this.screenUnit,
       this.screenJob ?? undefined,
+      {},
+      { editable: this.partyEditingAllowed() },
     );
     if (!vm) return;
     this.ui.updateJobScreen(vm);
   }
 
   private onSetJob(unitId: UnitId, jobId: JobId): void {
-    // Campaign first — never mutate the field unit until validation succeeds.
-    const result = changeJob(this.campaign, unitId, jobId, Date.now());
-    if (!result.ok) {
-      this.ui.sound('error');
-      this.pushJobScreen();
-      return;
-    }
-    this.persistCampaign(result.campaign);
-    this.screenJob = jobId;
-    this.mirrorUnitFromCampaign(unitId);
-    this.ui.sound('confirm');
+    const ok = this.applyPartyIntent({ kind: 'set-job', unitId, jobId });
+    if (ok) this.screenJob = jobId;
     this.pushJobScreen();
-    this.refreshHud();
   }
 
   private onLearnAbility(unitId: UnitId, jobId: JobId, abilityId: string): void {
-    const result = spendJpToLearn(this.campaign, unitId, jobId, abilityId, Date.now());
-    if (!result.ok) {
-      this.ui.sound('error');
-      this.pushJobScreen();
-      return;
-    }
-    this.persistCampaign(result.campaign);
-    this.mirrorUnitFromCampaign(unitId);
-    this.ui.sound('confirm');
+    this.applyPartyIntent({ kind: 'learn-ability', unitId, jobId, abilityId });
     this.pushJobScreen();
-  }
-
-  /** Swap the unit's sprite sheet on the field after a job change. */
-  private async reloadSprite(unit: Unit): Promise<void> {
-    const existing = this.sprites.get(unit.id);
-    if (!existing || existing.sheet.key === unit.sprite.sheet) return;
-    this.sprites.remove(unit.id);
-    try {
-      const sprite = await this.sprites.add(unit);
-      markAsSprite(sprite.object);
-      this.syncSprite(unit, sprite);
-      const active = this.activeUnit();
-      const isActive = active !== undefined && active.id === unit.id;
-      sprite.setTurnMarker(isActive);
-      sprite.setSelection(isActive ? 'active' : 'none');
-    } catch (err) {
-      console.error(`[game] sprite reload for ${unit.name} (${unit.sprite.sheet}) failed:`, err);
-    }
   }
 
   private onAssignSlot(
@@ -1292,16 +1278,7 @@ export class Game {
     slot: 'secondary' | 'reaction' | 'support' | 'movement',
     abilityId: string | null,
   ): void {
-    // Campaign validates learned/unlocked; only then mirror to the field unit.
-    const result = assignAbilitySlot(this.campaign, unitId, slot, abilityId, Date.now());
-    if (!result.ok) {
-      this.ui.sound('error');
-      this.pushJobScreen();
-      return;
-    }
-    this.persistCampaign(result.campaign);
-    this.mirrorUnitFromCampaign(unitId);
-    this.ui.sound('confirm');
+    this.applyPartyIntent({ kind: 'assign-slot', unitId, slot, abilityId });
     this.pushJobScreen();
   }
 
@@ -1326,12 +1303,13 @@ export class Game {
       startIndex: i,
     }));
     // Starter stock so the roster equip pane is not an empty box on day one.
+    // Consumable ids mirror the Item skillset (`use-potion`, not `potion`).
     if (Object.keys(campaign.inventory).length === 0) {
       campaign.inventory = {
         'long-sword': 1,
         rod: 1,
         buckler: 1,
-        potion: 3,
+        'use-potion': 3,
       };
     }
     if (opts.persist !== false) saveCampaign(campaign);
@@ -1341,23 +1319,6 @@ export class Game {
   private persistCampaign(next: CampaignState): void {
     this.campaign = next;
     saveCampaign(next);
-  }
-
-  /**
-   * Keep `BattleState.inventories` aligned with the campaign after equip /
-   * unequip / dismiss. `battleToCampaign` prefers the battle stock when present;
-   * leaving it stale after a roster equip re-materialises items the player just
-   * wore and drops gear that was displaced into inventory.
-   */
-  private syncBattleInventoryFromCampaign(): void {
-    const stock = new Map<ItemId, number>();
-    for (const [id, n] of Object.entries(this.campaign.inventory)) {
-      if (n > 0) stock.set(id, n);
-    }
-    if (!this.state.inventories) {
-      this.state.inventories = new Map();
-    }
-    this.state.inventories.set('player', stock);
   }
 
   /** Map-authored deploy tiles — not the scenario cast's combat positions. */
@@ -1375,15 +1336,23 @@ export class Game {
   private openFormationScreen(): void {
     const startTiles = this.playerStartTiles();
     this.formationDraft = (this.campaign.formation ?? []).map((e) => ({ ...e }));
-    // If the slate is empty, seed from currently deployed player units.
+    // If the slate is empty, seed from currently deployed player units / roster.
     if (this.formationDraft.length === 0) {
-      const players = [...this.state.units.values()].filter(
-        (u) => u.team === 'player' && !u.removed,
-      );
-      this.formationDraft = players.map((u, i) => ({
-        unitId: u.id,
-        startIndex: i,
-      }));
+      if (this.isBattleLive()) {
+        const players = [...this.state.units.values()].filter(
+          (u) => u.team === 'player' && !u.removed,
+        );
+        this.formationDraft = players.map((u, i) => ({
+          unitId: u.id,
+          startIndex: i,
+        }));
+      } else {
+        const n = Math.min(this.campaign.roster.length, startTiles.length);
+        this.formationDraft = this.campaign.roster.slice(0, n).map((u, i) => ({
+          unitId: u.id,
+          startIndex: i,
+        }));
+      }
     }
     this.ui.openFormationScreen(
       campaignFormationScreenVM(this.campaign, {
@@ -1391,6 +1360,7 @@ export class Game {
         formation: this.formationDraft,
         subtitle: this.scenario.name,
         maxDeployed: startTiles.length,
+        editable: this.partyEditingAllowed(),
       }),
     );
   }
@@ -1403,11 +1373,18 @@ export class Game {
         formation: this.formationDraft,
         subtitle: this.scenario.name,
         maxDeployed: startTiles.length,
+        editable: this.partyEditingAllowed(),
       }),
     );
   }
 
   private onFormationAssign(index: number, unitId: string | null): void {
+    // Draft edits are also campaign-bound; mid-battle the slate is read-only.
+    if (!this.partyEditingAllowed()) {
+      this.ui.sound('error');
+      this.pushFormationScreen();
+      return;
+    }
     const startTiles = this.playerStartTiles();
     if (index < 0 || index >= startTiles.length) {
       this.ui.sound('error');
@@ -1428,15 +1405,18 @@ export class Game {
 
   private onFormationConfirm(): void {
     const startTiles = this.playerStartTiles();
-    // Write mid-battle progress back first so JP/exp/inventory are not wiped
-    // when the field is rebuilt from the campaign.
-    this.syncBattleInventoryFromCampaign();
-    const written = battleToCampaign(this.campaign, this.state, Date.now());
-    const result = setFormation(written, this.formationDraft, {
-      startTileCount: startTiles.length,
-      maxDeployed: startTiles.length,
-      timestamp: Date.now(),
-    });
+    // Campaign only — never write into a live BattleState from here.
+    const result = dispatchPartyIntent(
+      this.campaign,
+      this.isBattleLive(),
+      { kind: 'formation-confirm' },
+      {
+        timestamp: Date.now(),
+        startTileCount: startTiles.length,
+        maxDeployed: startTiles.length,
+        formation: this.formationDraft,
+      },
+    );
     if (!result.ok) {
       this.ui.sound('error');
       return;
@@ -1444,14 +1424,14 @@ export class Game {
     this.persistCampaign(result.campaign);
     this.ui.sound('confirm');
     this.ui.closeScreen();
-    // Production path: the saved formation becomes the live party.
+    // Between battles: launch the next fight from the saved formation.
     void this.relaunchFromCampaign();
   }
 
   /**
    * Tear down the current field and rebuild it from the campaign via
-   * {@link campaignToBattle}. Formation confirm and any future "begin battle"
-   * entry point share this path so the test and the product cannot disagree.
+   * {@link campaignToBattle}. This is the sole campaign → battle entry point
+   * (paired with battleToCampaign at battle end).
    */
   private async relaunchFromCampaign(): Promise<void> {
     if (this.disposed) return;
@@ -1482,157 +1462,44 @@ export class Game {
   }
 
   private onEquipItem(unitId: UnitId, itemId: string): void {
-    const result = equipItem(this.campaign, unitId, itemId, Date.now());
-    if (!result.ok) {
-      this.ui.sound('error');
-      return;
+    if (this.applyPartyIntent({ kind: 'equip-item', unitId, itemId })) {
+      this.refreshRosterIfOpen();
     }
-    this.persistCampaign(result.campaign);
-    this.syncBattleInventoryFromCampaign();
-    this.mirrorUnitFromCampaign(unitId);
-    this.ui.sound('confirm');
-    this.refreshRosterIfOpen();
-    this.refreshHud();
   }
 
   private onUnequipItem(
     unitId: UnitId,
     slot: 'rightHand' | 'leftHand' | 'head' | 'body' | 'accessory',
   ): void {
-    const result = unequipItem(this.campaign, unitId, slot, Date.now());
-    if (!result.ok) {
-      this.ui.sound('error');
-      return;
+    if (this.applyPartyIntent({ kind: 'unequip-item', unitId, slot })) {
+      this.refreshRosterIfOpen();
     }
-    this.persistCampaign(result.campaign);
-    this.syncBattleInventoryFromCampaign();
-    this.mirrorUnitFromCampaign(unitId);
-    this.ui.sound('confirm');
-    this.refreshRosterIfOpen();
-    this.refreshHud();
   }
 
   private onRenameUnit(unitId: UnitId, name: string): void {
-    const result = renameUnit(this.campaign, unitId, name, Date.now());
-    if (!result.ok) {
-      this.ui.sound('error');
-      return;
+    if (this.applyPartyIntent({ kind: 'rename-unit', unitId, name })) {
+      this.refreshRosterIfOpen();
     }
-    this.persistCampaign(result.campaign);
-    this.mirrorUnitFromCampaign(unitId);
-    this.ui.sound('confirm');
-    this.refreshRosterIfOpen();
-    this.refreshHud();
   }
 
   private onDismissUnit(unitId: UnitId): void {
-    const onField = this.state.units.has(unitId);
-
-    // Fielded dismiss: write battle progress back, then dismiss, then relaunch.
-    // Never delete from BattleState.units outside applyCommand — that strands
-    // `state.active` and desyncs the turn loop.
-    if (onField) {
-      this.syncBattleInventoryFromCampaign();
-      const written = battleToCampaign(this.campaign, this.state, Date.now());
-      const result = dismissUnit(written, unitId, Date.now());
-      if (!result.ok) {
-        this.ui.sound('error');
-        return;
-      }
-      this.persistCampaign(result.campaign);
-      this.formationDraft = this.formationDraft.filter((e) => e.unitId !== unitId);
-      if (this.screenUnit === unitId) {
-        this.screenUnit = null;
-        this.screenJob = null;
-      }
-      this.ui.sound('confirm');
-      this.ui.closeScreen();
-      void this.relaunchFromCampaign();
-      return;
-    }
-
-    const result = dismissUnit(this.campaign, unitId, Date.now());
-    if (!result.ok) {
-      this.ui.sound('error');
-      return;
-    }
-    this.persistCampaign(result.campaign);
-    this.syncBattleInventoryFromCampaign();
+    if (!this.applyPartyIntent({ kind: 'dismiss-unit', unitId })) return;
     this.formationDraft = this.formationDraft.filter((e) => e.unitId !== unitId);
     if (this.screenUnit === unitId) {
       this.screenUnit = null;
       this.screenJob = null;
       this.ui.closeScreen();
     }
-    this.ui.sound('confirm');
     this.refreshRosterIfOpen();
-    this.refreshHud();
-  }
-
-  /**
-   * Copy campaign loadout / job / name onto a fielded unit after a successful
-   * party mutation. No-op when the unit is benched (not in the current battle).
-   *
-   * This is a meta-layer mirror (campaign is source of truth), not a battle
-   * command: CT, turn flags, position, and non-gear statuses are preserved.
-   * Gear-granted statuses are reconciled so equipping a Reflect Ring mid-battle
-   * actually grants Reflect.
-   */
-  private mirrorUnitFromCampaign(unitId: UnitId): void {
-    const unit = this.state.units.get(unitId);
-    const persisted = this.campaign.roster.find((u) => u.id === unitId);
-    if (!unit || !persisted) return;
-
-    const beforeSheet = unit.sprite.sheet;
-    const previousGranted = equipmentMods(unit).granted;
-
-    // Rebuild the combat fields that party edits touch, preserving CT / turn /
-    // position so mid-battle equip and rename stay honest.
-    const rebuilt = unitFromPersisted(persisted, {
-      team: unit.team,
-      pos: unit.pos,
-      facing: unit.facing,
-    });
-    unit.name = rebuilt.name;
-    unit.currentJob = rebuilt.currentJob;
-    unit.jobs = rebuilt.jobs;
-    unit.equipment = { ...rebuilt.equipment };
-    setRawStats(unit, {
-      hp: rebuilt.rawHp ?? rebuilt.stats.maxHp,
-      mp: rebuilt.rawMp ?? rebuilt.stats.maxMp,
-      pa: rebuilt.stats.pa,
-      ma: rebuilt.stats.ma,
-      spd: rebuilt.stats.spd,
-    });
-    unit.stats.brave = rebuilt.stats.brave;
-    unit.stats.faith = rebuilt.stats.faith;
-    unit.sprite = { ...rebuilt.sprite };
-    if (rebuilt.secondaryAction !== undefined) unit.secondaryAction = rebuilt.secondaryAction;
-    else delete unit.secondaryAction;
-    if (rebuilt.reaction !== undefined) unit.reaction = rebuilt.reaction;
-    else delete unit.reaction;
-    if (rebuilt.support !== undefined) unit.support = rebuilt.support;
-    else delete unit.support;
-    if (rebuilt.movement !== undefined) unit.movement = rebuilt.movement;
-    else delete unit.movement;
-
-    reconcileGearStatuses(unit, previousGranted);
-
-    const beforeHp = unit.stats.hp;
-    const beforeMp = unit.stats.mp;
-    refreshDerived(unit);
-    unit.stats.hp = Math.min(beforeHp, unit.stats.maxHp);
-    unit.stats.mp = Math.min(beforeMp, unit.stats.maxMp);
-
-    if (unit.sprite.sheet !== beforeSheet) {
-      void this.reloadSprite(unit);
-    }
   }
 
   private refreshRosterIfOpen(): void {
     if (this.ui.currentScreen !== 'roster') return;
     this.ui.updateRosterScreen(
-      campaignRosterScreenVM(this.campaign, { title: 'Company Roster' }),
+      campaignRosterScreenVM(this.campaign, {
+        title: 'Company Roster',
+        editable: this.partyEditingAllowed(),
+      }),
     );
   }
 

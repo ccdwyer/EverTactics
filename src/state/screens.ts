@@ -117,7 +117,7 @@ export function jobNodeVMs(unit: Unit, ctx: UnlockContext = {}): JobNodeVM[] {
     // Must match `canSwitchToJob` in core/party.ts — UI and mutation gate must
     // agree or the panel shows a job as open and changeJob silently refuses.
     const current = job.id === unit.currentJob;
-    const unlocked = canSwitchToJob(unit, job.id);
+    const unlocked = canSwitchToJob(unit, job.id, ctx);
     const requirement = unlocked ? undefined : requirementText(unit, job.id, ctx);
     const priced = pricedLearnables(job);
     out.push({
@@ -268,6 +268,7 @@ export function jobScreenVM(
   unit: Unit,
   selectedJob?: JobId,
   ctx: UnlockContext = {},
+  opts: { editable?: boolean } = {},
 ): JobScreenVM {
   const selected = selectedJob !== undefined && JOBS.has(selectedJob) ? selectedJob : unit.currentJob;
   // Touch the record so a unit that has never entered its own job still reports
@@ -279,6 +280,7 @@ export function jobScreenVM(
     learnables: learnableVMs(unit, selected),
     slots: abilitySlotVMs(unit, ctx),
     selectedJob: selected,
+    ...(opts.editable === false ? { editable: false } : {}),
   };
 }
 
@@ -292,11 +294,12 @@ export function campaignJobScreenVM(
   unitId: UnitId,
   selectedJob?: JobId,
   ctx: UnlockContext = {},
+  opts: { editable?: boolean } = {},
 ): JobScreenVM | null {
   const persisted = campaign.roster.find((u) => u.id === unitId);
   if (!persisted) return null;
   const unit = hydratePersisted(persisted);
-  return jobScreenVM(emptyBattleStub(), unit, selectedJob ?? unit.currentJob, ctx);
+  return jobScreenVM(emptyBattleStub(), unit, selectedJob ?? unit.currentJob, ctx, opts);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -382,11 +385,14 @@ export function campaignFormationScreenVM(
     title?: string;
     subtitle?: string;
     maxDeployed?: number;
+    /** False mid-battle — every slot is locked (viewer only). Default true. */
+    editable?: boolean;
   },
 ): FormationScreenVM {
   const startTiles = opts.startTiles;
   const max = opts.maxDeployed ?? startTiles.length;
   const formation = opts.formation ?? campaign.formation ?? [];
+  const locked = opts.editable === false;
   const bySlot = new Map<number, UnitId>();
   for (const entry of formation) {
     if (entry.startIndex >= 0 && entry.startIndex < max) {
@@ -402,6 +408,7 @@ export function campaignFormationScreenVM(
       index: i,
       ...(unitId !== undefined ? { unitId } : {}),
       ...(tile ? { tile: tileLabel(tile.x, tile.y) } : {}),
+      ...(locked ? { locked: true } : {}),
     });
   }
 
@@ -432,22 +439,40 @@ const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {
   accessory: 'Accessory',
 };
 
-/** Company-wide roster ledger (every persisted member, not just those on the field). */
+/**
+ * Company-wide roster ledger (every persisted member, not just those on the field).
+ *
+ * When `editable` is false (mid-battle), `edits` is omitted so the screen is a
+ * read-only ledger — no equip / rename / dismiss chrome.
+ */
 export function campaignRosterScreenVM(
   campaign: CampaignState,
-  opts: { title?: string } = {},
+  opts: { title?: string; editable?: boolean } = {},
 ): RosterScreenVM {
   const stateStub = emptyBattleStub();
   const units = campaign.roster.map((p) => unitVM(stateStub, hydratePersisted(p)));
   const notes: Record<string, string> = {};
-  const edits: Record<string, RosterUnitEditVM> = {};
   const canDismissAny = campaign.roster.length > 1;
+  const editable = opts.editable !== false;
 
   for (const p of campaign.roster) {
     const live = hydratePersisted(p);
     const progress = jobProgress(live, live.currentJob);
     notes[p.id] = `${progress.jp} JP · Job Lv ${jobLevelOf(live, live.currentJob)}`;
-    edits[p.id] = rosterUnitEdit(live, campaign.inventory, canDismissAny);
+  }
+
+  if (!editable) {
+    return {
+      title: opts.title ?? 'Roster',
+      units,
+      gil: campaign.gil,
+      notes,
+    };
+  }
+
+  const edits: Record<string, RosterUnitEditVM> = {};
+  for (const p of campaign.roster) {
+    edits[p.id] = rosterUnitEdit(hydratePersisted(p), campaign.inventory, canDismissAny);
   }
 
   return {

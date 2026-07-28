@@ -77,7 +77,10 @@ export class JobScreen extends Screen {
       },
       onConfirm: (a) => {
         const vm = this.vm;
-        if (!vm) return;
+        if (!vm || !this.isEditable()) {
+          play('error');
+          return;
+        }
         this.emit({ kind: 'learn-ability', unitId: vm.unit.id, jobId: vm.selectedJob, abilityId: a.id });
       },
     });
@@ -286,11 +289,16 @@ export class JobScreen extends Screen {
     this.jpMeter.set(node.totalJp % 1000, 1000, false);
   }
 
+  /** Mid-battle viewers set `editable: false`; mutations are refused. */
+  private isEditable(): boolean {
+    return this.vm?.editable !== false;
+  }
+
   private confirmJob(): void {
     const node = this.nodes[this.cursor];
     const vm = this.vm;
     if (!node || !vm) return;
-    if (!node.unlocked) {
+    if (!this.isEditable() || !node.unlocked) {
       play('error');
       this.treePanel.shake();
       return;
@@ -301,7 +309,10 @@ export class JobScreen extends Screen {
 
   private cycleSlot(slot: AbilitySlotVM, dir: number): void {
     const vm = this.vm;
-    if (!vm) return;
+    if (!vm || !this.isEditable()) {
+      play('error');
+      return;
+    }
     if (slot.options.length === 0) {
       play('error');
       return;

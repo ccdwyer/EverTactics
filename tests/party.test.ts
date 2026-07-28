@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { advance, applyCommand, evaluateObjective } from '../src/core/battle';
 import {
   battleToCampaign,
   createCampaign,
@@ -16,6 +17,7 @@ import {
   type CampaignState,
   type PersistedUnit,
 } from '../src/core/campaign';
+import { applyStatus } from '../src/core/combat/status';
 import { getMapDef } from '../src/core/grid';
 import {
   assignAbilitySlot,
@@ -38,7 +40,12 @@ import {
   reconcileGearStatuses,
 } from '../src/core/unit';
 import { bootstrapContent } from '../src/state/content';
+import {
+  dispatchPartyIntent,
+  type PartyMutationIntent,
+} from '../src/state/partyEdit';
 import { campaignToBattle, getScenario } from '../src/state/scenarios';
+import { jobNodeVMs } from '../src/state/screens';
 
 bootstrapContent();
 
@@ -313,22 +320,28 @@ describe('equip and unequip', () => {
     expect(result.campaign.inventory.defender).toBeUndefined();
   });
 
-  it('equip survives battleToCampaign when battle inventory is kept in sync', () => {
-    // Real lifecycle: equip on campaign, launch battle, equip again, write back.
-    // battleToCampaign reads battle.inventories when present — if that stock is
-    // stale the equipped item reappears and displaced gear vanishes.
+  it('consumed potions stay gone when the battle folds back into the campaign', () => {
+    // Brief: consume a Potion via applyCommand, end the battle through the same
+    // evaluateObjective path the reducer uses, then battleToCampaign (what
+    // Game.onBattleOver calls). No direct phase assignment, no HP hacking.
     const base = campaignOf(
       [
         unit({
           id: 'k',
           name: 'Knight',
-          currentJob: 'knight',
-          equipment: { rightHand: 'broadsword' },
+          currentJob: 'chemist',
+          jobs: {
+            chemist: {
+              level: 2,
+              jp: 100,
+              totalJp: 200,
+              learned: ['use-potion'],
+            },
+          },
         }),
       ],
-      { 'long-sword': 1 },
+      { 'use-potion': 3, 'long-sword': 1 },
     );
-    // Persist a legal formation so campaignToBattle deploys the unit.
     const formed = setFormation(base, [{ unitId: 'k', startIndex: 0 }], {
       startTileCount: 6,
       maxDeployed: 6,
@@ -337,26 +350,98 @@ describe('equip and unequip', () => {
     expect(formed.ok).toBe(true);
     if (!formed.ok) throw new Error('unreachable');
 
-    const equipped = equipItem(formed.campaign, 'k', 'long-sword', 2);
-    expect(equipped.ok).toBe(true);
-    if (!equipped.ok) throw new Error('unreachable');
-    expect(equipped.campaign.roster[0]!.equipment.rightHand).toBe('long-sword');
-    expect(equipped.campaign.inventory['long-sword']).toBeUndefined();
-    expect(equipped.campaign.inventory.broadsword).toBe(1);
-
     const scenario = getScenario('battle-open');
-    const built = campaignToBattle(equipped.campaign, scenario);
-    // Simulate the game sync: battle stock matches campaign after equip.
-    const stock = new Map<string, number>();
-    for (const [id, n] of Object.entries(equipped.campaign.inventory)) {
-      if (n > 0) stock.set(id, n);
-    }
-    built.state.inventories = new Map([['player', stock]]);
+    const built = campaignToBattle(formed.campaign, scenario);
+    const stockBefore = built.state.inventories?.get('player')?.get('use-potion') ?? 0;
+    expect(stockBefore).toBe(3);
 
-    const written = battleToCampaign(equipped.campaign, built.state, 3);
-    expect(written.roster[0]!.equipment.rightHand).toBe('long-sword');
-    expect(written.inventory['long-sword']).toBeUndefined();
-    expect(written.inventory.broadsword).toBe(1);
+    // Run the clock until the player unit holds the turn, then drink a Potion
+    // through the command reducer — stock falls whether or not HP was missing.
+    for (let i = 0; i < 80; i++) {
+      if (built.state.phase !== 'awaiting-command') advance(built.state);
+      if (built.state.active === 'k') break;
+      if (built.state.active === undefined) continue;
+      applyCommand(built.state, { kind: 'wait', unit: built.state.active });
+    }
+    expect(built.state.active).toBe('k');
+    const drinker = built.state.units.get('k')!;
+    applyCommand(built.state, {
+      kind: 'item',
+      unit: 'k',
+      item: 'use-potion',
+      target: { ...drinker.pos },
+    });
+    expect(built.state.inventories?.get('player')?.get('use-potion')).toBe(2);
+
+    // End the fight the way applyCommand does: KO every enemy, then
+    // evaluateObjective (not `phase = 'victory'`).
+    for (const u of built.state.units.values()) {
+      if (u.team !== 'enemy') continue;
+      u.stats.hp = 0;
+      applyStatus(u, 'ko', { duration: 3 });
+    }
+    expect(evaluateObjective(built.state)).toBe(true);
+    expect(built.state.phase).toBe('victory');
+
+    // Same fold Game.onBattleOver uses.
+    const written = battleToCampaign(formed.campaign, built.state, 99);
+    expect(written.inventory['use-potion']).toBe(2);
+    expect(written.inventory['long-sword']).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mid-battle edit gate — campaign only; live battle is read-only
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('party edit gate (mid-battle)', () => {
+  it('refuses party UIIntents while a battle is live; allows them between battles', () => {
+    // Production path: Game routes every equip / job / rename intent through
+    // dispatchPartyIntent. Removing the live guard there must break this test.
+    const c = campaignOf(
+      [unit({ id: 'k', name: 'Knight', currentJob: 'knight' })],
+      { 'long-sword': 1 },
+    );
+    const before = serialize(c);
+
+    const intents: PartyMutationIntent[] = [
+      { kind: 'equip-item', unitId: 'k', itemId: 'long-sword' },
+      { kind: 'set-job', unitId: 'k', jobId: 'squire' },
+      { kind: 'rename-unit', unitId: 'k', name: 'Hacked' },
+      { kind: 'dismiss-unit', unitId: 'k' },
+      { kind: 'learn-ability', unitId: 'k', jobId: 'knight', abilityId: 'counter' },
+      {
+        kind: 'formation-confirm',
+      },
+    ];
+
+    for (const intent of intents) {
+      const refused = dispatchPartyIntent(c, /* battleLive */ true, intent, {
+        timestamp: 1,
+        startTileCount: 4,
+        maxDeployed: 4,
+        formation: [{ unitId: 'k', startIndex: 0 }],
+      });
+      expect(refused.ok, intent.kind).toBe(false);
+      if (!refused.ok) expect(refused.reason).toBe('battle-live');
+    }
+    // Campaign bytes untouched — the equip branch must not land inventory writes.
+    expect(serialize(c)).toBe(before);
+    expect(c.inventory['long-sword']).toBe(1);
+    expect(c.roster[0]!.equipment.rightHand).toBeUndefined();
+    expect(c.roster[0]!.name).toBe('Knight');
+
+    // Same equip intent between battles succeeds and moves the item.
+    const allowed = dispatchPartyIntent(
+      c,
+      /* battleLive */ false,
+      { kind: 'equip-item', unitId: 'k', itemId: 'long-sword' },
+      { timestamp: 2 },
+    );
+    expect(allowed.ok).toBe(true);
+    if (!allowed.ok) throw new Error('unreachable');
+    expect(allowed.campaign.inventory['long-sword']).toBeUndefined();
+    expect(allowed.campaign.roster[0]!.equipment.rightHand).toBe('long-sword');
   });
 });
 
@@ -511,6 +596,130 @@ describe('job screen actions', () => {
     expect(restored.roster[0]!.currentJob).toBe('knight');
     const restoredStats = derivedStatsOf(restored.roster[0]!);
     expect(restoredStats.move).toBe(getJob('knight').move);
+  });
+
+  it('refuses gender-locked jobs — a female unit cannot become a Bard', () => {
+    // unlockStatus enforces GENDER_LOCKED; canSwitchToJob and changeJob must
+    // share that canonical gate, not the weaker jobUnlocked prereq check.
+    const female = campaignOf([
+      unit({
+        id: 'f',
+        name: 'Fara',
+        gender: 'female',
+        currentJob: 'squire',
+        jobs: {
+          squire: { level: 5, jp: 0, totalJp: 500, learned: [] },
+          summoner: { level: 5, jp: 0, totalJp: 500, learned: [] },
+          orator: { level: 5, jp: 0, totalJp: 500, learned: [] },
+          // Banked JP must NOT override the gender lock.
+          bard: { level: 1, jp: 0, totalJp: 100, learned: [] },
+        },
+      }),
+    ]);
+    const live = unitFromPersisted(female.roster[0]!, {
+      team: 'player',
+      pos: { x: 0, y: 0, z: 0 },
+      facing: 'S',
+    });
+    // jobUnlocked only checks job levels — it would wrongly say yes.
+    expect(jobUnlocked(live, 'bard')).toBe(true);
+    // Canonical gate: gender blocks Bard for women.
+    expect(canSwitchToJob(live, 'bard')).toBe(false);
+
+    const denied = changeJob(female, 'f', 'bard', 20);
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.reason).toBe('job-locked');
+    expect(female.roster[0]!.currentJob).toBe('squire');
+
+    // A male with the same prereqs may take Bard.
+    const male = campaignOf([
+      unit({
+        id: 'm',
+        name: 'Marc',
+        gender: 'male',
+        currentJob: 'squire',
+        jobs: {
+          squire: { level: 5, jp: 0, totalJp: 500, learned: [] },
+          summoner: { level: 5, jp: 0, totalJp: 500, learned: [] },
+          orator: { level: 5, jp: 0, totalJp: 500, learned: [] },
+        },
+      }),
+    ]);
+    const maleLive = unitFromPersisted(male.roster[0]!, {
+      team: 'player',
+      pos: { x: 0, y: 0, z: 0 },
+      facing: 'S',
+    });
+    expect(canSwitchToJob(maleLive, 'bard')).toBe(true);
+    const ok = changeJob(male, 'm', 'bard', 21);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error('unreachable');
+    expect(ok.campaign.roster[0]!.currentJob).toBe('bard');
+    expect(roundTrip(ok.campaign).roster[0]!.currentJob).toBe('bard');
+  });
+
+  it('refuses kill-gated jobs even with banked JP — Dark Knight needs 20 kills', () => {
+    // Historical-JP re-entry must not bypass SPECIAL_CONDITIONS. A unit with
+    // dark-knight JP and full job prereqs still cannot switch without kills.
+    const c = campaignOf([
+      unit({
+        id: 'k',
+        name: 'Knight',
+        currentJob: 'knight',
+        jobs: {
+          squire: { level: 8, jp: 0, totalJp: 3000, learned: [] },
+          knight: { level: 8, jp: 0, totalJp: 3000, learned: [] },
+          chemist: { level: 8, jp: 0, totalJp: 3000, learned: [] },
+          'black-mage': { level: 8, jp: 0, totalJp: 3000, learned: [] },
+          // Banked JP that previously bypassed the kill gate.
+          'dark-knight': { level: 1, jp: 0, totalJp: 500, learned: [] },
+        },
+      }),
+    ]);
+    const live = unitFromPersisted(c.roster[0]!, {
+      team: 'player',
+      pos: { x: 0, y: 0, z: 0 },
+      facing: 'S',
+    });
+
+    // No kills in context: locked, even with banked JP.
+    expect(canSwitchToJob(live, 'dark-knight', { kills: 0 })).toBe(false);
+    expect(canSwitchToJob(live, 'dark-knight', {})).toBe(false);
+    const denied = changeJob(c, 'k', 'dark-knight', 22, { kills: 0 });
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.reason).toBe('job-locked');
+    expect(c.roster[0]!.currentJob).toBe('knight');
+
+    // UI node must agree with the mutation gate under the same UnlockContext.
+    const nodesZero = jobNodeVMs(live, { kills: 0 });
+    const darkZero = nodesZero.find((n) => n.id === 'dark-knight');
+    expect(darkZero?.unlocked).toBe(false);
+
+    // With 20 kills: open.
+    expect(canSwitchToJob(live, 'dark-knight', { kills: 20 })).toBe(true);
+    const nodesOk = jobNodeVMs(live, { kills: 20 });
+    expect(nodesOk.find((n) => n.id === 'dark-knight')?.unlocked).toBe(true);
+    const ok = changeJob(c, 'k', 'dark-knight', 23, { kills: 20 });
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error('unreachable');
+    expect(ok.campaign.roster[0]!.currentJob).toBe('dark-knight');
+
+    // Death Knight: 30 kills, same rule — banked JP alone is not enough.
+    const deathLive = unitFromPersisted(
+      unit({
+        id: 'd',
+        name: 'Dark',
+        currentJob: 'dark-knight',
+        jobs: {
+          'dark-knight': { level: 3, jp: 0, totalJp: 700, learned: [] },
+          mystic: { level: 3, jp: 0, totalJp: 700, learned: [] },
+          'death-knight': { level: 1, jp: 0, totalJp: 200, learned: [] },
+        },
+      }),
+      { team: 'player', pos: { x: 0, y: 0, z: 0 }, facing: 'S' },
+    );
+    expect(canSwitchToJob(deathLive, 'death-knight', { kills: 29 })).toBe(false);
+    expect(canSwitchToJob(deathLive, 'death-knight', { kills: 30 })).toBe(true);
   });
 });
 

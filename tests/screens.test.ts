@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { allJobs, getJob } from '../src/core/jobs';
 import { jobLevelOf, unlockStatus } from '../src/core/jobs/tree';
+import { canSwitchToJob } from '../src/core/party';
 import { deriveStats, gainJp, jobProgress, learnAbility, setJob } from '../src/core/unit';
 import { bootstrapContent } from '../src/state/content';
 import { buildScenario, getScenario } from '../src/state/scenarios';
@@ -63,10 +64,11 @@ describe('jobNodeVMs', () => {
 
   it('agrees with core about which jobs are unlocked', () => {
     const unit = player(battle());
-    for (const node of jobNodeVMs(unit)) {
-      const held = (unit.jobs.get(node.id)?.totalJp ?? 0) > 0;
-      const expected = unlockStatus(unit, node.id).unlocked || node.id === unit.currentJob || held;
-      expect(node.unlocked, node.id).toBe(expected);
+    // Same UnlockContext must flow into both predicates (kills/gender gates).
+    const ctx = { kills: 0 };
+    for (const node of jobNodeVMs(unit, ctx)) {
+      // UI predicate and mutation gate must share canSwitchToJob (unlockStatus + held).
+      expect(node.unlocked, node.id).toBe(canSwitchToJob(unit, node.id, ctx));
     }
   });
 
