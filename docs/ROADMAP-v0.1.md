@@ -1,5 +1,15 @@
 # Road to v0.1
 
+> **STATUS: v0.1 is functionally complete** (steps 1-11 shipped). The loop closes, and that is
+> measured rather than asserted: a battle was driven to victory through real input and the campaign
+> survives a refresh with a byte-identical save — see `docs/V01-ACCEPTANCE.md` and
+> `shots/v01-victory/persistence-diff.md`.
+> 545 tests, typecheck clean, all four metrics gates green.
+>
+> What remains is polish (signature-ability VFX, camera work), not missing functionality.
+> The dependency-ordered plan below is kept as the record of how it was built.
+
+
 What exists today is a **battle engine with a demo scenario attached**. What v0.1 needs is a
 **game loop**. That distinction is the whole roadmap — most of the remaining work is not more
 battle features, it is the connective tissue that turns one fight into a campaign.
