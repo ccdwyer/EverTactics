@@ -124,3 +124,49 @@ silently. The brief said return null *and log*. A player in private-browsing mod
 with no console output is undebuggable.
 
 Add a test for each of the three.
+
+---
+
+## ROUND 3 — read this part first
+
+**The pattern across two rounds is not three separate bugs, it is one habit: tests are being written
+to confirm the behaviour the code has, rather than to assert the behaviour the brief requires.**
+
+- Round 2 defect 1: the test at `tests/campaign.test.ts:703` *explicitly asserts* that passing the
+  original campaign silently omits completion (lines 715-716). That is the bug, written down as an
+  expectation.
+- Round 2 defect 2: the round-trip fixture at `campaign.test.ts:179` pre-sorts `learned[]`, which
+  hides that `requireJobs` mutates it and breaks deep-equality.
+
+A green suite over a broken contract is worse than a red one. For every fix below, **write the test
+from the brief's wording first, watch it fail, then make it pass.** Do not adjust a fixture to
+accommodate the implementation.
+
+### Fix 1 — completion must not depend on which object the caller kept
+`campaignToBattle` (`src/state/scenarios.ts:328`) creates a fresh campaign at line 336 and returns
+it at 394, leaving the caller's original untouched; `battleToCampaign` (`campaign.ts:760`) then reads
+only its argument's `progress.current`. So the previous "remember the 4th argument" trap has become
+"remember to use `built.campaign`". Same trap, new shape.
+
+Make it work with the campaign the caller already has. Either `campaignToBattle` mutates
+`progress.current` on the passed campaign, or `battleToCampaign` derives the scenario from the
+`BattleState` itself. Delete the test that asserts the omission and replace it with one asserting
+completion IS recorded when the original campaign is passed.
+
+### Fix 2 — a current-version save must round-trip byte-identically
+Two violations, both confirmed by Sol at runtime:
+- `requireInventory` (`campaign.ts:368`) accepts a count of `0` then drops the entry at 376:
+  `{inventory:{"use-potion":0}}` returns `{inventory:{}}`.
+- `requireJobs` (`campaign.ts:520`) sorts `learned[]` at 552.
+
+Policy: **migration from an older version may transform; a current-version save is never rewritten.**
+Either preserve the value exactly or reject the save. Un-pre-sort the fixture at `campaign.test.ts:179`
+so the round-trip test can actually catch this.
+
+### Fix 3 — validate upper bounds, not just lower
+`requirePersistedUnit` (`campaign.ts:405`) checks only lower bounds at 423-437. Sol's probe accepted
+`brave: 1000`, `faith: 1000`, a level above the engine maximum of 99, and an arbitrary `currentJob`
+that does not exist in the job table. Validate against the real ranges and against `JOBS`.
+
+Verification was genuinely green last round (tsc 0, 464/464, campaign 23/23, shaders 2/2) and storage
+logging is now correct — keep all of that.

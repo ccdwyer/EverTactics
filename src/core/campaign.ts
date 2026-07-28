@@ -234,6 +234,12 @@ export function serialize(state: CampaignState): string {
 /**
  * Upgrade a parsed save blob to the current schema.
  * Throws with a clear message when the blob is not a recoverable campaign.
+ *
+ * Migration policy:
+ * - Older versions (version < CAMPAIGN_VERSION) may be upgraded and lightly
+ *   normalized (defaults filled, bad inventory counts dropped).
+ * - The *current* version must validate content fully. Corrupt current-version
+ *   saves fail loudly — never silently rewrite into a plausible empty campaign.
  */
 export function migrate(raw: unknown): CampaignState {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -241,7 +247,7 @@ export function migrate(raw: unknown): CampaignState {
   }
 
   const obj = raw as Record<string, unknown>;
-  const version = typeof obj.version === 'number' ? obj.version : 0;
+  const version = resolveSchemaVersion(obj);
 
   if (version > CAMPAIGN_VERSION) {
     throw new Error(
@@ -265,7 +271,7 @@ export function migrate(raw: unknown): CampaignState {
 
     const inventory = normalizeInventory(obj.inventory);
     const progress = normalizeProgress(obj.progress);
-    const roster = normalizeRoster(obj.roster);
+    const roster = normalizeRosterLenient(obj.roster);
 
     return {
       version: CAMPAIGN_VERSION,
@@ -279,45 +285,24 @@ export function migrate(raw: unknown): CampaignState {
     };
   }
 
-  // v1 (current): require the full shape. Missing or wrong-typed roster /
-  // inventory / progress must throw — silently wiping them to {} would brick a
-  // corrupt save into an empty campaign that loadCampaign treats as valid.
-  if (typeof obj.seed !== 'number' || !Number.isFinite(obj.seed)) {
-    throw new Error('campaign migrate: missing or invalid seed');
-  }
-  if (typeof obj.gil !== 'number' || !Number.isFinite(obj.gil)) {
-    throw new Error('campaign migrate: missing or invalid gil');
-  }
-  if (typeof obj.createdAt !== 'number' || !Number.isFinite(obj.createdAt)) {
-    throw new Error('campaign migrate: missing or invalid createdAt');
-  }
-  if (typeof obj.updatedAt !== 'number' || !Number.isFinite(obj.updatedAt)) {
-    throw new Error('campaign migrate: missing or invalid updatedAt');
-  }
-  if (!Array.isArray(obj.roster)) {
-    throw new Error('campaign migrate: missing or invalid roster');
-  }
-  if (obj.inventory === null || typeof obj.inventory !== 'object' || Array.isArray(obj.inventory)) {
-    throw new Error('campaign migrate: missing or invalid inventory');
-  }
-  if (obj.progress === null || typeof obj.progress !== 'object' || Array.isArray(obj.progress)) {
-    throw new Error('campaign migrate: missing or invalid progress');
-  }
-  const progressObj = obj.progress as Record<string, unknown>;
-  if (!Array.isArray(progressObj.completed)) {
-    throw new Error('campaign migrate: progress.completed must be an array');
-  }
+  // v1 (current): strict content validation. Any malformed field throws.
+  // Never floor, default, or drop — a corrupt current-version save fails loudly.
+  return parseCurrentVersion(obj);
+}
 
-  return {
-    version: CAMPAIGN_VERSION,
-    seed: obj.seed | 0,
-    gil: Math.max(0, Math.floor(obj.gil)),
-    roster: normalizeRoster(obj.roster),
-    inventory: normalizeInventory(obj.inventory),
-    progress: normalizeProgress(obj.progress),
-    createdAt: obj.createdAt,
-    updatedAt: obj.updatedAt,
-  };
+/**
+ * Schema version of a raw blob.
+ * - Missing `version` → treat as v0 (legacy hand-written saves).
+ * - Present but not a non-negative integer → reject (do not fall through to lenient migration).
+ */
+function resolveSchemaVersion(obj: Record<string, unknown>): number {
+  if (!('version' in obj) || obj.version === undefined) {
+    return 0;
+  }
+  if (!isFiniteInt(obj.version) || (obj.version as number) < 0) {
+    throw new Error('campaign migrate: invalid version (must be a non-negative integer)');
+  }
+  return obj.version as number;
 }
 
 export function deserialize(json: string): CampaignState {
@@ -330,6 +315,270 @@ export function deserialize(json: string): CampaignState {
   }
   return migrate(parsed);
 }
+
+// ─── current-version strict parse ────────────────────────────────────────────
+
+const GENDERS: ReadonlySet<string> = new Set(['male', 'female', 'monster']);
+const ZODIACS: ReadonlySet<string> = new Set([
+  'aries', 'taurus', 'gemini', 'cancer', 'leo', 'virgo',
+  'libra', 'scorpio', 'sagittarius', 'capricorn', 'aquarius', 'pisces',
+  'serpentarius',
+]);
+
+function parseCurrentVersion(obj: Record<string, unknown>): CampaignState {
+  if (!isFiniteInt(obj.seed)) {
+    throw new Error('campaign migrate: missing or invalid seed (must be an integer)');
+  }
+  if (!isFiniteInt(obj.gil) || (obj.gil as number) < 0) {
+    throw new Error('campaign migrate: missing or invalid gil (must be a non-negative integer)');
+  }
+  if (!isFiniteInt(obj.createdAt)) {
+    throw new Error('campaign migrate: missing or invalid createdAt (must be an integer)');
+  }
+  if (!isFiniteInt(obj.updatedAt)) {
+    throw new Error('campaign migrate: missing or invalid updatedAt (must be an integer)');
+  }
+  if (!Array.isArray(obj.roster)) {
+    throw new Error('campaign migrate: missing or invalid roster');
+  }
+  if (obj.inventory === null || typeof obj.inventory !== 'object' || Array.isArray(obj.inventory)) {
+    throw new Error('campaign migrate: missing or invalid inventory');
+  }
+  if (obj.progress === null || typeof obj.progress !== 'object' || Array.isArray(obj.progress)) {
+    throw new Error('campaign migrate: missing or invalid progress');
+  }
+
+  // Accept integers as-is — never floor fractions into a plausible save.
+  return {
+    version: CAMPAIGN_VERSION,
+    seed: obj.seed as number,
+    gil: obj.gil as number,
+    roster: requireRoster(obj.roster),
+    inventory: requireInventory(obj.inventory),
+    progress: requireProgress(obj.progress),
+    createdAt: obj.createdAt as number,
+    updatedAt: obj.updatedAt as number,
+  };
+}
+
+/**
+ * Current-version inventory: every entry must be a non-negative integer.
+ * Invalid counts reject the whole save — never drop keys or floor silently.
+ */
+function requireInventory(raw: object): Record<ItemId, number> {
+  const out: Record<ItemId, number> = {};
+  for (const [id, n] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isFiniteInt(n) || (n as number) < 0) {
+      throw new Error(
+        `campaign migrate: inventory["${id}"] must be a non-negative integer`,
+      );
+    }
+    if ((n as number) > 0) out[id] = n as number;
+  }
+  return out;
+}
+
+function requireProgress(raw: object): CampaignProgress {
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.completed)) {
+    throw new Error('campaign migrate: progress.completed must be an array');
+  }
+  for (let i = 0; i < obj.completed.length; i++) {
+    if (typeof obj.completed[i] !== 'string') {
+      throw new Error(`campaign migrate: progress.completed[${i}] must be a string`);
+    }
+  }
+  if (obj.current !== undefined && typeof obj.current !== 'string') {
+    throw new Error('campaign migrate: progress.current must be a string when present');
+  }
+  const progress: CampaignProgress = {
+    completed: [...(obj.completed as string[])],
+  };
+  if (typeof obj.current === 'string') progress.current = obj.current;
+  return progress;
+}
+
+function requireRoster(raw: unknown[]): PersistedUnit[] {
+  return raw.map((entry, index) => requirePersistedUnit(entry, index));
+}
+
+function requirePersistedUnit(raw: unknown, index: number): PersistedUnit {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`campaign migrate: roster[${index}] is not an object`);
+  }
+  const u = raw as Record<string, unknown>;
+  const path = `roster[${index}]`;
+
+  if (typeof u.id !== 'string') throw new Error(`campaign migrate: ${path}.id missing`);
+  if (typeof u.name !== 'string') throw new Error(`campaign migrate: ${path}.name missing`);
+  if (typeof u.currentJob !== 'string') {
+    throw new Error(`campaign migrate: ${path}.currentJob missing`);
+  }
+  if (typeof u.gender !== 'string' || !GENDERS.has(u.gender)) {
+    throw new Error(`campaign migrate: ${path}.gender invalid`);
+  }
+  if (typeof u.zodiac !== 'string' || !ZODIACS.has(u.zodiac)) {
+    throw new Error(`campaign migrate: ${path}.zodiac invalid`);
+  }
+  if (!isFiniteInt(u.level) || (u.level as number) < 1) {
+    throw new Error(`campaign migrate: ${path}.level invalid (must be integer >= 1)`);
+  }
+  if (!isFiniteNonNegInt(u.exp)) {
+    throw new Error(`campaign migrate: ${path}.exp invalid (must be non-negative integer)`);
+  }
+  // totalExp is required at the current schema version — never default to 0.
+  if (!isFiniteNonNegInt(u.totalExp)) {
+    throw new Error(`campaign migrate: ${path}.totalExp missing or invalid (must be non-negative integer)`);
+  }
+  if (!isFiniteNonNegInt(u.brave)) {
+    throw new Error(`campaign migrate: ${path}.brave invalid (must be non-negative integer)`);
+  }
+  if (!isFiniteNonNegInt(u.faith)) {
+    throw new Error(`campaign migrate: ${path}.faith invalid (must be non-negative integer)`);
+  }
+  if (u.raw === null || typeof u.raw !== 'object' || Array.isArray(u.raw)) {
+    throw new Error(`campaign migrate: ${path}.raw missing or invalid`);
+  }
+  if (u.jobs === null || typeof u.jobs !== 'object' || Array.isArray(u.jobs)) {
+    throw new Error(`campaign migrate: ${path}.jobs missing or invalid`);
+  }
+  if (u.equipment === null || typeof u.equipment !== 'object' || Array.isArray(u.equipment)) {
+    throw new Error(`campaign migrate: ${path}.equipment missing or invalid`);
+  }
+
+  const rawStats = requireRaw(u.raw as Record<string, unknown>, path);
+  const jobs = requireJobs(u.jobs as Record<string, unknown>, path);
+  // currentJob must have a progress row — never invent zeroed progress at load.
+  if (!(u.currentJob in jobs)) {
+    throw new Error(
+      `campaign migrate: ${path}.jobs must include an entry for currentJob "${u.currentJob}"`,
+    );
+  }
+  const equipment = requireEquipment(u.equipment as Record<string, unknown>, path);
+
+  const persisted: PersistedUnit = {
+    id: u.id,
+    name: u.name,
+    gender: u.gender as Gender,
+    zodiac: u.zodiac as Zodiac,
+    level: u.level as number,
+    exp: u.exp as number,
+    totalExp: u.totalExp as number,
+    currentJob: u.currentJob,
+    jobs,
+    equipment,
+    raw: rawStats,
+    brave: u.brave as number,
+    faith: u.faith as number,
+  };
+
+  if (u.secondaryAction !== undefined) {
+    if (typeof u.secondaryAction !== 'string') {
+      throw new Error(`campaign migrate: ${path}.secondaryAction invalid`);
+    }
+    persisted.secondaryAction = u.secondaryAction;
+  }
+  if (u.reaction !== undefined) {
+    if (typeof u.reaction !== 'string') {
+      throw new Error(`campaign migrate: ${path}.reaction invalid`);
+    }
+    persisted.reaction = u.reaction;
+  }
+  if (u.support !== undefined) {
+    if (typeof u.support !== 'string') {
+      throw new Error(`campaign migrate: ${path}.support invalid`);
+    }
+    persisted.support = u.support;
+  }
+  if (u.movement !== undefined) {
+    if (typeof u.movement !== 'string') {
+      throw new Error(`campaign migrate: ${path}.movement invalid`);
+    }
+    persisted.movement = u.movement;
+  }
+
+  return persisted;
+}
+
+function requireRaw(r: Record<string, unknown>, path: string): RawStats {
+  for (const key of ['hp', 'mp', 'pa', 'ma', 'spd'] as const) {
+    if (!isFiniteNonNegInt(r[key])) {
+      throw new Error(
+        `campaign migrate: ${path}.raw.${key} invalid (must be non-negative integer)`,
+      );
+    }
+  }
+  return {
+    hp: r.hp as number,
+    mp: r.mp as number,
+    pa: r.pa as number,
+    ma: r.ma as number,
+    spd: r.spd as number,
+  };
+}
+
+function requireJobs(
+  raw: Record<string, unknown>,
+  path: string,
+): Record<JobId, PersistedJobProgress> {
+  const out: Record<JobId, PersistedJobProgress> = {};
+  for (const [jobId, value] of Object.entries(raw)) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`campaign migrate: ${path}.jobs["${jobId}"] is not an object`);
+    }
+    const p = value as Record<string, unknown>;
+    const jpPath = `${path}.jobs["${jobId}"]`;
+    if (!isFiniteInt(p.level) || (p.level as number) < 1) {
+      throw new Error(`campaign migrate: ${jpPath}.level invalid (must be integer >= 1)`);
+    }
+    if (!isFiniteNonNegInt(p.jp)) {
+      throw new Error(`campaign migrate: ${jpPath}.jp invalid (must be non-negative integer)`);
+    }
+    if (!isFiniteNonNegInt(p.totalJp)) {
+      throw new Error(`campaign migrate: ${jpPath}.totalJp invalid (must be non-negative integer)`);
+    }
+    if (!Array.isArray(p.learned)) {
+      throw new Error(`campaign migrate: ${jpPath}.learned must be an array`);
+    }
+    for (let i = 0; i < p.learned.length; i++) {
+      if (typeof p.learned[i] !== 'string') {
+        throw new Error(`campaign migrate: ${jpPath}.learned[${i}] must be a string`);
+      }
+    }
+    out[jobId] = {
+      level: p.level as number,
+      jp: p.jp as number,
+      totalJp: p.totalJp as number,
+      learned: [...(p.learned as string[])].sort(),
+    };
+  }
+  return out;
+}
+
+function requireEquipment(raw: Record<string, unknown>, path: string): Equipment {
+  const equipment: Equipment = {};
+  const slots = ['rightHand', 'leftHand', 'head', 'body', 'accessory'] as const;
+  for (const slot of slots) {
+    const v = raw[slot];
+    if (v === undefined) continue;
+    if (typeof v !== 'string') {
+      throw new Error(`campaign migrate: ${path}.equipment.${slot} must be a string`);
+    }
+    equipment[slot] = v;
+  }
+  return equipment;
+}
+
+/** Finite integer (not a float). Used for all current-version numeric fields. */
+function isFiniteInt(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v);
+}
+
+function isFiniteNonNegInt(v: unknown): v is number {
+  return isFiniteInt(v) && v >= 0;
+}
+
+// ─── older-version lenient normalize (migration only) ────────────────────────
 
 function normalizeInventory(raw: unknown): Record<ItemId, number> {
   if (raw === null || raw === undefined) return {};
@@ -356,7 +605,7 @@ function normalizeProgress(raw: unknown): CampaignProgress {
   return progress;
 }
 
-function normalizeRoster(raw: unknown): PersistedUnit[] {
+function normalizeRosterLenient(raw: unknown): PersistedUnit[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((entry, index) => normalizePersistedUnit(entry, index));
 }
@@ -372,8 +621,12 @@ function normalizePersistedUnit(raw: unknown, index: number): PersistedUnit {
     throw new Error(`campaign migrate: roster[${index}].currentJob missing`);
   }
 
-  const gender = (u.gender as Gender) ?? 'male';
-  const zodiac = (u.zodiac as Zodiac) ?? 'aries';
+  const gender = (typeof u.gender === 'string' && GENDERS.has(u.gender)
+    ? u.gender
+    : 'male') as Gender;
+  const zodiac = (typeof u.zodiac === 'string' && ZODIACS.has(u.zodiac)
+    ? u.zodiac
+    : 'aries') as Zodiac;
   const level = typeof u.level === 'number' ? Math.max(1, Math.floor(u.level)) : 1;
   const exp = typeof u.exp === 'number' ? Math.max(0, Math.floor(u.exp)) : 0;
   const totalExp = typeof u.totalExp === 'number' ? Math.max(0, Math.floor(u.totalExp)) : 0;
@@ -458,19 +711,47 @@ function num(v: unknown, fallback: number): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Battle write-back
+// Scenario launch / battle write-back
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mark which scenario the player is entering.
+ *
+ * Prefer the campaign returned by {@link campaignToBattle} (in `state/scenarios.ts`),
+ * which calls this automatically so callers cannot forget the step. Exposed for
+ * tests and any non-battle launch path that still needs to pin `progress.current`.
+ *
+ * Pure: returns a new campaign; does not mutate the input. Overwrites any stale
+ * `progress.current` so a previous scenario cannot be credited by accident.
+ */
+export function beginScenario(
+  campaign: CampaignState,
+  scenarioId: string,
+  timestamp: number,
+): CampaignState {
+  return {
+    ...campaign,
+    roster: campaign.roster.map(structuredClonePersisted),
+    inventory: { ...campaign.inventory },
+    progress: {
+      completed: [...campaign.progress.completed],
+      current: scenarioId,
+    },
+    updatedAt: timestamp,
+  };
+}
 
 /**
  * Fold a finished (or abandoned) battle back into the campaign.
  *
  * Writes: exp, JP, levels, learned abilities, equipment, support slots, raw stats,
- * party inventory stock, and — on victory — the scenario id into
+ * party inventory stock, and — on victory — `progress.current` into
  * `progress.completed`. Does not mutate `campaign` or `battle`; returns a new state.
  *
- * Scenario identity: pass `scenarioId` (preferred). Falls back to
- * `campaign.progress.current` only when the caller omitted it. Completion is a
- * no-op when neither is set — never invents an id.
+ * Scenario identity comes only from `campaign.progress.current`. The launch path
+ * is {@link campaignToBattle}, which returns a campaign with `current` set to the
+ * scenario id (overwriting any stale value). There is no optional scenarioId
+ * parameter — callers pass the campaign returned from launch into this function.
  *
  * Inventory: reads `battle.inventories` for the player team if present. Does not
  * call `inventoryFor` (which would mutate the battle and manufacture default
@@ -480,7 +761,6 @@ export function battleToCampaign(
   campaign: CampaignState,
   battle: BattleState,
   timestamp: number,
-  scenarioId?: string,
 ): CampaignState {
   const nextRoster: PersistedUnit[] = [];
 
@@ -501,16 +781,15 @@ export function battleToCampaign(
       ? stockToRecord(battleStock)
       : { ...campaign.inventory };
 
-  const completedScenario = scenarioId ?? campaign.progress.current;
   const completed = [...campaign.progress.completed];
-  if (battle.phase === 'victory' && completedScenario) {
-    if (!completed.includes(completedScenario)) {
-      completed.push(completedScenario);
+  const current = campaign.progress.current;
+  if (battle.phase === 'victory' && current !== undefined) {
+    if (!completed.includes(current)) {
+      completed.push(current);
     }
   }
 
   const progress: CampaignProgress = { completed };
-  const current = scenarioId ?? campaign.progress.current;
   if (current !== undefined) {
     progress.current = current;
   }

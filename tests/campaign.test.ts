@@ -33,6 +33,40 @@ import {
 } from '../src/state/save';
 import { buildScenario, campaignToBattle, getScenario } from '../src/state/scenarios';
 
+/** Minimal valid v1 roster unit for negative validation cases. */
+function validPersistedUnit(overrides: Partial<PersistedUnit> = {}): PersistedUnit {
+  return {
+    id: 'p1',
+    name: 'Hero',
+    gender: 'male',
+    zodiac: 'leo',
+    level: 3,
+    exp: 10,
+    totalExp: 10,
+    currentJob: 'squire',
+    jobs: { squire: { level: 1, jp: 0, totalJp: 0, learned: [] } },
+    equipment: {},
+    raw: { hp: 100, mp: 40, pa: 8, ma: 8, spd: 8 },
+    brave: 70,
+    faith: 70,
+    ...overrides,
+  };
+}
+
+function validV1Shell(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    version: 1,
+    seed: 1,
+    gil: 100,
+    roster: [],
+    inventory: {},
+    progress: { completed: [] },
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,6 +286,117 @@ describe('campaign serialize / deserialize', () => {
     };
     expect(() => migrate(missingRoster)).toThrow(/roster/);
   });
+
+  it('migrate rejects current-version saves with corrupt *contents* (not just shape)', () => {
+    // Invalid inventory count — previously dropped silently, leaving a plausible save
+    // with missing potions. Must fail loudly.
+    expect(() =>
+      migrate(validV1Shell({ inventory: { 'use-potion': 'three' } })),
+    ).toThrow(/inventory/);
+
+    expect(() =>
+      migrate(validV1Shell({ inventory: { 'use-potion': -2 } })),
+    ).toThrow(/inventory/);
+
+    // Malformed job progress — previously reset to defaults / dropped.
+    expect(() =>
+      migrate(
+        validV1Shell({
+          gil: 0,
+          roster: [{ ...validPersistedUnit(), jobs: { squire: 'not-a-progress-object' } }],
+        }),
+      ),
+    ).toThrow(/jobs/);
+
+    // Missing raw stats — previously filled with defaults, rewriting the unit.
+    const { raw: _raw, ...missingRaw } = validPersistedUnit();
+    void _raw;
+    expect(() => migrate(validV1Shell({ gil: 0, roster: [missingRaw] }))).toThrow(/raw/);
+
+    // Non-string entry in progress.completed.
+    expect(() =>
+      migrate(validV1Shell({ gil: 0, progress: { completed: [42] } })),
+    ).toThrow(/completed/);
+  });
+
+  it('migrate rejects fractional seed/gil/inventory (never floors into a plausible save)', () => {
+    // Runtime probe from review: seed 1.75, gil 10.9, inventory 2.8 must fail.
+    expect(() => migrate(validV1Shell({ seed: 1.75, gil: 10, inventory: {} }))).toThrow(/seed/);
+    expect(() => migrate(validV1Shell({ seed: 1, gil: 10.9, inventory: {} }))).toThrow(/gil/);
+    expect(() =>
+      migrate(validV1Shell({ inventory: { 'use-potion': 2.8 } })),
+    ).toThrow(/inventory/);
+
+    // Fractional job/stat fields also reject.
+    expect(() =>
+      migrate(
+        validV1Shell({
+          gil: 0,
+          roster: [validPersistedUnit({ exp: 10.5 })],
+        }),
+      ),
+    ).toThrow(/exp/);
+    expect(() =>
+      migrate(
+        validV1Shell({
+          gil: 0,
+          roster: [
+            validPersistedUnit({
+              jobs: { squire: { level: 1, jp: 3.2, totalJp: 0, learned: [] } },
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/jp/);
+  });
+
+  it('migrate rejects missing totalExp and currentJob absent from jobs', () => {
+    const { totalExp: _te, ...noTotalExp } = validPersistedUnit();
+    void _te;
+    expect(() => migrate(validV1Shell({ gil: 0, roster: [noTotalExp] }))).toThrow(/totalExp/);
+
+    expect(() =>
+      migrate(
+        validV1Shell({
+          gil: 0,
+          roster: [
+            validPersistedUnit({
+              currentJob: 'knight',
+              jobs: { squire: { level: 1, jp: 0, totalJp: 0, learned: [] } },
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/currentJob/);
+  });
+
+  it('migrate rejects a present but non-integer version (does not treat as v0)', () => {
+    // A corrupt version field must not fall through to lenient migration.
+    expect(() =>
+      migrate({
+        version: '1',
+        seed: 1,
+        gil: 100,
+        roster: [],
+        inventory: {},
+        progress: { completed: [] },
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    ).toThrow(/version/);
+    expect(() =>
+      migrate({
+        version: 1.5,
+        seed: 1,
+        gil: 100,
+        roster: [],
+        inventory: {},
+        progress: { completed: [] },
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    ).toThrow(/version/);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,6 +512,41 @@ describe('save / load (localStorage)', () => {
     expect(() => saveCampaign(createCampaign(1, 1))).not.toThrow();
   });
 
+  it('logs when storage is unavailable on load (private mode / missing storage)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('localStorage', undefined);
+    expect(loadCampaign()).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    const messages = warn.mock.calls.map((c) => String(c[0]));
+    expect(messages.some((m) => /localStorage unavailable/i.test(m))).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('logs when storage access throws on load', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('localStorage', {
+      getItem() {
+        throw new Error('SecurityError: storage blocked');
+      },
+      setItem() {
+        throw new Error('SecurityError: storage blocked');
+      },
+      removeItem() {
+        throw new Error('SecurityError: storage blocked');
+      },
+      clear() {},
+      key() {
+        return null;
+      },
+      length: 0,
+    });
+    expect(loadCampaign()).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    const messages = warn.mock.calls.map((c) => String(c[0]));
+    expect(messages.some((m) => /localStorage unavailable|failed to read/i.test(m))).toBe(true);
+    warn.mockRestore();
+  });
+
   it('uses only the namespaced campaign key (no probe keys)', () => {
     const storage = installMemoryStorage();
     // Pre-seed an unrelated key; save ops must not create/remove others.
@@ -459,14 +639,13 @@ describe('determinism across save/load', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('battleToCampaign', () => {
-  it('writes back earned JP/exp and marks the scenario completed on victory', () => {
-    const campaign = campaignFromBattleOpen(55, 100);
+  it('writes back earned JP/exp and marks the scenario completed on victory (3-arg form)', () => {
+    const base = campaignFromBattleOpen(55, 100);
     const scenario = getScenario('battle-open');
-    // Do NOT preload progress.current — completion must come from the
-    // scenarioId argument, not a pre-seeded campaign field.
-    expect(campaign.progress.current).toBeUndefined();
+    // Launch is campaignToBattle itself — no separate beginScenario step.
+    expect(base.progress.current).toBeUndefined();
 
-    const before = campaign.roster.map((u) => ({
+    const before = base.roster.map((u) => ({
       id: u.id,
       exp: u.exp,
       totalExp: u.totalExp,
@@ -476,7 +655,8 @@ describe('battleToCampaign', () => {
       ),
     }));
 
-    const built = campaignToBattle(campaign, scenario);
+    const built = campaignToBattle(base, scenario);
+    expect(built.campaign.progress.current).toBe(scenario.id);
     const state = built.state;
 
     // Award known gains without playing a full fight.
@@ -486,16 +666,17 @@ describe('battleToCampaign', () => {
       gainJp(unit, 25);
     }
     // Consume an item so inventory write-back is visible.
-    const potionsBefore = campaign.inventory['use-potion'] ?? 0;
+    const potionsBefore = base.inventory['use-potion'] ?? 0;
     const playerInv = state.inventories?.get('player');
     expect(playerInv?.get('use-potion')).toBe(potionsBefore);
     playerInv?.set('use-potion', Math.max(0, potionsBefore - 2));
 
     state.phase = 'victory';
 
-    const after = battleToCampaign(campaign, state, 200, scenario.id);
+    // Three-arg form with the campaign returned from campaignToBattle.
+    const after = battleToCampaign(built.campaign, state, 200);
     expect(after.updatedAt).toBe(200);
-    expect(after.createdAt).toBe(campaign.createdAt);
+    expect(after.createdAt).toBe(base.createdAt);
     expect(after.progress.completed).toContain(scenario.id);
     expect(after.progress.current).toBe(scenario.id);
     expect(after.inventory['use-potion']).toBe(potionsBefore - 2);
@@ -514,21 +695,65 @@ describe('battleToCampaign', () => {
     }
 
     // Original campaign was not mutated.
-    expect(campaign.progress.completed).not.toContain(scenario.id);
-    expect(campaign.updatedAt).toBe(100);
+    expect(base.progress.completed).not.toContain(scenario.id);
+    expect(base.progress.current).toBeUndefined();
+    expect(base.updatedAt).toBe(100);
+  });
+
+  it('campaignToBattle pins progress.current so battleToCampaign completes without a separate step', () => {
+    const base = campaignFromBattleOpen(8, 10);
+    const scenario = getScenario('battle-open');
+
+    // The bridge is two calls: campaignToBattle → battleToCampaign.
+    // Feeding the *input* campaign (no current) must not complete — that would
+    // only work if someone invented a fourth scenarioId arg.
+    const built = campaignToBattle(base, scenario);
+    expect(base.progress.current).toBeUndefined();
+    expect(built.campaign.progress.current).toBe(scenario.id);
+
+    built.state.phase = 'victory';
+    const forgotLaunch = battleToCampaign(base, built.state, 20);
+    expect(forgotLaunch.progress.completed).not.toContain(scenario.id);
+
+    const after = battleToCampaign(built.campaign, built.state, 20);
+    expect(after.progress.completed).toContain(scenario.id);
+    expect(after.progress.current).toBe(scenario.id);
+  });
+
+  it('campaignToBattle overwrites a stale progress.current so the previous scenario is not credited', () => {
+    const base = campaignFromBattleOpen(3, 10);
+    base.progress.current = 'old-stale-fight';
+    const scenario = getScenario('battle-open');
+
+    const built = campaignToBattle(base, scenario);
+    expect(built.campaign.progress.current).toBe(scenario.id);
+    expect(built.campaign.progress.current).not.toBe('old-stale-fight');
+
+    built.state.phase = 'victory';
+    const after = battleToCampaign(built.campaign, built.state, 20);
+    expect(after.progress.completed).toContain(scenario.id);
+    expect(after.progress.completed).not.toContain('old-stale-fight');
   });
 
   it('does not mark completion on defeat', () => {
-    const campaign = campaignFromBattleOpen(3, 10);
-    const built = campaignToBattle(campaign, getScenario('battle-open'));
+    const base = campaignFromBattleOpen(3, 10);
+    const built = campaignToBattle(base, getScenario('battle-open'));
     built.state.phase = 'defeat';
-    const after = battleToCampaign(campaign, built.state, 20, 'battle-open');
+    const after = battleToCampaign(built.campaign, built.state, 20);
     expect(after.progress.completed).not.toContain('battle-open');
+    // current still records where the player was.
+    expect(after.progress.current).toBe('battle-open');
   });
 
   it('does not mutate battle when inventory is absent, and keeps campaign stock', () => {
-    const campaign = campaignFromBattleOpen(11, 50);
-    campaign.inventory = { 'use-potion': 5 };
+    const base = campaignFromBattleOpen(11, 50);
+    base.inventory = { 'use-potion': 5 };
+    // Simulate a launch that already pinned current (e.g. a custom scenario id).
+    const launched = {
+      ...base,
+      inventory: { ...base.inventory },
+      progress: { completed: [...base.progress.completed], current: 'some-fight' },
+    };
 
     // Minimal battle with no inventories map.
     const battle: BattleState = {
@@ -544,7 +769,7 @@ describe('battleToCampaign', () => {
     };
     expect(battle.inventories).toBeUndefined();
 
-    const after = battleToCampaign(campaign, battle, 99, 'some-fight');
+    const after = battleToCampaign(launched, battle, 99);
     // Pure: battle still has no inventories.
     expect(battle.inventories).toBeUndefined();
     // Campaign stock preserved (not replaced with default starting pile).

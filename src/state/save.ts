@@ -23,25 +23,30 @@ export const CAMPAIGN_STORAGE_KEY = 'evertactics.campaign';
 /**
  * Resolve localStorage without writing any secondary key.
  * Some private-mode browsers expose the object but throw on access.
+ * Returns `{ storage, error }` so callers can log the real failure mode.
  */
-function getStorage(): Storage | null {
+function getStorage(): { storage: Storage | null; error?: unknown } {
   try {
-    if (typeof globalThis === 'undefined') return null;
+    if (typeof globalThis === 'undefined') {
+      return { storage: null, error: new Error('globalThis is undefined') };
+    }
     const storage = (globalThis as { localStorage?: Storage }).localStorage;
-    if (!storage) return null;
+    if (!storage) {
+      return { storage: null, error: new Error('localStorage is not available') };
+    }
     // Touch via the real key only — never invent a probe entry.
     void storage.getItem(CAMPAIGN_STORAGE_KEY);
-    return storage;
-  } catch {
-    return null;
+    return { storage };
+  } catch (err) {
+    return { storage: null, error: err };
   }
 }
 
 /** Persist the campaign. No-op when storage is unavailable. */
 export function saveCampaign(state: CampaignState): void {
-  const storage = getStorage();
+  const { storage, error } = getStorage();
   if (!storage) {
-    console.warn('[save] localStorage unavailable; campaign not written');
+    console.warn('[save] localStorage unavailable; campaign not written', error);
     return;
   }
   try {
@@ -53,11 +58,15 @@ export function saveCampaign(state: CampaignState): void {
 
 /**
  * Load the campaign, or null when missing / corrupt / storage unavailable.
- * Never throws.
+ * Never throws. Logs when storage is unavailable or the blob is corrupt so a
+ * private-browsing / quota failure is debuggable from the console.
  */
 export function loadCampaign(): CampaignState | null {
-  const storage = getStorage();
-  if (!storage) return null;
+  const { storage, error } = getStorage();
+  if (!storage) {
+    console.warn('[save] localStorage unavailable; cannot load campaign', error);
+    return null;
+  }
   let raw: string | null;
   try {
     raw = storage.getItem(CAMPAIGN_STORAGE_KEY);
@@ -76,7 +85,7 @@ export function loadCampaign(): CampaignState | null {
 
 /** Remove the save. No-op when storage is unavailable. */
 export function clearCampaign(): void {
-  const storage = getStorage();
+  const { storage } = getStorage();
   if (!storage) return;
   try {
     storage.removeItem(CAMPAIGN_STORAGE_KEY);
@@ -87,7 +96,7 @@ export function clearCampaign(): void {
 
 /** True when a non-empty blob is present (not necessarily valid). */
 export function hasSave(): boolean {
-  const storage = getStorage();
+  const { storage } = getStorage();
   if (!storage) return false;
   try {
     const raw = storage.getItem(CAMPAIGN_STORAGE_KEY);
