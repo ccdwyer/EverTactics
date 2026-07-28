@@ -32,7 +32,30 @@ should not be able to tell which is which.**
 
 ---
 
-## Current state — last updated end of round 5
+## Current state — v0.1 functionally complete (updated after v0.1 step 12)
+
+**The loop closes, and that is measured rather than asserted.** A battle was driven to victory
+through real input and the campaign survives a browser refresh with a byte-identical save
+(SHA-256 `6927f35b...`, 4999 bytes both sides). Field-by-field evidence:
+`shots/v01-victory/persistence-diff.md`. Walk-through and stage table: `docs/V01-ACCEPTANCE.md`.
+
+Shipped since round 5: persistence, two-way Formation/Roster, battle-launch refactor, world map,
+economy/shop, onboarding, six maps and ten encounters across two chapters, battle audio, battle
+intro/outcome presentation, the four player-reported fixes, roster-identity hardening, one id space
+for `progress.current`, and eight signature ability VFX with a sparse ability camera.
+
+**555 tests, typecheck clean, all four metrics gates green.**
+
+Two things worth carrying forward:
+- `npm run verify` previously exited 0 even when a metrics gate FAILED — gates were computed,
+  printed, and not enforced. Fixed in step 12; verification is now stricter than it was for most
+  of this project's life. Treat any green run recorded before that with mild suspicion.
+- Music was deliberately not shipped. Silence beat a weak procedural loop, and that was the right
+  call to make explicitly rather than by omission.
+
+### Superseded below — kept as the record of how it was built
+
+## Current state — as of end of round 5
 
 ### Gameplay: complete
 - Battle loop: CT turn order with predictive forecast, movement with height/jump, facing and back
