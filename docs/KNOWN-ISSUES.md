@@ -29,3 +29,11 @@ failures log rather than fail silently, 469 tests green, typecheck clean.
    knockdowns then unlock". Kill increment is tested separately.
 3. Status-tick KOs in `battle.ts` emit unattributed knockdowns, so those kills aren't credited.
    Pre-existing.
+
+## Step 5 residuals (reviewer-flagged, accepted)
+
+1. Economy tests hardcode prices (dagger 200, potion 100) rather than reading the item table — they
+   still exercise the rules, but a price change breaks the test instead of the test catching it.
+2. `sellItem` allows a resale price of `0` (`price < 0` rather than `<= 0`). Edge case.
+3. `world.test.ts` hand-builds reward objects from `computeBattleRewards`; the Game path is covered
+   in the routing tests instead.
