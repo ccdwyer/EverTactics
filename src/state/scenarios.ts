@@ -15,6 +15,10 @@
 import { jobActions, jobSkillset } from './abilityIndex';
 import { bootstrapContent } from './content';
 
+import {
+  unitFromPersisted,
+  type CampaignState,
+} from '@core/campaign';
 import { getMapDef, generateMap, positionOn, tileKey } from '@core/grid';
 import { getJob } from '@core/jobs';
 import { createRng } from '@core/rng';
@@ -26,6 +30,7 @@ import type {
   Equipment,
   Facing,
   Gender,
+  ItemId,
   JobId,
   Objective,
   Team,
@@ -205,6 +210,58 @@ function jpFor(level: number): number {
 // Build
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Build a unit from a scenario placement (hardcoded demo path). */
+function unitFromPlacement(
+  placement: UnitPlacement,
+  pos: Vec3,
+): Unit {
+  const budget = jpFor(placement.level);
+  const learned = grantedAbilities(placement.job, budget, placement.learn ?? []);
+
+  const unit = createUnit({
+    id: placement.id,
+    name: placement.name,
+    team: placement.team,
+    job: placement.job,
+    gender: placement.gender,
+    zodiac: placement.zodiac,
+    level: placement.level,
+    brave: placement.brave,
+    faith: placement.faith,
+    pos,
+    facing: placement.facing,
+    equipment: placement.equipment,
+    learned: { [placement.job]: learned },
+    jp: { [placement.job]: budget },
+    ...(placement.secondary !== undefined
+      ? { secondaryAction: getJob(placement.secondary).actionSet }
+      : {}),
+    ...(placement.reaction !== undefined ? { reaction: placement.reaction } : {}),
+    ...(placement.support !== undefined ? { support: placement.support } : {}),
+    ...(placement.movement !== undefined ? { movement: placement.movement } : {}),
+  });
+
+  if (placement.secondary !== undefined) {
+    // The borrowed skillset must actually be learned or the menu is empty.
+    const secondaryJob = getJob(placement.secondary);
+    const progress = unit.jobs.get(placement.job);
+    const borrowed = jobActions(secondaryJob).filter((s) => s.jp <= budget * 0.6);
+    if (progress) for (const skill of borrowed) progress.learned.add(skill.ability.id);
+  }
+
+  return unit;
+}
+
+function primeDerived(units: Iterable<Unit>): void {
+  for (const unit of units) {
+    const derived = deriveStats(unit);
+    unit.stats.maxHp = derived.maxHp;
+    unit.stats.maxMp = derived.maxMp;
+    unit.stats.hp = derived.maxHp;
+    unit.stats.mp = derived.maxMp;
+  }
+}
+
 export function buildScenario(scenario: Scenario): BuiltScenario {
   bootstrapContent();
 
@@ -216,40 +273,7 @@ export function buildScenario(scenario: Scenario): BuiltScenario {
 
   for (const placement of scenario.units) {
     const pos = resolvePlacement(field, placement.at, taken);
-    const budget = jpFor(placement.level);
-    const learned = grantedAbilities(placement.job, budget, placement.learn ?? []);
-
-    const unit = createUnit({
-      id: placement.id,
-      name: placement.name,
-      team: placement.team,
-      job: placement.job,
-      gender: placement.gender,
-      zodiac: placement.zodiac,
-      level: placement.level,
-      brave: placement.brave,
-      faith: placement.faith,
-      pos,
-      facing: placement.facing,
-      equipment: placement.equipment,
-      learned: { [placement.job]: learned },
-      jp: { [placement.job]: budget },
-      ...(placement.secondary !== undefined
-        ? { secondaryAction: getJob(placement.secondary).actionSet }
-        : {}),
-      ...(placement.reaction !== undefined ? { reaction: placement.reaction } : {}),
-      ...(placement.support !== undefined ? { support: placement.support } : {}),
-      ...(placement.movement !== undefined ? { movement: placement.movement } : {}),
-    });
-
-    if (placement.secondary !== undefined) {
-      // The borrowed skillset must actually be learned or the menu is empty.
-      const secondaryJob = getJob(placement.secondary);
-      const progress = unit.jobs.get(placement.job);
-      const borrowed = jobActions(secondaryJob).filter((s) => s.jp <= budget * 0.6);
-      if (progress) for (const skill of borrowed) progress.learned.add(skill.ability.id);
-    }
-
+    const unit = unitFromPlacement(placement, pos);
     // Stagger the clock so the turn order is a real ordering, not a tie-break.
     unit.ct = placement.ct ?? rng.int(40);
     units.set(unit.id, unit);
@@ -268,14 +292,82 @@ export function buildScenario(scenario: Scenario): BuiltScenario {
     objective: scenario.objective,
   };
 
-  // Prime the derived stat mirrors so the first UI paint is not showing 1 HP.
-  for (const unit of units.values()) {
-    const derived = deriveStats(unit);
-    unit.stats.maxHp = derived.maxHp;
-    unit.stats.maxMp = derived.maxMp;
-    unit.stats.hp = derived.maxHp;
-    unit.stats.mp = derived.maxMp;
+  primeDerived(units.values());
+
+  return { scenario, state, personalities };
+}
+
+/**
+ * Open a battle whose player units come from the campaign roster instead of the
+ * scenario's hardcoded list. Enemies (and any non-player placements) still come
+ * from the scenario. Placement tiles and CT offsets are the scenario's.
+ *
+ * Battle RNG is seeded from `campaign.seed` (not `scenario.seed`) so a campaign
+ * save/load boundary preserves determinism and changing the campaign seed
+ * changes the fight. Map geometry and enemy placements still come from the
+ * scenario definition.
+ *
+ * Does not replace {@link buildScenario}: diagnostic scenes and the screenshot
+ * harness keep using the hardcoded path.
+ */
+export function campaignToBattle(campaign: CampaignState, scenario: Scenario): BuiltScenario {
+  bootstrapContent();
+
+  const field = generateMap(scenario.mapId);
+  // Campaign seed drives CT stagger and battle RNG — scenario.seed is unused
+  // on this path (it remains the seed for the diagnostic buildScenario path).
+  const battleSeed = campaign.seed;
+  const rng = createRng(battleSeed);
+  const units = new Map<UnitId, Unit>();
+  const personalities = new Map<UnitId, PersonalityId>();
+  const taken = new Set<string>();
+
+  const playerPlacements = scenario.units.filter((u) => u.team === 'player');
+  const nonPlayerPlacements = scenario.units.filter((u) => u.team !== 'player');
+
+  // Roster order → scenario start tiles. Extra roster members sit out; extra
+  // start tiles stay empty. Formation screen will choose the mapping later.
+  const deployCount = Math.min(campaign.roster.length, playerPlacements.length);
+  for (let i = 0; i < deployCount; i++) {
+    const placement = playerPlacements[i]!;
+    const persisted = campaign.roster[i]!;
+    const pos = resolvePlacement(field, placement.at, taken);
+    const unit = unitFromPersisted(persisted, {
+      team: 'player',
+      pos,
+      facing: placement.facing,
+    });
+    unit.ct = placement.ct ?? rng.int(40);
+    units.set(unit.id, unit);
   }
+
+  for (const placement of nonPlayerPlacements) {
+    const pos = resolvePlacement(field, placement.at, taken);
+    const unit = unitFromPlacement(placement, pos);
+    unit.ct = placement.ct ?? rng.int(40);
+    units.set(unit.id, unit);
+    if (placement.personality) personalities.set(unit.id, placement.personality);
+  }
+
+  const playerStock = new Map<ItemId, number>();
+  for (const [id, n] of Object.entries(campaign.inventory)) {
+    if (n > 0) playerStock.set(id, n);
+  }
+
+  const state: BattleState = {
+    field,
+    units,
+    order: [],
+    active: undefined,
+    phase: 'deploy',
+    tick: 0,
+    rngState: createRng(battleSeed ^ 0x5f3759df).state(),
+    log: [],
+    objective: scenario.objective,
+    inventories: new Map([['player', playerStock]]),
+  };
+
+  primeDerived(units.values());
 
   return { scenario, state, personalities };
 }

@@ -91,3 +91,36 @@ Report the exact commands you ran and the numbers they printed.
 - Never put a backtick in a comment inside a shader file (six occurrences so far);
   `npx vitest run tests/shader-source.test.ts` catches it.
 - Do not modify `src/render/`, `src/ui/`, or the existing scenarios' behaviour.
+
+---
+
+## ROUND 2 — reviewer objections from GPT-5.6 Sol. Fix all three.
+
+The work is close: 456 tests pass and no purity, determinism or shader rule was violated. Three
+real defects remain. (A fourth objection — that campaign.ts/save.ts/tests were missing from the
+diff — was a harness bug on my side and is fixed; ignore it.)
+
+**1. `battleToCampaign` can silently omit completion.**
+`src/core/campaign.ts:479` adds an undocumented fourth `scenarioId` parameter, and lines 504-509
+record nothing when both it and `progress.current` are absent. The test at
+`tests/campaign.test.ts:496` then passes `scenario.id` as that fourth argument, bypassing the
+contract instead of testing it.
+
+Make the specified three-argument form work: `battleToCampaign(campaign, battleState, timestamp)`
+must reliably mark the scenario completed. If it genuinely needs the scenario id, then
+`progress.current` must be set when the battle is launched and that must be what it reads — do not
+paper over it with an optional parameter the caller has to remember.
+
+**2. Corrupt current-version saves are silently normalised instead of rejected.**
+v1 validation at `campaign.ts:282` checks only outer containers, while the normalisers at
+`campaign.ts:334` quietly drop invalid inventory counts and reset malformed job/stat data. That
+turns a corrupt save into a plausible-looking one with missing progress — the worst outcome for a
+player. Validate the *contents*, and reject clearly rather than repairing silently. Migration from
+an OLDER version may still upgrade; a corrupt save at the CURRENT version must fail loudly.
+
+**3. Storage-unavailable loads are not logged.**
+`src/state/save.ts:27` swallows storage access errors and `loadCampaign` at line 58 returns `null`
+silently. The brief said return null *and log*. A player in private-browsing mode losing their save
+with no console output is undebuggable.
+
+Add a test for each of the three.
