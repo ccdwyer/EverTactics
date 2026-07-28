@@ -134,20 +134,15 @@ let feedback = '';
 let verdict = 'NO ROUNDS RUN';
 
 for (let round = 1; round <= maxRounds; round++) {
-  console.error(`\n── round ${round}/${maxRounds} · Grok 4.5 implementing ─────────────────`);
-  // `--always-approve` and `--max-turns` are both load-bearing. The first live run
-  // used only `--permission-mode dontAsk` and Grok printed one line — "I'll start by
-  // loading project context..." — then exited having changed nothing. `-p` is a
-  // single-turn prompt; without an explicit turn budget and tool auto-approval it
-  // answers rather than works, and the harness dutifully reported "produced no
-  // changes" as though Grok had failed. It had not been asked to work.
-  const build = sh('grok', [
-    '-p', buildPrompt(round, feedback),
-    '--always-approve',
-    '--max-turns', '60',
-    '--cwd', process.cwd(),
-  ]);
-  writeFileSync(`${logDir}/round${round}-grok.txt`, build.out);
+  console.error(`\n── round ${round}/${maxRounds} · GPT-5.6 Sol implementing ─────────────────`);
+  // ROLES SWAPPED: GPT-5.6 Sol (codex) builds, Grok 4.5 reviews.
+  //
+  // `codex exec` runs agentically and honours ~/.codex/config.toml, which pins
+  // model = "gpt-5.6-sol" and model_reasoning_effort = "xhigh". Do NOT pass a
+  // `*-fast` model: this machine authenticates codex via a ChatGPT account and the
+  // backend rejects API-only fast variants with a 400, failing the kickoff.
+  const build = sh('codex', ['exec', buildPrompt(round, feedback)]);
+  writeFileSync(`${logDir}/round${round}-build.txt`, build.out);
   console.error(build.out.slice(-1500));
 
   console.error(`\n── round ${round} · verifying ───────────────────────────────────`);
@@ -165,14 +160,21 @@ for (let round = 1; round <= maxRounds; round++) {
   const diff = git('diff', before);
   const diffstat = git('diff', '--stat', before);
   if (!diff.trim()) {
-    verdict = 'FAIL — Grok produced no changes';
+    verdict = 'FAIL — builder produced no changes';
     console.error(verdict);
     break;
   }
 
-  console.error(`\n── round ${round} · GPT-5.6 Sol reviewing ──────────────────────`);
-  const review = sh('codex', ['exec', reviewPrompt(diffstat, diff, verify.out)]);
-  writeFileSync(`${logDir}/round${round}-sol.txt`, review.out);
+  console.error(`\n── round ${round} · Grok 4.5 reviewing ──────────────────────`);
+  // Grok reviews. It needs a turn budget and tool approval or it answers instead of
+  // working — the same trap that made it print one line and exit when it was the builder.
+  const review = sh('grok', [
+    '-p', reviewPrompt(diffstat, diff, verify.out),
+    '--always-approve',
+    '--max-turns', '40',
+    '--cwd', process.cwd(),
+  ]);
+  writeFileSync(`${logDir}/round${round}-review.txt`, review.out);
   console.error(review.out.slice(-2500));
 
   // Sol's verdict is the first PASS/FAIL token in its output.
@@ -180,7 +182,7 @@ for (let round = 1; round <= maxRounds; round++) {
   verdict = m ? m[1] : 'UNCLEAR';
 
   if (verdict === 'PASS' && verify.ok) {
-    console.error(`\n✓ Sol passed it on round ${round}, and ${verifyCmd} is green.`);
+    console.error(`\n✓ Reviewer passed it on round ${round}, and ${verifyCmd} is green.`);
     break;
   }
   feedback = review.out.slice(-6000);
