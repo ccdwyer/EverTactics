@@ -11,7 +11,7 @@ import { attackDirection } from '../src/core/combat/hit';
 import { forecastTurns } from '../src/core/ct';
 import { getMapDef } from '../src/core/grid';
 import { stockAwareWorld } from '../src/core/inventory';
-import { nextObjective } from '../src/core/world';
+import { nextObjective, WORLD_NODES } from '../src/core/world';
 import type { CampaignState } from '../src/core/campaign';
 import type { BattleState } from '../src/core/types';
 import {
@@ -174,8 +174,8 @@ describe('onboarding', () => {
     saved.roster[0]!.name = 'Agrias';
     saved.gil = 8_675;
     saved.progress = {
-      completed: ['battle-open', 'gariland-camp'],
-      current: 'gariland-camp',
+      completed: [WORLD_NODES[0]!.id, WORLD_NODES[1]!.id],
+      current: WORLD_NODES[1]!.id,
     };
     saveCampaign(saved);
 

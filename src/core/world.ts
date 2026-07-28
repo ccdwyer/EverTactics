@@ -5,17 +5,35 @@
  * Node ids are the durable progression keys stored in CampaignProgress.completed.
  */
 
-import type { CampaignState } from './campaign';
+import { setCurrentWorldNode, type CampaignState } from './campaign';
+import { worldNodeId, type WorldNodeId } from './ids';
 
 export interface WorldNode {
-  id: string;
+  id: WorldNodeId;
   name: string;
   kind: 'battle' | 'town' | 'event';
   scenarioId?: string;
   position: { x: number; y: number };
-  requires: string[];
+  requires: WorldNodeId[];
   chapter: number;
 }
+
+const WORLD_NODE_IDS = {
+  battleOpen: worldNodeId('battle-open'),
+  garilandCamp: worldNodeId('gariland-camp'),
+  mandaliaSkirmish: worldNodeId('mandalia-skirmish'),
+  crossroadsOath: worldNodeId('crossroads-oath'),
+  garilandBridge: worldNodeId('gariland-bridge'),
+  zeircheleCharge: worldNodeId('zeirchele-charge'),
+  chapterTwo: worldNodeId('chapter-two'),
+  lionelGate: worldNodeId('lionel-gate'),
+  dorterStorehouse: worldNodeId('dorter-storehouse'),
+  dorterMarket: worldNodeId('dorter-market'),
+  mandaliaAmbush: worldNodeId('mandalia-ambush'),
+  orbonneReturn: worldNodeId('orbonne-return'),
+  merchantRoad: worldNodeId('merchant-road'),
+  lionelReckoning: worldNodeId('lionel-reckoning'),
+} as const;
 
 /**
  * The v0.1 two-chapter arc. Battles alternate terrain problems so progression
@@ -24,7 +42,7 @@ export interface WorldNode {
  */
 export const WORLD_NODES: readonly WorldNode[] = [
   {
-    id: 'battle-open',
+    id: WORLD_NODE_IDS.battleOpen,
     name: 'The Broken Cloister',
     kind: 'battle',
     scenarioId: 'first-lesson',
@@ -33,115 +51,115 @@ export const WORLD_NODES: readonly WorldNode[] = [
     chapter: 1,
   },
   {
-    id: 'gariland-camp',
+    id: WORLD_NODE_IDS.garilandCamp,
     name: 'Gariland Camp',
     kind: 'town',
     position: { x: 0.28, y: 0.58 },
-    requires: ['battle-open'],
+    requires: [WORLD_NODE_IDS.battleOpen],
     chapter: 1,
   },
   {
-    id: 'mandalia-skirmish',
+    id: WORLD_NODE_IDS.mandaliaSkirmish,
     name: 'Mandalia Skirmish',
     kind: 'battle',
     scenarioId: 'mandalia-skirmish',
     position: { x: 0.43, y: 0.7 },
-    requires: ['gariland-camp'],
+    requires: [WORLD_NODE_IDS.garilandCamp],
     chapter: 1,
   },
   {
-    id: 'crossroads-oath',
+    id: WORLD_NODE_IDS.crossroadsOath,
     name: 'Oath at the Crossroads',
     kind: 'event',
     position: { x: 0.52, y: 0.47 },
-    requires: ['mandalia-skirmish'],
+    requires: [WORLD_NODE_IDS.mandaliaSkirmish],
     chapter: 1,
   },
   {
-    id: 'gariland-bridge',
+    id: WORLD_NODE_IDS.garilandBridge,
     name: 'Gariland Bridge',
     kind: 'battle',
     scenarioId: 'gariland-bridge',
     position: { x: 0.59, y: 0.61 },
-    requires: ['crossroads-oath'],
+    requires: [WORLD_NODE_IDS.crossroadsOath],
     chapter: 1,
   },
   {
-    id: 'zeirchele-charge',
+    id: WORLD_NODE_IDS.zeircheleCharge,
     name: 'Zeirchele Charge',
     kind: 'battle',
     scenarioId: 'zeirchele-charge',
     position: { x: 0.7, y: 0.72 },
-    requires: ['gariland-bridge'],
+    requires: [WORLD_NODE_IDS.garilandBridge],
     chapter: 1,
   },
   {
-    id: 'chapter-two',
+    id: WORLD_NODE_IDS.chapterTwo,
     name: 'The Lion Banner',
     kind: 'event',
     position: { x: 0.75, y: 0.48 },
-    requires: ['zeirchele-charge'],
+    requires: [WORLD_NODE_IDS.zeircheleCharge],
     chapter: 2,
   },
   {
-    id: 'lionel-gate',
+    id: WORLD_NODE_IDS.lionelGate,
     name: 'Lionel Gate',
     kind: 'battle',
     scenarioId: 'lionel-gate',
     position: { x: 0.82, y: 0.31 },
-    requires: ['chapter-two'],
+    requires: [WORLD_NODE_IDS.chapterTwo],
     chapter: 2,
   },
   {
-    id: 'dorter-storehouse',
+    id: WORLD_NODE_IDS.dorterStorehouse,
     name: 'Dorter Storehouse',
     kind: 'battle',
     scenarioId: 'dorter-storehouse',
     position: { x: 0.68, y: 0.25 },
-    requires: ['lionel-gate'],
+    requires: [WORLD_NODE_IDS.lionelGate],
     chapter: 2,
   },
   {
-    id: 'dorter-market',
+    id: WORLD_NODE_IDS.dorterMarket,
     name: 'Dorter Market',
     kind: 'town',
     position: { x: 0.56, y: 0.39 },
-    requires: ['dorter-storehouse'],
+    requires: [WORLD_NODE_IDS.dorterStorehouse],
     chapter: 2,
   },
   {
-    id: 'mandalia-ambush',
+    id: WORLD_NODE_IDS.mandaliaAmbush,
     name: 'Mandalia Ambush',
     kind: 'battle',
     scenarioId: 'mandalia-ambush',
     position: { x: 0.45, y: 0.58 },
-    requires: ['dorter-market'],
+    requires: [WORLD_NODE_IDS.dorterMarket],
     chapter: 2,
   },
   {
-    id: 'orbonne-return',
+    id: WORLD_NODE_IDS.orbonneReturn,
     name: 'Return to Orbonne',
     kind: 'battle',
     scenarioId: 'orbonne-return',
     position: { x: 0.31, y: 0.37 },
-    requires: ['mandalia-ambush'],
+    requires: [WORLD_NODE_IDS.mandaliaAmbush],
     chapter: 2,
   },
   {
-    id: 'merchant-road',
+    id: WORLD_NODE_IDS.merchantRoad,
     name: 'Merchant Road',
     kind: 'town',
     position: { x: 0.45, y: 0.2 },
-    requires: ['orbonne-return'],
+    requires: [WORLD_NODE_IDS.orbonneReturn],
     chapter: 2,
   },
   {
-    id: 'lionel-reckoning',
+    id: WORLD_NODE_IDS.lionelReckoning,
     name: 'Lionel Reckoning',
     kind: 'battle',
     scenarioId: 'lionel-reckoning',
     position: { x: 0.91, y: 0.16 },
-    requires: ['merchant-road'],
+    requires: [WORLD_NODE_IDS.merchantRoad],
     chapter: 2,
   },
 ];
@@ -178,12 +196,9 @@ export function completeTravelNode(
   const completed = campaign.progress.completed.includes(node.id)
     ? [...campaign.progress.completed]
     : [...campaign.progress.completed, node.id];
+  const arrived = setCurrentWorldNode(campaign, node.id, timestamp);
   return {
-    ...campaign,
-    roster: [...campaign.roster],
-    inventory: { ...campaign.inventory },
-    formation: campaign.formation.map((entry) => ({ ...entry })),
-    progress: { completed, current: node.id },
-    updatedAt: timestamp,
+    ...arrived,
+    progress: { ...arrived.progress, completed },
   };
 }

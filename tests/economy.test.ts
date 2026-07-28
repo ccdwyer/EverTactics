@@ -23,6 +23,7 @@ import {
   type DropTableEntry,
 } from '../src/core/economy';
 import { equipItem } from '../src/core/party';
+import { WORLD_NODES } from '../src/core/world';
 import { bootstrapContent } from '../src/state/content';
 import {
   campaignToBattle,
@@ -230,8 +231,9 @@ describe('campaign economy', () => {
     const equipped = equipItem(campaign, 'm', 'rod', 2_002);
     if (!equipped.ok) throw new Error('expected bought rod to equip');
     campaign = equipped.campaign;
-    const scenario = getScenario('battle-open');
-    const built = campaignToBattle(campaign, scenario);
+    const node = WORLD_NODES[0]!;
+    const scenario = getScenario(node.scenarioId);
+    const built = campaignToBattle(campaign, scenario, { worldNodeId: node.id });
     campaign = battleToCampaign(
       campaign,
       { ...built.state, phase: 'victory' },
@@ -245,6 +247,6 @@ describe('campaign economy', () => {
     expect(restored.inventory.dagger).toBeUndefined();
     expect(restored.inventory['use-potion']).toBe(2);
     expect(restored.roster[0]!.equipment.rightHand).toBe('rod');
-    expect(restored.progress.completed).toContain('battle-open');
+    expect(restored.progress.completed).toContain(node.id);
   });
 });

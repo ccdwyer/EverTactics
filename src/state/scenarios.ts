@@ -31,10 +31,12 @@ import {
 
 import {
   createCampaign,
+  setCurrentWorldNode,
   unitFromPersisted,
   unitToPersisted,
   type CampaignState,
 } from '@core/campaign';
+import type { WorldNodeId } from '@core/ids';
 import { getMapDef, generateMap, positionOn, tileKey } from '@core/grid';
 import { getJob } from '@core/jobs';
 import { createRng } from '@core/rng';
@@ -166,15 +168,17 @@ export interface BuiltScenario {
 }
 
 /**
- * Campaign path result: a playable battle plus the same campaign object the
- * caller passed in, with `progress.current` pinned to this scenario (mutated
- * in place). `battleToCampaign(originalCampaign, battle, ts)` works.
+ * Campaign path result: a playable battle plus the selected durable company.
+ * Battle launch provenance travels on BattleState, so write-back does not rely
+ * on mutating campaign navigation or on the caller retaining a wrapper object.
  */
 export interface CampaignBuiltScenario extends BuiltScenario {
   campaign: CampaignState;
 }
 
 export interface CampaignBattleOptions {
+  /** World-map node that explicitly launched this battle, if any. */
+  worldNodeId?: WorldNodeId;
   /**
    * Place the campaign roster at the scenario's authored player positions.
    * Screenshot mode uses this so routing through the campaign does not move
@@ -382,12 +386,17 @@ export function launchCampaignBattle(
   opts: CampaignLaunchOptions,
 ): CampaignLaunch {
   const loaded = opts.campaign;
-  const campaign =
+  const selected =
     loaded === null || loaded === undefined || loaded.roster.length === 0
       ? newGameCampaign(scenario, opts.timestamp)
       : loaded;
+  const campaign =
+    opts.worldNodeId === undefined
+      ? selected
+      : setCurrentWorldNode(selected, opts.worldNodeId, opts.timestamp);
   const built = campaignToBattle(campaign, scenario, {
     preserveScenarioPlayerPlacements: opts.preserveScenarioPlayerPlacements ?? false,
+    ...(opts.worldNodeId === undefined ? {} : { worldNodeId: opts.worldNodeId }),
   });
   return { campaign, built };
 }
@@ -402,10 +411,9 @@ export function launchCampaignBattle(
  * changes the fight. Map geometry and enemy placements still come from the
  * scenario definition.
  *
- * **Mutates** `campaign.progress.current` to `scenario.id` (overwriting any
- * stale value) so the object the caller already holds works with
- * {@link battleToCampaign} — there is no separate launched copy to remember
- * and no optional scenarioId on write-back.
+ * World-node provenance is copied onto BattleState only when the world map
+ * supplied it. Direct scenario and diagnostic entry paths leave it absent, so
+ * they cannot complete a stale navigation node.
  *
  * Does not replace {@link buildScenario}: diagnostic scenes and the screenshot
  * harness keep using the hardcoded path.
@@ -424,10 +432,6 @@ export function campaignToBattle(
     }
     rosterIds.add(unit.id);
   }
-
-  // Pin on the caller's object. battleToCampaign(campaign, battle, ts) must
-  // record completion without requiring the caller to keep built.campaign.
-  campaign.progress.current = scenario.id;
 
   const field = generateMap(scenario.mapId);
   // Campaign seed drives CT stagger and battle RNG — scenario.seed is unused
@@ -514,6 +518,7 @@ export function campaignToBattle(
     log: [],
     objective: activeEncounter?.objective ?? scenario.objective,
     inventories: new Map([['player', playerStock]]),
+    ...(opts.worldNodeId === undefined ? {} : { campaignNodeId: opts.worldNodeId }),
   };
 
   primeDerived(units.values());

@@ -6,6 +6,7 @@ import { computeBattleRewards } from '../src/core/economy';
 import { BATTLE_DROP_TABLE } from '../src/state/items';
 import { resolveBootRoute } from '../src/state/onboarding';
 import { abilityById } from '../src/state/viewModels';
+import { WORLD_NODES } from '../src/core/world';
 import type {
   ResultScreenVM,
   UIIntent,
@@ -81,6 +82,7 @@ vi.mock('../src/render/camera', () => ({
   IsoCamera: class {
     camera = { layers: { enable: vi.fn() } };
     focusTile = vi.fn();
+    worldToScreen = vi.fn(() => ({ x: 0, y: 0, depth: 0, visible: true }));
   },
 }));
 
@@ -99,6 +101,8 @@ vi.mock('../src/render/lighting', () => ({
 vi.mock('../src/render/sprites', () => ({
   SpriteLayer: class {
     all: unknown[] = [];
+    get = vi.fn();
+    remove = vi.fn();
   },
 }));
 
@@ -113,13 +117,17 @@ vi.mock('../src/render/stage', () => ({
 vi.mock('../src/render/terrain', () => ({
   Terrain: class {},
   buildTerrain: vi.fn(),
-  tileWorldPosition: vi.fn(),
+  tileWorldPosition: vi.fn(() => ({ x: 0, y: 0, z: 0 })),
 }));
 
 vi.mock('../src/render/vfx', () => ({
   VFX_KEYS: [],
   VfxSystem: class {
     addTo = vi.fn();
+    beginCharge = vi.fn();
+    play = vi.fn(async () => undefined);
+    playHitSpark = vi.fn();
+    playBloodBurst = vi.fn();
   },
 }));
 
@@ -132,6 +140,8 @@ vi.mock('../src/ui/UIRoot', () => ({
     setHudVisible = vi.fn();
     setTargetPreview = vi.fn();
     closeMenus = vi.fn();
+    hideAbilityMenu = vi.fn();
+    hideCommandMenu = vi.fn();
     closeScreen = vi.fn();
     banner = vi.fn();
     presentBattleIntro = vi.fn((vm: { mapName: string; encounterName: string }) => {
@@ -158,6 +168,8 @@ vi.mock('../src/ui/UIRoot', () => ({
     setTurnOrder = vi.fn();
     setActiveUnit = vi.fn();
     showCommandMenu = vi.fn();
+    setHints = vi.fn();
+    float = vi.fn();
     updateJobScreen = vi.fn((vm: typeof uiCapture.openedJobVM) => {
       uiCapture.openedJobVM = vm;
     });
@@ -180,6 +192,46 @@ function peacefulFirstBattle(): Scenario {
     ...shipped,
     layers: { ...shipped.layers, ui: false },
     units: shipped.units.filter((placement) => placement.team === 'player'),
+  };
+}
+
+function peacefulFirstLesson(): Scenario {
+  const shipped = getScenario('first-lesson');
+  return {
+    ...shipped,
+    layers: { ...shipped.layers, ui: false },
+    units: shipped.units.filter((placement) => placement.team === 'player'),
+  };
+}
+
+function adjacentFinisherScenario(): Scenario {
+  const shipped = getScenario('first-lesson');
+  const player = shipped.units.find((placement) => placement.team === 'player')!;
+  const { encounterId: _encounterId, ...withoutEncounter } = shipped;
+  return {
+    ...withoutEncounter,
+    id: 'ui-victory-regression',
+    layers: { ...shipped.layers, ui: true },
+    units: [
+      { ...player, ct: 100 },
+      {
+        id: 'e-adjacent',
+        name: 'Adjacent Novice',
+        job: 'squire',
+        gender: 'male',
+        team: 'enemy',
+        level: 1,
+        zodiac: 'taurus',
+        brave: 50,
+        faith: 50,
+        at: { x: 4, y: 11 },
+        facing: 'N',
+        equipment: {},
+        personality: 'defensive',
+        ct: 0,
+      },
+    ],
+    objective: { kind: 'defeat-all' },
   };
 }
 
@@ -210,6 +262,15 @@ function persistedDarkKnightCandidate(): PersistedUnit {
 function newGame(): Game {
   return new Game({
     scenarioId: 'battle-open',
+    container: {} as HTMLElement,
+    uiMount: {} as HTMLElement,
+  });
+}
+
+function newGameAtFirstNode(): Game {
+  return new Game({
+    scenarioId: 'first-lesson',
+    params: new URLSearchParams('node=battle-open'),
     container: {} as HTMLElement,
     uiMount: {} as HTMLElement,
   });
@@ -263,12 +324,12 @@ describe('Game campaign routing', () => {
     expect(saves.loadCalls).toBe(1);
     expect(game.campaign.inventory['use-potion']).toBe(3);
     expect(game.state.inventories?.get('player')?.get('use-potion')).toBe(3);
-    expect(game.campaign.progress.current).toBe('battle-open');
-    expect(saves.written.at(-1)?.progress.current).toBe('battle-open');
+    expect(game.campaign.progress.current).toBeUndefined();
+    expect(saves.written.at(-1)?.progress.current).toBeUndefined();
 
     saves.loaded = {
       ...game.campaign,
-      progress: { completed: ['battle-open'], current: 'battle-open' },
+      progress: { completed: [WORLD_NODES[0]!.id], current: WORLD_NODES[0]!.id },
     };
     const map = new Game({
       scenarioId: 'battle-open',
@@ -297,9 +358,28 @@ describe('Game campaign routing', () => {
     expect(saves.written.at(-1)?.progress.current).toBe('battle-open');
   });
 
+  it('does not replace a world-node current value during a direct scenario boot', () => {
+    const previousNode = WORLD_NODES.find((node) => node.id === 'gariland-camp')!;
+    const campaign = createCampaign(99, 1_000);
+    campaign.roster = [persistedDarkKnightCandidate()];
+    campaign.formation = [{ unitId: 'k', startIndex: 0 }];
+    campaign.progress.current = previousNode.id;
+    saves.loaded = campaign;
+
+    const game = new Game({
+      scenarioId: 'first-lesson',
+      container: {} as HTMLElement,
+      uiMount: {} as HTMLElement,
+    });
+
+    expect(game.campaign.progress.current).toBe(previousNode.id);
+    expect(game.state.campaignNodeId).toBeUndefined();
+    expect(saves.written.at(-1)?.progress.current).toBe(previousNode.id);
+  });
+
   it('records a victory in the first battle without assigning BattleState fields', () => {
-    routing.scenario = peacefulFirstBattle();
-    const game = newGame();
+    routing.scenario = peacefulFirstLesson();
+    const game = newGameAtFirstNode();
     const encounter = getEncounter(game.scenario.encounterId)!;
     const expected = computeBattleRewards(
       game.campaign.seed,
@@ -319,6 +399,41 @@ describe('Game campaign routing', () => {
         ((itemId === 'use-potion' ? 3 : 0) + count),
       );
     }
+  });
+
+  it('routes a real player attack victory into the outcome and result screens', async () => {
+    routing.scenario = adjacentFinisherScenario();
+    const campaign = createCampaign(99, 1_000);
+    campaign.roster = [{
+      ...persistedDarkKnightCandidate(),
+      id: 'p-finisher',
+      name: 'Finisher',
+      equipment: { rightHand: 'defender' },
+      support: 'concentrate',
+      raw: { hp: 400, mp: 90, pa: 99, ma: 10, spd: 9 },
+    }];
+    campaign.formation = [{ unitId: 'p-finisher', startIndex: 0 }];
+    saves.loaded = campaign;
+    const game = new Game({
+      scenarioId: 'ui-victory-regression',
+      container: {} as HTMLElement,
+      uiMount: {} as HTMLElement,
+    });
+
+    await game.beginTurn();
+    expect(game.state.phase).toBe('awaiting-command');
+    expect(game.state.units.get(game.state.active!)?.team).toBe('player');
+
+    uiCapture.intentHandler?.({ kind: 'command', id: 'attack' });
+    const enemy = [...game.state.units.values()].find((unit) => unit.team === 'enemy')!;
+    await (game as unknown as { onClick(tile: typeof enemy.pos): Promise<void> })
+      .onClick(enemy.pos);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(game.state.phase).toBe('victory');
+    expect(uiCapture.outcome?.outcome).toBe('victory');
+    expect(uiCapture.result?.outcome).toBe('victory');
   });
 
   // REMOVED: 'opens the result flow when a player action wins the battle'.
@@ -396,8 +511,8 @@ describe('Game campaign routing', () => {
   });
 
   it('returns to the world map with the saved campaign after dismissing battle results', () => {
-    routing.scenario = peacefulFirstBattle();
-    const game = newGame();
+    routing.scenario = peacefulFirstLesson();
+    const game = newGameAtFirstNode();
 
     advance(game.state);
     expect(game.state.phase).toBe('victory');
@@ -497,6 +612,24 @@ describe('Game campaign routing', () => {
       expect([...game.built.personalities], scenario.id).toEqual([...hardcoded.personalities]);
     }
     expect(saves.loadCalls).toBe(0);
+    expect(saves.written).toEqual([]);
+  });
+
+  it('does not overwrite the durable campaign after a live diagnostic scene ends', async () => {
+    const durable = createCampaign(99, 1_000);
+    durable.roster = [persistedDarkKnightCandidate()];
+    durable.formation = [{ unitId: 'k', startIndex: 0 }];
+    durable.progress.current = WORLD_NODES[0]!.id;
+    saves.loaded = durable;
+
+    const game = new Game({
+      scenarioId: 'terrain-only',
+      container: {} as HTMLElement,
+      uiMount: {} as HTMLElement,
+    });
+    await game.startBattle();
+
+    expect(game.state.phase).toBe('defeat');
     expect(saves.written).toEqual([]);
   });
 

@@ -262,26 +262,20 @@ export class Game {
       this.state = this.built.state;
       this.campaign = this.seedCampaignFromField({ persist: false });
     } else {
+      const routedNode = this.routedWorldNode();
       const launched = launchCampaignBattle(this.scenario, {
         // Tooling must never read or overwrite the player's durable company.
         campaign: this.shot ? null : loadCampaign(),
         timestamp: Date.now(),
         // Keep the authored composition while still exercising the campaign path.
         preserveScenarioPlayerPlacements: this.shot,
+        ...(routedNode === undefined ? {} : { worldNodeId: routedNode.id }),
       });
       this.campaign = launched.campaign;
       this.built = launched.built;
       this.state = this.built.state;
-      const routedNode = this.worldNodeId === null
-        ? undefined
-        : WORLD_NODES.find(
-            (node) =>
-              node.id === this.worldNodeId &&
-              node.scenarioId === this.scenario.id,
-          );
-      if (routedNode) this.campaign.progress.current = routedNode.id;
-      // campaignToBattle pins progress.current. Persist after that happens so
-      // the save on disk represents the battle that actually launched.
+      // Persist the node selected by the world map before play begins. Direct
+      // scenario boots preserve the existing navigation value.
       if (!this.shot) saveCampaign(this.campaign);
     }
     this.snapshotProgress();
@@ -323,6 +317,15 @@ export class Game {
     this.ui = new UIRoot(uiMount, { sound: !this.shot });
     this.disposers.push(this.ui.on((intent) => this.onIntent(intent)));
     if (!this.scenario.layers.ui) this.ui.setHudVisible(false);
+  }
+
+  private routedWorldNode(): WorldNode | undefined {
+    if (this.worldNodeId === null) return undefined;
+    return WORLD_NODES.find(
+      (node) =>
+        node.id === this.worldNodeId &&
+        node.scenarioId === this.scenario.id,
+    );
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -811,7 +814,7 @@ export class Game {
       encounter !== undefined
         ? computeBattleRewards(
             this.campaign.seed,
-            this.worldNodeId ?? this.campaign.progress.current ?? this.scenario.id,
+            this.state.campaignNodeId ?? this.scenario.id,
             encounter.enemies,
             BATTLE_DROP_TABLE,
           )
@@ -829,9 +832,17 @@ export class Game {
     this.ui.closeMenus();
     // Fold field progress (JP, exp, inventory stock) back into the campaign so
     // a refresh mid-result still keeps what was earned.
-    this.persistCampaign(
-      battleToCampaign(this.campaign, this.state, Date.now(), rewards),
+    const nextCampaign = battleToCampaign(
+      this.campaign,
+      this.state,
+      Date.now(),
+      rewards,
     );
+    if (isDiagnosticScenario(this.scenario.id)) {
+      this.campaign = nextCampaign;
+    } else {
+      this.persistCampaign(nextCampaign);
+    }
     if (!this.scenario.layers.ui) return;
 
     // The result screen counts up from the snapshot taken at deploy, so the
@@ -1872,7 +1883,10 @@ export class Game {
     this.ui.closeMenus();
     this.hoverTile = null;
 
-    const built = campaignToBattle(this.campaign, this.scenario);
+    const routedNode = this.routedWorldNode();
+    const built = campaignToBattle(this.campaign, this.scenario, {
+      ...(routedNode === undefined ? {} : { worldNodeId: routedNode.id }),
+    });
     this.built = built;
     this.state = built.state;
     this.progressSnapshot.clear();
@@ -2143,7 +2157,9 @@ export class Game {
       if (path.length < 2) return;
       this.setMode({ kind: 'idle' });
       const ok = await this.submit({ kind: 'move', unit: unit.id, path });
-      if (ok && this.state.active === unit.id) this.enterCommandMode(unit);
+      if (ok && !isOver(this.state) && this.state.active === unit.id) {
+        this.enterCommandMode(unit);
+      }
       else void this.beginTurn();
       return;
     }
@@ -2162,7 +2178,9 @@ export class Game {
         target: aim,
         ...(victim ? { targetUnit: victim.id } : {}),
       });
-      if (ok && this.state.active === unit.id) this.enterCommandMode(unit);
+      if (ok && !isOver(this.state) && this.state.active === unit.id) {
+        this.enterCommandMode(unit);
+      }
       else void this.beginTurn();
       return;
     }

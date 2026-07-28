@@ -6,6 +6,8 @@
  * Rendering (`render/`) observes core state; it never mutates it.
  */
 
+import type { WorldNodeId } from './ids';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Geometry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -437,6 +439,13 @@ export interface BattleState {
   rngState: number;
   log: BattleLogEntry[];
   objective: Objective;
+  /**
+   * World-map node that launched this battle, when there is one.
+   *
+   * Direct scenario and diagnostic boots intentionally leave this absent.
+   * Write-back reads this provenance instead of ambient campaign navigation.
+   */
+  campaignNodeId?: WorldNodeId;
   /**
    * Consumable stock, one shared pile per side (FFT's party inventory).
    * Plain data so it clones and replays with the rest of the state; read and

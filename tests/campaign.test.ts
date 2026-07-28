@@ -22,6 +22,7 @@ import {
 } from '../src/core/campaign';
 import { advance, applyCommand, evaluateObjective } from '../src/core/battle';
 import { decideTurn } from '../src/core/ai';
+import { WORLD_NODES } from '../src/core/world';
 import { gainExp, gainJp } from '../src/core/unit';
 import type { BattleEvent, BattleState, Unit } from '../src/core/types';
 import {
@@ -31,7 +32,16 @@ import {
   loadCampaign,
   saveCampaign,
 } from '../src/state/save';
-import { buildScenario, campaignToBattle, getScenario } from '../src/state/scenarios';
+import {
+  buildScenario,
+  campaignToBattle,
+  getScenario,
+  launchCampaignBattle,
+} from '../src/state/scenarios';
+
+function finishedBattle(state: BattleState, phase: 'victory' | 'defeat'): BattleState {
+  return { ...state, phase };
+}
 
 /** Minimal valid v1 roster unit for negative validation cases. */
 function validPersistedUnit(overrides: Partial<PersistedUnit> = {}): PersistedUnit {
@@ -170,7 +180,7 @@ describe('campaign serialize / deserialize', () => {
     const original = campaignFromBattleOpen(42, 100);
     // Put some earned progress on so the blob is non-trivial.
     original.gil = 1500;
-    original.progress.completed = ['tutorial-skirmish'];
+    original.progress.completed = [WORLD_NODES[0]!.id];
     original.roster[0]!.exp = 47;
     // Deliberately unsorted learned[] — current-version load must not re-sort.
     original.roster[0]!.jobs['knight'] = {
@@ -779,10 +789,10 @@ describe('determinism across save/load', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('battleToCampaign', () => {
-  it('writes back earned JP/exp and marks the scenario completed on victory (3-arg form)', () => {
+  it('writes back earned JP/exp and marks the launched world node completed', () => {
     const base = campaignFromBattleOpen(55, 100);
-    const scenario = getScenario('battle-open');
-    // Launch is campaignToBattle itself — no separate beginScenario step.
+    const node = WORLD_NODES[0]!;
+    const scenario = getScenario(node.scenarioId);
     expect(base.progress.current).toBeUndefined();
 
     const before = base.roster.map((u) => ({
@@ -795,11 +805,15 @@ describe('battleToCampaign', () => {
       ),
     }));
 
-    const built = campaignToBattle(base, scenario);
-    // Pins on the caller's object (same reference as built.campaign).
-    expect(base.progress.current).toBe(scenario.id);
-    expect(built.campaign).toBe(base);
-    const state = built.state;
+    const launched = launchCampaignBattle(scenario, {
+      campaign: base,
+      timestamp: 150,
+      worldNodeId: node.id,
+    });
+    expect(base.progress.current).toBeUndefined();
+    expect(launched.campaign.progress.current).toBe(node.id);
+    expect(launched.built.state.campaignNodeId).toBe(node.id);
+    const state = launched.built.state;
 
     // Award known gains without playing a full fight.
     for (const unit of state.units.values()) {
@@ -813,14 +827,15 @@ describe('battleToCampaign', () => {
     expect(playerInv?.get('use-potion')).toBe(potionsBefore);
     playerInv?.set('use-potion', Math.max(0, potionsBefore - 2));
 
-    state.phase = 'victory';
+    const victory = finishedBattle(state, 'victory');
 
     // Three-arg form with the original campaign the caller already held.
-    const after = battleToCampaign(base, state, 200);
+    const after = battleToCampaign(launched.campaign, victory, 200);
     expect(after.updatedAt).toBe(200);
     expect(after.createdAt).toBe(base.createdAt);
-    expect(after.progress.completed).toContain(scenario.id);
-    expect(after.progress.current).toBe(scenario.id);
+    expect(after.progress.completed).toContain(node.id);
+    expect(after.progress.completed).not.toContain(scenario.id);
+    expect(after.progress.current).toBe(node.id);
     expect(after.inventory['use-potion']).toBe(potionsBefore - 2);
 
     for (const prior of before) {
@@ -837,60 +852,81 @@ describe('battleToCampaign', () => {
     }
 
     // Write-back returns a new state; completed is not mutated onto the input.
-    expect(base.progress.completed).not.toContain(scenario.id);
+    expect(base.progress.completed).not.toContain(node.id);
     expect(base.updatedAt).toBe(100);
   });
 
-  it('records completion when the original campaign is passed to battleToCampaign', () => {
-    // Brief contract: completion must not depend on which object the caller kept.
-    // campaignToBattle pins progress.current on the passed campaign in place.
+  it('records launch provenance without requiring the caller to retain a wrapper', () => {
     const base = campaignFromBattleOpen(8, 10);
-    const scenario = getScenario('battle-open');
-    const built = campaignToBattle(base, scenario);
-    expect(base.progress.current).toBe(scenario.id);
+    const node = WORLD_NODES[0]!;
+    const scenario = getScenario(node.scenarioId);
+    const built = campaignToBattle(base, scenario, { worldNodeId: node.id });
+    expect(base.progress.current).toBeUndefined();
     expect(built.campaign).toBe(base);
+    expect(built.state.campaignNodeId).toBe(node.id);
 
-    built.state.phase = 'victory';
-    const after = battleToCampaign(base, built.state, 20);
-    expect(after.progress.completed).toContain(scenario.id);
-    expect(after.progress.current).toBe(scenario.id);
+    const after = battleToCampaign(base, finishedBattle(built.state, 'victory'), 20);
+    expect(after.progress.completed).toContain(node.id);
+    expect(after.progress.completed).not.toContain(scenario.id);
+    expect(after.progress.current).toBeUndefined();
   });
 
-  it('campaignToBattle overwrites a stale progress.current so the previous scenario is not credited', () => {
+  it('a direct scenario boot neither rewrites nor completes a stale world node', () => {
     const base = campaignFromBattleOpen(3, 10);
-    base.progress.current = 'old-stale-fight';
-    const scenario = getScenario('battle-open');
+    const previousNode = WORLD_NODES.find((node) => node.id === 'gariland-camp')!;
+    base.progress.current = previousNode.id;
+    const scenario = getScenario('first-lesson');
 
     const built = campaignToBattle(base, scenario);
-    expect(base.progress.current).toBe(scenario.id);
-    expect(base.progress.current).not.toBe('old-stale-fight');
-    expect(built.campaign.progress.current).toBe(scenario.id);
+    expect(base.progress.current).toBe(previousNode.id);
+    expect(built.campaign.progress.current).toBe(previousNode.id);
+    expect(built.state.campaignNodeId).toBeUndefined();
 
-    built.state.phase = 'victory';
-    // Original campaign (not a separate launched copy) still completes correctly.
-    const after = battleToCampaign(base, built.state, 20);
-    expect(after.progress.completed).toContain(scenario.id);
-    expect(after.progress.completed).not.toContain('old-stale-fight');
+    const after = battleToCampaign(base, finishedBattle(built.state, 'victory'), 20);
+    expect(after.progress.current).toBe(previousNode.id);
+    expect(after.progress.completed).not.toContain(previousNode.id);
+    expect(after.progress.completed).not.toContain(scenario.id);
+  });
+
+  it('a diagnostic battle cannot complete or rewrite campaign navigation', () => {
+    const base = campaignFromBattleOpen(3, 10);
+    const current = WORLD_NODES[0]!.id;
+    base.progress.current = current;
+    const diagnostic = buildScenario(getScenario('terrain-only')).state;
+
+    const after = battleToCampaign(base, finishedBattle(diagnostic, 'victory'), 20);
+
+    expect(diagnostic.campaignNodeId).toBeUndefined();
+    expect(after.progress.completed).toEqual([]);
+    expect(after.progress.current).toBe(current);
   });
 
   it('does not mark completion on defeat', () => {
     const base = campaignFromBattleOpen(3, 10);
-    const built = campaignToBattle(base, getScenario('battle-open'));
-    built.state.phase = 'defeat';
-    const after = battleToCampaign(base, built.state, 20);
-    expect(after.progress.completed).not.toContain('battle-open');
-    // current still records where the player was.
-    expect(after.progress.current).toBe('battle-open');
+    const node = WORLD_NODES[0]!;
+    const launched = launchCampaignBattle(getScenario(node.scenarioId), {
+      campaign: base,
+      timestamp: 15,
+      worldNodeId: node.id,
+    });
+    const after = battleToCampaign(
+      launched.campaign,
+      finishedBattle(launched.built.state, 'defeat'),
+      20,
+    );
+    expect(after.progress.completed).not.toContain(node.id);
+    expect(after.progress.current).toBe(node.id);
   });
 
   it('does not mutate battle when inventory is absent, and keeps campaign stock', () => {
     const base = campaignFromBattleOpen(11, 50);
+    const node = WORLD_NODES[0]!;
     base.inventory = { 'use-potion': 5 };
-    // Simulate a launch that already pinned current (e.g. a custom scenario id).
+    // Simulate a world-node launch without installing a battle inventory.
     const launched = {
       ...base,
       inventory: { ...base.inventory },
-      progress: { completed: [...base.progress.completed], current: 'some-fight' },
+      progress: { completed: [...base.progress.completed], current: node.id },
     };
 
     // Minimal battle with no inventories map.
@@ -904,6 +940,7 @@ describe('battleToCampaign', () => {
       rngState: 0,
       log: [],
       objective: { kind: 'defeat-all' },
+      campaignNodeId: node.id,
     };
     expect(battle.inventories).toBeUndefined();
 
@@ -912,6 +949,6 @@ describe('battleToCampaign', () => {
     expect(battle.inventories).toBeUndefined();
     // Campaign stock preserved (not replaced with default starting pile).
     expect(after.inventory).toEqual({ 'use-potion': 5 });
-    expect(after.progress.completed).toContain('some-fight');
+    expect(after.progress.completed).toContain(node.id);
   });
 });

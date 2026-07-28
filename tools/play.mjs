@@ -209,6 +209,7 @@ const probe = () =>
               exp: unit.exp,
               totalExp: unit.totalExp,
               currentJob: unit.currentJob,
+              equipment: unit.equipment,
               jobs: Object.fromEntries(
                 Object.entries(unit.jobs ?? {}).map(([job, progress]) => [
                   job,
@@ -347,6 +348,17 @@ const autoplayBattle = async () => {
     if (await page.locator('.et-result.is-open').count()) break;
     const phase = await page.evaluate(() => window.__EVERTACTICS__?.state.phase);
     if (phase === 'victory' || phase === 'defeat') {
+      const presentation = page.locator(
+        `.et-battle-presentation.is-open[data-kind="${phase}"]`,
+      );
+      await presentation.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined);
+      if (await presentation.isVisible().catch(() => false)) {
+        steps.push({
+          action: `autoplay-${phase}`,
+          shot: await capture(`battle-${phase}`),
+          state: await probe(),
+        });
+      }
       await page.locator('.et-result.is-open').waitFor({ state: 'visible', timeout: 120000 });
       break;
     }
@@ -558,15 +570,17 @@ if (cdpPort > 0) await page.close();
 await browser.close();
 if (child) child.kill();
 
+const isMissingFavicon = (failedUrl) => {
+  try {
+    return new URL(failedUrl).pathname === '/favicon.ico';
+  } catch {
+    return false;
+  }
+};
 const onlyMissingFavicon =
-  failedResponses.length > 0 &&
-  failedResponses.every(({ url: failedUrl }) => {
-    try {
-      return new URL(failedUrl).pathname === '/favicon.ico';
-    } catch {
-      return false;
-    }
-  });
+  failedResponses.length + consoleErrors.length > 0 &&
+  failedResponses.every(({ url: failedUrl }) => isMissingFavicon(failedUrl)) &&
+  consoleErrors.every(({ url: errorUrl }) => isMissingFavicon(errorUrl));
 const errors = [
   ...consoleErrors
     .filter(({ message }) => !(

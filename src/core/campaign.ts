@@ -25,6 +25,7 @@ import type {
   Vec3,
   Zodiac,
 } from './types';
+import { worldNodeId, type WorldNodeId } from './ids';
 import { JOBS } from './jobs';
 import {
   createUnit,
@@ -85,10 +86,10 @@ export interface PersistedUnit {
 }
 
 export interface CampaignProgress {
-  /** Scenario ids already won. */
-  completed: string[];
-  /** Scenario (or world-map node) the player is at. */
-  current?: string;
+  /** World-map node ids already completed. */
+  completed: WorldNodeId[];
+  /** World-map node the player is currently navigating from. */
+  current?: WorldNodeId;
 }
 
 /** One roster member assigned to one scenario start-tile index. */
@@ -541,9 +542,9 @@ function requireProgress(raw: object): CampaignProgress {
     throw new Error('campaign migrate: progress.current must be a string when present');
   }
   const progress: CampaignProgress = {
-    completed: [...(obj.completed as string[])],
+    completed: (obj.completed as string[]).map(worldNodeId),
   };
-  if (typeof obj.current === 'string') progress.current = obj.current;
+  if (typeof obj.current === 'string') progress.current = worldNodeId(obj.current);
   return progress;
 }
 
@@ -796,8 +797,8 @@ function normalizeProgress(raw: unknown): CampaignProgress {
   const completed = Array.isArray(obj.completed)
     ? obj.completed.filter((id): id is string => typeof id === 'string')
     : [];
-  const progress: CampaignProgress = { completed: [...completed] };
-  if (typeof obj.current === 'string') progress.current = obj.current;
+  const progress: CampaignProgress = { completed: completed.map(worldNodeId) };
+  if (typeof obj.current === 'string') progress.current = worldNodeId(obj.current);
   return progress;
 }
 
@@ -917,18 +918,17 @@ function num(v: unknown, fallback: number): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Mark which scenario the player is entering.
+ * Move durable campaign navigation to one authored world-map node.
  *
- * Pins `progress.current` on a *new* campaign object (does not mutate `campaign`).
- * {@link campaignToBattle} mutates the caller's campaign in place instead, so
- * write-back works with the object the caller already holds.
- *
- * Overwrites any stale `progress.current` so a previous scenario cannot be
- * credited by accident.
+ * `progress.current` deliberately stores a world-node id, never a scenario id:
+ * the map is what the player navigates and what progression completes, while a
+ * scenario is content referenced by a node and may also boot directly or for
+ * diagnostics. Keep the assignment centralized here so those entry paths
+ * cannot silently introduce a second id space again.
  */
-export function beginScenario(
+export function setCurrentWorldNode(
   campaign: CampaignState,
-  scenarioId: string,
+  nodeId: WorldNodeId,
   timestamp: number,
 ): CampaignState {
   return {
@@ -938,7 +938,7 @@ export function beginScenario(
     formation: (campaign.formation ?? []).map((e) => ({ ...e })),
     progress: {
       completed: [...campaign.progress.completed],
-      current: scenarioId,
+      current: nodeId,
     },
     updatedAt: timestamp,
   };
@@ -948,14 +948,13 @@ export function beginScenario(
  * Fold a finished battle back into the campaign.
  *
  * Victory writes exp, JP, levels, learned abilities, equipment, support slots,
- * raw stats, party inventory stock, rewards, and `progress.current` into
- * `progress.completed`. Defeat preserves the pre-battle durable state so the
- * encounter can be retried. Does not mutate `campaign` or `battle`.
+ * raw stats, party inventory stock, rewards, and the battle's explicit
+ * `campaignNodeId` into `progress.completed`. Defeat preserves the pre-battle
+ * durable state so the encounter can be retried. Does not mutate `campaign` or
+ * `battle`.
  *
- * Scenario identity comes only from `campaign.progress.current`. Launch via
- * {@link campaignToBattle} pins `current` on the *caller's* campaign object, so
- * `battleToCampaign(originalCampaign, battle, ts)` records completion without
- * requiring the caller to keep a separate launched copy.
+ * Direct scenario and diagnostic battles carry no campaign node provenance, so
+ * they can write rewards without completing or rewriting an unrelated map node.
  *
  * Inventory: reads `battle.inventories` for the player team if present. Does not
  * call `inventoryFor` (which would mutate the battle and manufacture default
@@ -1027,16 +1026,16 @@ export function battleToCampaign(
   }
 
   const completed = [...campaign.progress.completed];
-  const current = campaign.progress.current;
-  if (current !== undefined) {
-    if (!completed.includes(current)) {
-      completed.push(current);
+  const completedNode = battle.campaignNodeId;
+  if (completedNode !== undefined) {
+    if (!completed.includes(completedNode)) {
+      completed.push(completedNode);
     }
   }
 
   const progress: CampaignProgress = { completed };
-  if (current !== undefined) {
-    progress.current = current;
+  if (campaign.progress.current !== undefined) {
+    progress.current = campaign.progress.current;
   }
 
   return {

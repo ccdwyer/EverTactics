@@ -20,13 +20,14 @@ import {
   campaignToBattle,
   getEncounter,
   getScenario,
+  launchCampaignBattle,
   newGameCampaign,
 } from '../src/state/scenarios';
 import { BATTLE_DROP_TABLE } from '../src/state/items';
 import type { BattleState } from '../src/core/types';
 
-const FIRST_BATTLE_ID = 'battle-open';
-const FIRST_DESTINATION_ID = 'gariland-camp';
+const FIRST_BATTLE_ID = WORLD_NODES[0]!.id;
+const FIRST_DESTINATION_ID = WORLD_NODES[1]!.id;
 
 function freshCampaign(): CampaignState {
   return newGameCampaign(getScenario(FIRST_BATTLE_ID), 1_700_000_000_000);
@@ -63,7 +64,9 @@ describe('world progression', () => {
 
   it('records a won battle node and unlocks the next objective', () => {
     const campaign = freshCampaign();
-    const scenario = getScenario(FIRST_BATTLE_ID);
+    const firstNode = WORLD_NODES.find((node) => node.id === FIRST_BATTLE_ID);
+    expect(firstNode?.scenarioId).toBe('first-lesson');
+    const scenario = getScenario(firstNode!.scenarioId);
     const encounter = getEncounter(scenario.encounterId);
     expect(encounter).toBeDefined();
     const firstUnit = campaign.roster[0]!;
@@ -74,15 +77,21 @@ describe('world progression', () => {
       encounter!.enemies,
       BATTLE_DROP_TABLE,
     );
-    const built = campaignToBattle(campaign, scenario);
-    const won = battleToCampaign(
+    const launched = launchCampaignBattle(scenario, {
       campaign,
-      finishedBattle(built.state, 'victory'),
+      timestamp: 1_700_000_000_500,
+      worldNodeId: firstNode!.id,
+    });
+    const won = battleToCampaign(
+      launched.campaign,
+      finishedBattle(launched.built.state, 'victory'),
       1_700_000_001_000,
       { ...encounter!.rewards, gil: economy.gil, items: economy.items },
     );
 
+    expect(launched.campaign.progress.current).toBe(firstNode!.id);
     expect(won.progress.completed).toContain(FIRST_BATTLE_ID);
+    expect(won.progress.completed).not.toContain(scenario.id);
     expect(nextObjective(won)?.id).toBe(FIRST_DESTINATION_ID);
     expect(availableNodes(won).map((node) => node.id)).toContain(FIRST_DESTINATION_ID);
     expect(won.gil).toBe(campaign.gil + economy.gil);
@@ -107,10 +116,15 @@ describe('world progression', () => {
 
   it('preserves the whole progression chain through serialize and deserialize', () => {
     const campaign = freshCampaign();
-    const first = campaignToBattle(campaign, getScenario(FIRST_BATTLE_ID));
-    const won = battleToCampaign(
+    const firstNode = WORLD_NODES.find((node) => node.id === FIRST_BATTLE_ID)!;
+    const first = launchCampaignBattle(getScenario(firstNode.scenarioId), {
       campaign,
-      finishedBattle(first.state, 'victory'),
+      timestamp: 1_700_000_000_500,
+      worldNodeId: firstNode.id,
+    });
+    const won = battleToCampaign(
+      first.campaign,
+      finishedBattle(first.built.state, 'victory'),
       1_700_000_001_000,
     );
     const visitedTown: CampaignState = {
