@@ -16,6 +16,15 @@ shots/*
 !shots/acc-mine/01-Enter.png
 !shots/acc-mine2/02-click-0.113-0.75.png
 !shots/acc-mine4/04-reload.png
+!shots/battle-ux/
+shots/battle-ux/*
+!shots/battle-ux/01-camera-before.png
+!shots/battle-ux/01-camera-after.png
+!shots/battle-ux/02-move-range-before.png
+!shots/battle-ux/02-move-range-after.png
+!shots/battle-ux/03-enemy-path-before.png
+!shots/battle-ux/03-enemy-path-after.png
+!shots/battle-ux/measurements.md
 !shots/softlock/
 shots/softlock/*
 !shots/softlock/world-back/

@@ -10,6 +10,9 @@ import {
 } from '../src/render/abilityPresentation';
 import {
   AbilityCameraDirector,
+  ORDINARY_ACTION_CAMERA_PROFILE,
+  abilityCameraFocus,
+  abilityCameraProfile,
   type AbilityCameraRig,
 } from '../src/render/abilityCamera';
 import { VFX_KEYS } from '../src/render/vfx';
@@ -54,11 +57,34 @@ describe('signature ability presentation', () => {
     expect(signatureAbilityPresentation('use-elixir')).toBeUndefined();
   });
 
+  it('gives ordinary actions a fast fallback while preserving signature profiles', () => {
+    expect(abilityCameraProfile('attack')).toBe(ORDINARY_ACTION_CAMERA_PROFILE);
+    expect(abilityCameraProfile('fire')).toBe(ORDINARY_ACTION_CAMERA_PROFILE);
+    expect(abilityCameraProfile('use-potion')).toBe(ORDINARY_ACTION_CAMERA_PROFILE);
+    expect(abilityCameraProfile('flare')).toBe(SIGNATURE_ABILITY_PRESENTATIONS.flare.camera);
+    expect(
+      ORDINARY_ACTION_CAMERA_PROFILE.pushSeconds
+        + ORDINARY_ACTION_CAMERA_PROFILE.restoreSeconds,
+    ).toBeLessThan(0.5);
+  });
+
+  it('frames the bounds of every impacted target around the selected panel', () => {
+    expect(
+      abilityCameraFocus(
+        new Vector3(4, 2, 8),
+        [
+          new Vector3(-2, 0, 6),
+          new Vector3(10, 4, -2),
+        ],
+      ),
+    ).toEqual(new Vector3(4, 2.75, 3));
+  });
+
   it('keeps seeded event bytes stable when applying the render-side presentation policy', () => {
     const baseline = runAiBattle(7);
     const observed = runAiBattle(7, 'battle-open', false, 400, true, (events) => {
       for (const event of events) {
-        if (event.kind === 'cast-fire') signatureAbilityPresentation(event.ability);
+        if (event.kind === 'cast-fire') abilityCameraProfile(event.ability);
       }
     });
 
@@ -86,6 +112,27 @@ class FakeCamera implements AbilityCameraRig {
   }
 }
 
+class GatedPushCamera extends FakeCamera {
+  private finishPush!: () => void;
+  readonly push = new Promise<void>((resolve) => {
+    this.finishPush = resolve;
+  });
+
+  override cinematic(): Promise<void> {
+    this.cinematicCalls++;
+    return this.push;
+  }
+
+  override cancelCinematic(): void {
+    this.skipCalls++;
+    this.landOnTarget();
+  }
+
+  landOnTarget(): void {
+    this.finishPush();
+  }
+}
+
 describe('AbilityCameraDirector', () => {
   const profile = SIGNATURE_ABILITY_PRESENTATIONS.flare.camera;
 
@@ -103,6 +150,59 @@ describe('AbilityCameraDirector', () => {
     expect(camera.cinematicCalls).toBe(1);
     expect(camera.restoreCalls).toBe(1);
     expect(camera.skipCalls).toBe(0);
+  });
+
+  it('lands on an ordinary target before its visible effect starts', async () => {
+    const target = new EventTarget();
+    const camera = new GatedPushCamera();
+    const director = new AbilityCameraDirector(camera, target);
+    let played = false;
+
+    const running = director.present(
+      ORDINARY_ACTION_CAMERA_PROFILE,
+      new Vector3(3, 1, 5),
+      async () => {
+        played = true;
+      },
+    );
+    await Promise.resolve();
+    expect(played).toBe(false);
+
+    camera.landOnTarget();
+    await running;
+
+    expect(played).toBe(true);
+    expect(camera.restoreCalls).toBe(1);
+  });
+
+  it('starts an ordinary effect after a skipped push and still awaits its completion', async () => {
+    const target = new EventTarget();
+    const camera = new GatedPushCamera();
+    const director = new AbilityCameraDirector(camera, target);
+    let finishEffect!: () => void;
+    let effectStarted = false;
+    const effect = new Promise<void>((resolve) => {
+      finishEffect = resolve;
+    });
+
+    const running = director.present(
+      ORDINARY_ACTION_CAMERA_PROFILE,
+      new Vector3(3, 1, 5),
+      () => {
+        effectStarted = true;
+        return effect;
+      },
+    );
+    await Promise.resolve();
+
+    target.dispatchEvent(new Event('keydown', { cancelable: true }));
+    await Promise.resolve();
+    expect(effectStarted).toBe(true);
+    expect(camera.skipCalls).toBe(1);
+
+    finishEffect();
+    await running;
+    expect(camera.restoreCalls).toBe(0);
   });
 
   it('skips camera attention without cancelling the effect or later event playback', async () => {
@@ -171,6 +271,42 @@ async function advance(
 }
 
 describe('IsoCamera ability framing', () => {
+  it('lands exactly on the requested focus when the push resolves', async () => {
+    const camera = new IsoCamera({ pixelScale: 3, pitchDegrees: 30 });
+    camera.setViewport(1600, 900, 1);
+    camera.focus(new Vector3(0, 0, 0), { immediate: true });
+    const target = new Vector3(12, 4, -9);
+
+    await advance(
+      camera,
+      camera.cinematic({
+        focus: target,
+        pixelScale: 3.2,
+        duration: 0.2,
+      }),
+      12,
+    );
+
+    expect(camera.focusPoint.toArray()).toEqual(target.toArray());
+    expect(camera.settled).toBe(true);
+  });
+
+  it('zooms out far enough to keep a wide target group in frame', () => {
+    const camera = new IsoCamera({ pixelScale: 5, pitchDegrees: 30 });
+    camera.setViewport(1600, 900, 1);
+
+    const fitted = camera.pixelScaleToFrameTargets(
+      [
+        new Vector3(-8, 0, 0),
+        new Vector3(8, 0, 0),
+      ],
+      5.3,
+    );
+
+    expect(fitted).toBeLessThan(5.3);
+    expect(fitted).toBeGreaterThan(1);
+  });
+
   it('returns byte-for-byte to its prior framing when restoration resolves', async () => {
     const camera = new IsoCamera({ pixelScale: 3, pitchDegrees: 30 });
     camera.setViewport(1600, 900, 1);

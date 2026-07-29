@@ -145,6 +145,12 @@ export function areHostile(a: Team, b: Team): boolean {
   return teamSide(a) !== teamSide(b);
 }
 
+/** Occupied tiles may be crossed only when mover and occupant are actual allies. */
+export function canPassThroughOccupant(mover: Team, occupant: Team): boolean {
+  if (mover === 'neutral' || occupant === 'neutral') return false;
+  return !areHostile(mover, occupant);
+}
+
 function teamSide(t: Team): number {
   if (t === 'player' || t === 'ally') return 0;
   if (t === 'enemy') return 1;
@@ -736,7 +742,7 @@ export function reachableTiles(
 
       const nKey = tileKey(nx, ny);
       const holder = occupied.get(nKey);
-      if (holder !== undefined && areHostile(holder, unit.team)) continue;
+      if (holder !== undefined && !canPassThroughOccupant(unit.team, holder)) continue;
 
       const cost = node.cost + step;
       if (cost > move) continue;

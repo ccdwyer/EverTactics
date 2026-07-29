@@ -859,6 +859,23 @@ describe('decideTurn — engaging rather than hovering', () => {
 });
 
 describe('computeReachable — agrees with the reducer about footing', () => {
+  it('walks through allies but blocks enemies and neutral units', () => {
+    const field = makeField(['00000']);
+    const mover = makeUnit('mover', 'player', { x: 0, y: 0, z: 0 }, { move: 4 });
+    const blocker = makeUnit('blocker', 'ally', { x: 2, y: 0, z: 0 });
+    const state = makeState(field, [mover, blocker]);
+
+    const withAlly = computeReachable(state, mover);
+    expect(withAlly.some((option) => option.pos.x === 2)).toBe(false);
+    expect(withAlly.some((option) => option.pos.x === 3)).toBe(true);
+
+    for (const team of ['enemy', 'neutral'] as const) {
+      blocker.team = team;
+      const blocked = computeReachable(state, mover);
+      expect(blocked.some((option) => option.pos.x >= 2), team).toBe(false);
+    }
+  });
+
   it('charges the same move cost the reducer will charge', () => {
     // The AI keeps its own copy of the surface cost table so `evaluate.ts` stays
     // free of the rest of core. If the two drift, the AI plans routes the

@@ -120,8 +120,11 @@ import {
   type PartyMutationIntent,
 } from './partyEdit';
 
-import { AbilityCameraDirector } from '@render/abilityCamera';
-import { signatureAbilityPresentation } from '@render/abilityPresentation';
+import {
+  AbilityCameraDirector,
+  abilityCameraFocus,
+  abilityCameraProfile,
+} from '@render/abilityCamera';
 import { IsoCamera, TILE_SIZE } from '@render/camera';
 import { LightingRig } from '@render/lighting';
 import { SpriteLayer, type UnitSprite } from '@render/sprites';
@@ -183,6 +186,35 @@ const SPRITE_ANIM_FOR_FORMULA: Readonly<Record<string, 'attack' | 'cast' | 'item
   special: 'attack',
   move: 'cast',
 };
+
+type ActionFeedbackEvent = Extract<
+  BattleEvent,
+  {
+    kind:
+      | 'damage'
+      | 'heal'
+      | 'miss'
+      | 'status-add'
+      | 'status-remove'
+      | 'knockdown'
+      | 'crystal';
+  }
+>;
+
+function isActionFeedbackEvent(event: BattleEvent): event is ActionFeedbackEvent {
+  switch (event.kind) {
+    case 'damage':
+    case 'heal':
+    case 'miss':
+    case 'status-add':
+    case 'status-remove':
+    case 'knockdown':
+    case 'crystal':
+      return true;
+    default:
+      return false;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Game
@@ -957,7 +989,10 @@ export class Game {
             )
             .map((event) => event.unit),
         );
-        for (const event of events) {
+        const playEvent = async (
+          event: BattleEvent,
+          playImpactFeedback?: () => Promise<void>,
+        ): Promise<void> => {
           const unit = 'unit' in event ? this.state.units.get(event.unit) : undefined;
           const ability = 'ability' in event ? abilityById(event.ability) : undefined;
           this.battleAudio(event, {
@@ -973,7 +1008,29 @@ export class Game {
               && event.source === undefined
               && attributedKnockdowns.has(event.unit),
           });
-          await this.playOne(event);
+          await this.playOne(event, playImpactFeedback);
+        };
+
+        for (let index = 0; index < events.length; index++) {
+          const event = events[index]!;
+          if (event.kind !== 'cast-fire') {
+            await playEvent(event);
+            continue;
+          }
+
+          const feedback: ActionFeedbackEvent[] = [];
+          let next = index + 1;
+          while (next < events.length) {
+            const candidate = events[next]!;
+            if (!isActionFeedbackEvent(candidate)) break;
+            feedback.push(candidate);
+            next += 1;
+          }
+
+          await playEvent(event, async () => {
+            for (const impact of feedback) await playEvent(impact);
+          });
+          index = next - 1;
         }
       } finally {
         this.busy = false;
@@ -981,7 +1038,10 @@ export class Game {
     });
   }
 
-  private async playOne(event: BattleEvent): Promise<void> {
+  private async playOne(
+    event: BattleEvent,
+    playImpactFeedback: () => Promise<void> = async () => {},
+  ): Promise<void> {
     const sprite = 'unit' in event ? this.sprites.get(event.unit) : undefined;
     const unit = 'unit' in event ? this.state.units.get(event.unit) : undefined;
 
@@ -1025,20 +1085,31 @@ export class Game {
         const origin = unit ? this.worldOf(unit.pos) : this.worldOf(event.target);
         const target = this.worldOf(event.target);
         const impacts = this.impactPoints(unit, ability, event.target);
-        const playEffect = (): Promise<void> =>
-          this.vfx.play(resolveVfxKey(ability), {
+        const vfxImpacts = impacts.slice(0, 8);
+        const playEffect = async (): Promise<void> => {
+          let feedback: Promise<void> | null = null;
+          const startFeedback = (): void => {
+            feedback ??= playImpactFeedback();
+          };
+          await this.vfx.play(resolveVfxKey(ability), {
             origin,
             target,
-            targets: impacts,
+            targets: vfxImpacts,
             element: ability.element,
             power: powerOf(ability),
+            onImpact: startFeedback,
           });
-        const presentation = signatureAbilityPresentation(ability.id);
-        if (presentation) {
-          await this.abilityCamera.present(presentation.camera, target, playEffect);
-        } else {
-          await playEffect();
-        }
+          // Effects without an authored impact cue still need their reducer
+          // feedback while the target framing is held.
+          startFeedback();
+          await feedback;
+        };
+        await this.abilityCamera.present(
+          abilityCameraProfile(ability.id),
+          abilityCameraFocus(target, impacts),
+          playEffect,
+          impacts,
+        );
         break;
       }
 
@@ -1131,7 +1202,7 @@ export class Game {
       actor !== undefined
         ? affectedTiles(this.state, actor, ability, target)
         : tilesInBurst(this.state.field, target, ability.range);
-    return tiles.slice(0, 8).map((t) => this.worldOf(t));
+    return tiles.map((t) => this.worldOf(t));
   }
 
   // ───────────────────────────────────────────────────────────────────────────

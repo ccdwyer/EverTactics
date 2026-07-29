@@ -742,14 +742,14 @@ void main() {
   float intensity = s.b;
 
   vec3 col;
-  if (kind < 1.5)       col = vec3(0.20, 0.58, 1.00);   // movement
+  if (kind < 1.5)       col = vec3(0.06, 0.38, 1.00);   // movement
   else if (kind < 2.5)  col = vec3(1.00, 0.24, 0.20);   // attack
   else if (kind < 3.5)  col = vec3(1.00, 0.70, 0.16);   // area of effect
   else if (kind < 4.5)  col = vec3(0.32, 1.00, 0.52);   // beneficial
   else if (kind < 5.5)  col = vec3(0.76, 0.30, 1.00);   // danger
   else                  col = vec3(1.00, 0.95, 0.82);   // cursor
 
-  // Outline only the boundary of the region, never the seams between tiles inside it.
+  // Start with the region boundary; movement adds lighter tile seams below.
   float d = 1.0;
   if (bitSet(mask, 1.0)) d = min(d, vLocal.y);
   if (bitSet(mask, 2.0)) d = min(d, 1.0 - vLocal.x);
@@ -758,6 +758,9 @@ void main() {
 
   float phase = uTime * 2.4 - (vTile.x + vTile.y) * 0.45;
   float pulse = 0.80 + 0.20 * sin(phase);
+  float isMove = kind < 1.5 ? 1.0 : 0.0;
+  // Movement remains readable at every animation phase instead of fading to three fifths.
+  pulse = mix(pulse, 0.94 + 0.06 * sin(phase), isMove);
   // Slow diagonal shimmer keeps the fill from reading as a dead wash.
   float hatch = 0.5 + 0.5 * sin((vLocal.x + vLocal.y) * 22.0 - uTime * 1.6 + (vTile.x - vTile.y) * 3.0);
 
@@ -769,13 +772,27 @@ void main() {
   float rimSoft = 1.0 - smoothstep(0.0, rimSoftW, d);
   float rimCore = 1.0 - smoothstep(0.0, rimCoreW, d);
 
+  // The region outline says where movement stops; restrained cell seams make the
+  // reachable tiles countable and preserve height changes within that region.
+  float cellD = min(min(vLocal.x, 1.0 - vLocal.x), min(vLocal.y, 1.0 - vLocal.y));
+  float cellSoft = 1.0 - smoothstep(0.0, 0.15, cellD);
+  float cellCore = 1.0 - smoothstep(0.0, 0.045, cellD);
+  rimSoft = max(rimSoft, cellSoft * isMove * 0.58);
+  rimCore = max(rimCore, cellCore * isMove * 0.68);
+
   float fill = 0.24 + 0.08 * hatch + rimSoft * 0.22;
+  // A denser blue field separates reachable ground from merely visible ground.
+  fill = mix(fill, 0.56 + 0.05 * hatch + rimSoft * 0.14, isMove);
   fill = mix(fill, 0.42 + 0.10 * hatch + rimSoft * 0.35, isCursor);
   float a = mix(fill, mix(0.92, 1.0, isCursor), rimCore) * pulse * intensity;
   a = mix(a, min(1.0, a * 1.25), isCursor);
 
   vec3 c = mix(col * 1.05, mix(col, vec3(1.0), 0.65), rimCore);
   c += col * rimSoft * 0.55;
+  // Dark cell seams survive pale stone; the bright region edge survives shadow.
+  vec3 moveC = mix(col * 1.08, vec3(0.025, 0.12, 0.34), cellSoft * 0.82);
+  moveC = mix(moveC, vec3(0.72, 0.92, 1.00), rimCore);
+  c = mix(c, moveC, isMove);
   c = mix(c, mix(col * 1.15, vec3(1.0), 0.55 * rimCore), isCursor);
 
   // Palette above is authored display-referred; convert before the sRGB encode.

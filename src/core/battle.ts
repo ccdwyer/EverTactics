@@ -61,10 +61,12 @@ import {
   areHostile,
   buildOccupancy,
   canEndOn,
+  canPassThroughOccupant,
   facingBetween,
   isInRange,
   moveCostInto,
   tileDistance,
+  tileKey,
   tilesInBurst,
   type Mover,
 } from './grid';
@@ -914,8 +916,9 @@ export function advance(state: BattleState): BattleEvent[] {
  * route, always starting on the unit's current tile.
  *
  * The reducer trusts nothing: every step must be orthogonally adjacent, land on a
- * passable tile, stay inside the unit's Jump, and the whole route must fit inside
- * Move. Only the destination has to be free — FFT lets you walk through allies.
+ * passable tile, stay inside the unit's Jump, avoid blocking occupants, and the
+ * whole route must fit inside Move. Only the destination has to be free — FFT
+ * lets you walk through allies.
  */
 export function validatePath(state: BattleState, unit: Unit, path: readonly Vec3[]): Vec3[] {
   if (isImmobile(unit)) fail(`move: ${unit.name} cannot move right now`);
@@ -932,7 +935,8 @@ export function validatePath(state: BattleState, unit: Unit, path: readonly Vec3
   let cursor = walked[0]!;
   let cost = 0;
 
-  for (const raw of steps) {
+  for (let index = 0; index < steps.length; index++) {
+    const raw = steps[index]!;
     const tile = field.tileAt(raw.x, raw.y);
     if (!tile) fail(`move: tile (${raw.x},${raw.y}) is off the map`);
     if (!tile.passable) fail(`move: tile (${raw.x},${raw.y}) is impassable`);
@@ -946,6 +950,16 @@ export function validatePath(state: BattleState, unit: Unit, path: readonly Vec3
     if (!Number.isFinite(stepCost)) fail(`move: tile (${raw.x},${raw.y}) cannot be crossed`);
     cost += stepCost;
     if (cost > move) fail(`move: path costs ${cost} but Move is ${move}`);
+
+    const holder = occupied.get(tileKey(raw.x, raw.y));
+    const isDestination = index === steps.length - 1;
+    if (
+      !isDestination
+      && holder !== undefined
+      && !canPassThroughOccupant(unit.team, holder)
+    ) {
+      fail(`move: cannot pass through a blocking unit at (${raw.x},${raw.y})`);
+    }
 
     const next: Vec3 = { x: raw.x, y: raw.y, z: tile.height };
     walked.push(next);

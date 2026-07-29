@@ -34,6 +34,7 @@ import type {
 } from '../types';
 import { isAbilityInRange } from '../targeting';
 import { effectiveRange } from '../unit';
+import { canPassThroughOccupant } from '../grid';
 import { battleCaution, type Personality, type ScoreTerm } from './personalities';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,7 +253,10 @@ export function computeReachable(
         if (next > move) continue;
 
         const blocker = occupied.get(tileKey(nx, ny));
-        if (blocker !== undefined && isHostileTo(unit, blocker)) continue; // cannot pass through enemies
+        if (
+          blocker !== undefined
+          && !canPassThroughOccupant(unit.team, blocker.team)
+        ) continue;
 
         const nKey = tileKey(nx, ny);
         const existing = nodes.get(nKey);

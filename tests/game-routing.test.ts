@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Vector3 } from 'three';
 
 import { advance, applyCommand } from '../src/core/battle';
 import { createCampaign, type CampaignState, type PersistedUnit } from '../src/core/campaign';
@@ -85,6 +86,8 @@ vi.mock('../src/state/render', () => ({
 
 vi.mock('../src/render/camera', () => ({
   TILE_SIZE: 1,
+  TEXELS_PER_UNIT: 32,
+  HUMANOID_TEXEL_HEIGHT: 48,
   IsoCamera: class {
     camera = { layers: { enable: vi.fn() } };
     devicePixelsPerTexel = 3;
@@ -127,7 +130,7 @@ vi.mock('../src/render/stage', () => ({
 vi.mock('../src/render/terrain', () => ({
   Terrain: class {},
   buildTerrain: vi.fn(),
-  tileWorldPosition: vi.fn(() => ({ x: 0, y: 0, z: 0 })),
+  tileWorldPosition: vi.fn((_field, x: number, y: number) => ({ x, y: 0, z: y })),
 }));
 
 vi.mock('../src/render/vfx', () => ({
@@ -440,6 +443,78 @@ describe('Game campaign routing', () => {
       'black/flare',
       expect.objectContaining({ power: expect.any(Number) }),
     );
+  });
+
+  it('frames an ordinary action on its target through the same camera director', async () => {
+    routing.scenario = peacefulFirstBattle();
+    const game = newGame();
+    const actor = [...game.state.units.values()][0]!;
+    const target = { x: actor.pos.x + 2, y: actor.pos.y + 1, z: actor.pos.z };
+    const event: BattleEvent = {
+      kind: 'cast-fire',
+      unit: actor.id,
+      ability: 'attack',
+      target,
+    };
+    const stateBefore = battleStateBytes(game.state);
+
+    await game.play([event]);
+
+    expect(battleStateBytes(game.state)).toBe(stateBefore);
+    expect(game.camera.cinematic).toHaveBeenCalledWith({
+      focus: new Vector3(target.x, 0.75, target.y),
+      pixelScale: 3.18,
+      pitchDegrees: undefined,
+      duration: 0.2,
+    });
+    expect(game.camera.endCinematic).toHaveBeenCalledWith(0.18);
+    expect(game.vfx.play).toHaveBeenCalledWith(
+      'slash-arc',
+      expect.objectContaining({
+        target: { x: target.x, y: 0, z: target.y },
+      }),
+    );
+  });
+
+  it('keeps target framing until ordinary impact feedback has played', async () => {
+    routing.scenario = peacefulFirstBattle();
+    const game = newGame();
+    const actor = [...game.state.units.values()][0]!;
+    const trace: string[] = [];
+    const sprite = {
+      flash: vi.fn(),
+      popLabel: vi.fn(() => trace.push('damage')),
+      playOnce: vi.fn(async () => undefined),
+    };
+    vi.mocked(game.sprites.get).mockReturnValue(
+      sprite as unknown as NonNullable<ReturnType<typeof game.sprites.get>>,
+    );
+    vi.mocked(game.vfx.play).mockImplementation(async (_key, options) => {
+      trace.push('impact');
+      options.onImpact?.(0, options.target);
+    });
+    vi.mocked(game.camera.endCinematic).mockImplementation(async () => {
+      trace.push('restore');
+    });
+
+    await game.play([
+      {
+        kind: 'cast-fire',
+        unit: actor.id,
+        ability: 'attack',
+        target: { ...actor.pos },
+      },
+      {
+        kind: 'damage',
+        unit: actor.id,
+        amount: 37,
+        element: 'none',
+        crit: false,
+      },
+    ]);
+
+    expect(trace).toEqual(['impact', 'damage', 'restore']);
+    expect(sprite.popLabel).toHaveBeenCalledWith('37', 'damage');
   });
 
   it('records a victory in the first battle without assigning BattleState fields', () => {

@@ -521,6 +521,49 @@ export class IsoCamera {
     return this.pixelScale;
   }
 
+  /**
+   * Largest zoom no greater than 'maximum' that keeps target tiles and their
+   * standing figures inside the viewport. The calculation is read-only: screen
+   * spans are measured at the current orthographic scale, then scaled linearly.
+   */
+  pixelScaleToFrameTargets(
+    targets: readonly Vec3[],
+    maximum: number,
+    paddingCssPixels = 120,
+  ): number {
+    if (targets.length === 0) return maximum;
+    const halfTile = TILE_SIZE * 0.5;
+    const figureHeight = HUMANOID_TEXEL_HEIGHT / TEXELS_PER_UNIT;
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    const include = (x: number, y: number, z: number): void => {
+      const point = this.worldToScreen(this.tmpVecB.set(x, y, z));
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    };
+
+    for (const target of targets) {
+      include(target.x - halfTile, target.y, target.z - halfTile);
+      include(target.x + halfTile, target.y, target.z - halfTile);
+      include(target.x - halfTile, target.y, target.z + halfTile);
+      include(target.x + halfTile, target.y, target.z + halfTile);
+      include(target.x, target.y + figureHeight, target.z);
+    }
+
+    const cssWidth = this.bufferWidth / this.pixelRatio;
+    const cssHeight = this.bufferHeight / this.pixelRatio;
+    const usableWidth = Math.max(1, cssWidth - paddingCssPixels * 2);
+    const usableHeight = Math.max(1, cssHeight - paddingCssPixels * 2);
+    const spanWidth = Math.max(1, maxX - minX);
+    const spanHeight = Math.max(1, maxY - minY);
+    const fitRatio = Math.min(usableWidth / spanWidth, usableHeight / spanHeight);
+    return Math.max(0.5, Math.min(maximum, this.pixelScale * fitRatio));
+  }
+
   get yawIndex(): YawIndex {
     return this.yawSlot;
   }
@@ -883,6 +926,12 @@ export class IsoCamera {
       jobs.push(this.tweenPitch(MathUtils.degToRad(options.pitchDegrees), duration));
     }
     await Promise.all(jobs);
+    // Zoom and pitch have finite tweens, while focus uses damping and otherwise
+    // only approaches its destination. The effect starts when this promise
+    // resolves, so land the authored target exactly before handing control back.
+    if (this.cinematicActive && options.focus) {
+      this.focus(options.focus, { immediate: true });
+    }
   }
 
   /** Return from cinematic framing to the gameplay rig. */

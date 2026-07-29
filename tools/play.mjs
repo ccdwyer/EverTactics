@@ -41,7 +41,9 @@ const stepDelay = Number(arg('delay', 700));
 const cdpPort = Number(arg('cdp', 0));
 const verbose = argv.includes('--verbose');
 const origin = `http://${host}:${port}`;
-const SIGNATURE_CAPTURE_ABILITIES = new Set([
+const CAPTURE_ABILITIES = new Set([
+  'attack',
+  'fire',
   'flare',
   'bahamut',
   'holy',
@@ -190,6 +192,13 @@ const probe = () =>
     const active = activeId === undefined ? undefined : state?.units.get(activeId);
     const raw = localStorage.getItem('evertactics.campaign');
     const campaign = raw === null ? null : JSON.parse(raw);
+    const captured = window.__EVERTACTICS_CAPTURE_CAST__;
+    const capturedTarget = captured === undefined
+      ? undefined
+      : state?.units.get(captured.targetUnit);
+    const capturedPoint = capturedTarget === undefined || !g
+      ? undefined
+      : g.camera.worldToScreen(g.worldOf(capturedTarget.pos), g.screen);
     const digest = raw === null
       ? null
       : Array.from(
@@ -205,6 +214,16 @@ const probe = () =>
       mode: g?.mode.kind ?? null,
       phase: state?.phase ?? null,
       active: active?.name ?? null,
+      capture: capturedTarget === undefined || capturedPoint === undefined
+        ? null
+        : {
+            ability: captured.ability,
+            target: capturedTarget.id,
+            targetTile: { ...capturedTarget.pos },
+            targetScreen: capturedPoint,
+            pixelScale: g.camera.devicePixelsPerTexel,
+            focus: g.camera.focusPoint.toArray(),
+          },
       campaign: campaign === null
         ? null
         : {
@@ -467,7 +486,7 @@ for (const spec of parsed) {
   const separator = spec.indexOf(':');
   const [kind, valueRaw] = spec === 'reload'
     ? ['reload', '']
-    : ['title-new', 'clear-formation', 'autoplay', 'wait-cast'].includes(spec)
+    : ['title-new', 'clear-formation', 'autoplay', 'wait-cast', 'resume-stage'].includes(spec)
     ? [spec, '']
     : separator >= 0
     ? [spec.slice(0, separator), spec.slice(separator + 1)]
@@ -475,10 +494,11 @@ for (const spec of parsed) {
   const value = valueRaw ?? '';
 
   if (kind === 'cast') {
-    if (!SIGNATURE_CAPTURE_ABILITIES.has(value)) {
-      throw new Error(`Unknown signature capture ability "${value}"`);
+    const [abilityId, targetId] = value.split('@');
+    if (!CAPTURE_ABILITIES.has(abilityId)) {
+      throw new Error(`Unknown capture ability "${abilityId}"`);
     }
-    const posed = await page.evaluate((abilityId) => {
+    const posed = await page.evaluate(({ abilityId, targetId }) => {
       const game = window.__EVERTACTICS__;
       const state = game?.state;
       if (!game || !state) return null;
@@ -487,26 +507,183 @@ for (const spec of parsed) {
       const actor = active ?? units[0];
       if (!actor) return null;
       const beneficial = abilityId === 'curaja';
-      const targetUnit = beneficial
-        ? actor
-        : units.find((unit) => unit.team !== actor.team) ?? actor;
+      const explicit = targetId
+        ? units.find((unit) => unit.id === targetId || unit.name === targetId)
+        : undefined;
+      const targetUnit = explicit ?? (
+        beneficial
+          ? actor
+          : units.find((unit) => unit.team !== actor.team) ?? actor
+      );
       const target = { ...targetUnit.pos };
 
       window.__EVERTACTICS_CAPTURE_CAST_DONE__ = false;
-      window.__EVERTACTICS_CAPTURE_CAST__ = { ability: abilityId, unit: actor.id, target };
+      window.__EVERTACTICS_CAPTURE_CAST__ = {
+        ability: abilityId,
+        unit: actor.id,
+        target,
+        targetUnit: targetUnit.id,
+      };
       void game
         .play([{ kind: 'cast-fire', unit: actor.id, ability: abilityId, target }])
         .finally(() => {
           window.__EVERTACTICS_CAPTURE_CAST_DONE__ = true;
         });
       return { ability: abilityId, actor: actor.name, target: targetUnit.name };
-    }, value);
-    if (!posed) throw new Error(`Unable to pose cast for "${value}"`);
-    activeCastLabel = value;
+    }, { abilityId, targetId });
+    if (!posed) throw new Error(`Unable to pose cast for "${abilityId}"`);
+    activeCastLabel = abilityId;
     await page.waitForTimeout(80);
     steps.push({
       action: spec,
       shot: await capture(`${value}-cast`),
+      state: { ...(await probe()), posed },
+    });
+    continue;
+  }
+
+  if (kind === 'action') {
+    const [abilityId, targetId] = value.split('@');
+    if (!CAPTURE_ABILITIES.has(abilityId)) {
+      throw new Error(`Unknown capture ability "${abilityId}"`);
+    }
+    const posed = await page.evaluate(({ abilityId, targetId }) => {
+      const game = window.__EVERTACTICS__;
+      const state = game?.state;
+      if (!game || !state) return null;
+      const units = [...state.units.values()].filter((unit) => !unit.removed);
+      const active = state.active === undefined ? undefined : state.units.get(state.active);
+      const actor = active ?? units[0];
+      if (!actor) return null;
+      const targetUnit = units.find(
+        (unit) => unit.id === targetId || unit.name === targetId,
+      ) ?? units.find((unit) => unit.team !== actor.team) ?? actor;
+      const target = { ...targetUnit.pos };
+
+      window.__EVERTACTICS_CAPTURE_CAST_DONE__ = false;
+      window.__EVERTACTICS_CAPTURE_CAST__ = {
+        ability: abilityId,
+        unit: actor.id,
+        target,
+        targetUnit: targetUnit.id,
+      };
+      void game
+        .play([
+          { kind: 'cast-fire', unit: actor.id, ability: abilityId, target },
+          {
+            kind: 'damage',
+            unit: targetUnit.id,
+            amount: 37,
+            element: 'none',
+            crit: false,
+          },
+        ])
+        .finally(() => {
+          window.__EVERTACTICS_CAPTURE_CAST_DONE__ = true;
+        });
+      return { ability: abilityId, actor: actor.name, target: targetUnit.name };
+    }, { abilityId, targetId });
+    if (!posed) throw new Error(`Unable to pose action for "${abilityId}"`);
+    activeCastLabel = abilityId;
+    await page.waitForTimeout(80);
+    steps.push({
+      action: spec,
+      shot: await capture(`${abilityId}-action`),
+      state: { ...(await probe()), posed },
+    });
+    continue;
+  }
+
+  if (kind === 'action-freeze') {
+    const [abilityId, targetId, freezeRaw] = value.split('@');
+    const freezeMs = Number(freezeRaw ?? 320);
+    if (!CAPTURE_ABILITIES.has(abilityId)) {
+      throw new Error(`Unknown capture ability "${abilityId}"`);
+    }
+    const posed = await page.evaluate(({ abilityId, targetId, freezeMs }) => {
+      const game = window.__EVERTACTICS__;
+      const state = game?.state;
+      if (!game || !state) return null;
+      const units = [...state.units.values()].filter((unit) => !unit.removed);
+      const active = state.active === undefined ? undefined : state.units.get(state.active);
+      const actor = active ?? units[0];
+      if (!actor) return null;
+      const targetUnit = units.find(
+        (unit) => unit.id === targetId || unit.name === targetId,
+      ) ?? units.find((unit) => unit.team !== actor.team) ?? actor;
+      const target = { ...targetUnit.pos };
+
+      window.__EVERTACTICS_CAPTURE_CAST_DONE__ = false;
+      window.__EVERTACTICS_CAPTURE_CAST__ = {
+        ability: abilityId,
+        unit: actor.id,
+        target,
+        targetUnit: targetUnit.id,
+      };
+      window.setTimeout(() => game.stage.stop(), freezeMs);
+      void game
+        .play([
+          { kind: 'cast-fire', unit: actor.id, ability: abilityId, target },
+          {
+            kind: 'damage',
+            unit: targetUnit.id,
+            amount: 37,
+            element: 'none',
+            crit: false,
+          },
+        ])
+        .finally(() => {
+          window.__EVERTACTICS_CAPTURE_CAST_DONE__ = true;
+        });
+      return {
+        ability: abilityId,
+        actor: actor.name,
+        target: targetUnit.name,
+        freezeMs,
+      };
+    }, { abilityId, targetId, freezeMs });
+    if (!posed) throw new Error(`Unable to pose frozen action for "${abilityId}"`);
+    activeCastLabel = abilityId;
+    await page.waitForTimeout(freezeMs + 80);
+    steps.push({
+      action: spec,
+      shot: await capture(`${abilityId}-impact`),
+      state: { ...(await probe()), posed },
+    });
+    continue;
+  }
+
+  if (kind === 'pose-offscreen') {
+    const [targetId, scaleRaw] = value.split('@');
+    const scale = Number(scaleRaw ?? 5);
+    const posed = await page.evaluate(({ targetId, scale }) => {
+      const game = window.__EVERTACTICS__;
+      const state = game?.state;
+      if (!game || !state) return null;
+      const active = state.active === undefined ? undefined : state.units.get(state.active);
+      const target = state.units.get(targetId);
+      if (!active || !target) return null;
+      game.camera.focusTile(active.pos, { immediate: true });
+      void game.camera.setPixelScale(scale, true);
+      window.__EVERTACTICS_CAPTURE_CAST__ = {
+        ability: 'attack',
+        unit: active.id,
+        target: { ...target.pos },
+        targetUnit: target.id,
+      };
+      const point = game.camera.worldToScreen(game.worldOf(target.pos), game.screen);
+      return {
+        actor: active.name,
+        target: target.name,
+        targetScreen: point,
+        pixelScale: game.camera.devicePixelsPerTexel,
+      };
+    }, { targetId, scale });
+    if (!posed) throw new Error(`Unable to pose off-screen target "${targetId}"`);
+    await page.waitForTimeout(120);
+    steps.push({
+      action: spec,
+      shot: await capture('offscreen-target'),
       state: { ...(await probe()), posed },
     });
     continue;
@@ -519,6 +696,11 @@ for (const spec of parsed) {
       { timeout: 120000 },
     );
     await page.waitForTimeout(120);
+    continue;
+  }
+
+  if (kind === 'resume-stage') {
+    await page.evaluate(() => window.__EVERTACTICS__?.stage.start());
     continue;
   }
 
@@ -619,7 +801,7 @@ for (const spec of parsed) {
       const label = activeCastLabel
         ? `${activeCastLabel}-burst${String(j).padStart(2, '0')}`
         : `burst${String(j).padStart(2, '0')}`;
-      steps.push({ action: `burst${j}`, shot: await capture(label) });
+      steps.push({ action: `burst${j}`, shot: await capture(label), state: await probe() });
     }
     continue;
   }

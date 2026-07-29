@@ -24,6 +24,8 @@ export interface AbilityCameraProfile {
   /** Seconds for the push-in and the exact return. */
   readonly pushSeconds: number;
   readonly restoreSeconds: number;
+  /** Delay the effect until the camera reaches an initially distant target. */
+  readonly effectAfterPush?: boolean;
   /** Optional authored pitch while the effect is active. */
   readonly pitchDegrees?: number;
 }

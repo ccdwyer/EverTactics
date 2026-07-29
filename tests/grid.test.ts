@@ -5,6 +5,7 @@ import {
   buildBattlefield,
   buildOccupancy,
   canEndOn,
+  canPassThroughOccupant,
   createBattlefield,
   facingBetween,
   generateMap,
@@ -139,6 +140,10 @@ describe('tile keys and geometry helpers', () => {
     expect(areHostile('ally', 'enemy')).toBe(true);
     expect(areHostile('neutral', 'player')).toBe(true);
     expect(areHostile('neutral', 'neutral')).toBe(false);
+    expect(canPassThroughOccupant('player', 'ally')).toBe(true);
+    expect(canPassThroughOccupant('enemy', 'enemy')).toBe(true);
+    expect(canPassThroughOccupant('player', 'enemy')).toBe(false);
+    expect(canPassThroughOccupant('neutral', 'neutral')).toBe(false);
   });
 });
 

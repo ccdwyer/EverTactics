@@ -494,6 +494,55 @@ describe('illegal commands', () => {
     );
   });
 
+  it('rejects walking through a hostile unit', () => {
+    const { state } = setup();
+    advance(state);
+    expect(() =>
+      applyCommand(state, {
+        kind: 'move',
+        unit: 'hero',
+        path: [{ x: 2, y: 1, z: 0 }, { x: 3, y: 1, z: 0 }],
+      }),
+    ).toThrow(/cannot pass through a blocking unit/);
+  });
+
+  it('rejects walking through a neutral unit', () => {
+    const { state, brute } = setup();
+    brute.team = 'neutral';
+    advance(state);
+
+    expect(() =>
+      applyCommand(state, {
+        kind: 'move',
+        unit: 'hero',
+        path: [{ x: 2, y: 1, z: 0 }, { x: 3, y: 1, z: 0 }],
+      }),
+    ).toThrow(/cannot pass through a blocking unit/);
+  });
+
+  it('walks through an allied unit but still ends on a free tile', () => {
+    const { state, hero, brute } = setup();
+    brute.team = 'ally';
+    advance(state);
+
+    const events = applyCommand(state, {
+      kind: 'move',
+      unit: 'hero',
+      path: [{ x: 2, y: 1, z: 0 }, { x: 3, y: 1, z: 0 }],
+    });
+
+    expect(hero.pos).toEqual({ x: 3, y: 1, z: 0 });
+    expect(events).toContainEqual({
+      kind: 'moved',
+      unit: 'hero',
+      path: [
+        { x: 1, y: 1, z: 0 },
+        { x: 2, y: 1, z: 0 },
+        { x: 3, y: 1, z: 0 },
+      ],
+    });
+  });
+
   it('rejects an out-of-range ability', () => {
     const { state } = setup();
     advance(state);
