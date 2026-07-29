@@ -52,6 +52,10 @@ shots/battle-ux2/07-attack-before/*
 shots/battle-ux2/07-attack-after/*
 !shots/battle-ux2/07-attack-after/01-attack-impact.png
 !shots/battle-ux2/measurements.md
+!shots/balance/
+shots/balance/*
+!shots/balance/inspect-before.png
+!shots/balance/inspect-after.png
 !shots/softlock/
 shots/softlock/*
 !shots/softlock/world-back/

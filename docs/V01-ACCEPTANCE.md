@@ -4,6 +4,11 @@ Driven through the real input path with `tools/play.mjs` against a static build 
 `vite preview`), not the dev server. Frames in `shots/acc-mine*/`. Walked by Claude after three
 delegated rounds produced fixes but no evidence.
 
+> Historical balance note (2026-07-29): this walk predates the encounter balance pass. The new
+> campaign company starts at level 7–9 and First Watch's enemies are level 5–6. The level 13/14
+> versus level 3 statement below remains valid evidence about that captured build, not the current
+> game. See `docs/BALANCE.md`.
+
 ## Stage table
 
 | stage | verdict | evidence |

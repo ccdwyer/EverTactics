@@ -10,9 +10,11 @@ import type { CampaignState } from '@core/campaign';
 import type { TitleScreenVM } from '@ui/types';
 
 import { hasSave, loadCampaign, saveCampaign } from './save';
-import { getScenario, newGameCampaign } from './scenarios';
-
-const STARTER_ROSTER_SCENARIO_ID = 'battle-open';
+import {
+  CAMPAIGN_START_SCENARIO_ID,
+  getScenario,
+  newGameCampaign,
+} from './scenarios';
 
 export type BootRoute =
   | { kind: 'title' }
@@ -66,7 +68,7 @@ export function startNewCampaign(options: NewCampaignOptions): NewCampaignResult
     return { kind: 'confirmation-required' };
   }
   const campaign = newGameCampaign(
-    getScenario(STARTER_ROSTER_SCENARIO_ID),
+    getScenario(CAMPAIGN_START_SCENARIO_ID),
     options.timestamp,
   );
   saveCampaign(campaign);

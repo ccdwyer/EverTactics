@@ -62,11 +62,6 @@ These are unclear or awkward, but none traps the player:
 
 ## Battle UX part 2 residuals
 
-1. **The inspect panel's EQUIPMENT column wraps mid-word.** `shots/battle-ux2/02-move-range-after.png`
-   shows "LONGSWORD" rendered as "LON / GSW / ORD" and "BATTLE BOOTS" as "BATT / LE / BOO / TS".
-   The column is too narrow for the longest item names. Functional, and it makes the panel look
-   broken at a glance — which matters more than usual because this panel is the thing a player
-   opens to make a tactical decision about an enemy.
-2. **Item 4's before/after stills were captured at different resolutions** (1600x900 vs 1920x1080),
+1. **Item 4's before/after stills were captured at different resolutions** (1600x900 vs 1920x1080),
    so a pixel diff between them proves little. The palette fix is real — verified by the shared-
    sheet row split and visible in the frame — but the evidence pair is weaker than it looks.

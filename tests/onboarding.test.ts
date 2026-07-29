@@ -240,7 +240,9 @@ describe('onboarding', () => {
     expect(encounter, 'first battle has no authored encounter').toBeDefined();
     expect(encounter!.enemies.length).toBeGreaterThan(0);
     expect(encounter!.enemies.length).toBeLessThanOrEqual(3);
-    expect(Math.max(...encounter!.enemies.map((enemy) => enemy.level))).toBeLessThanOrEqual(6);
+    expect(Math.max(...encounter!.enemies.map((enemy) => enemy.level))).toBeLessThanOrEqual(
+      Math.max(...campaign.roster.map((unit) => unit.level)),
+    );
     expect(
       encounter!.enemies.some((enemy) =>
         starts.some((start) => {

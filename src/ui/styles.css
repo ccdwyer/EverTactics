@@ -1998,8 +1998,11 @@
 .et-unitinfo__statuses.is-empty { display: none; }
 .et-unitinfo__loadout {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 10px;
+  /* The item table's longest display name is the 15-character Assassin Dagger.
+     Equipment needs enough of this compact card to keep that name intact;
+     abilities stack in the narrower companion column. */
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.65fr);
+  gap: 8px;
   margin-top: 10px;
   padding-top: 9px;
   border-top: 1px solid rgba(201, 162, 39, 0.34);
@@ -2022,11 +2025,18 @@
   flex-direction: column;
   gap: 3px;
 }
-.et-loadout__equipment-row,
+.et-loadout__equipment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 48px) minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(201, 162, 39, 0.1);
+}
 .et-loadout__ability-group {
   display: grid;
-  grid-template-columns: minmax(0, 68px) minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
   min-width: 0;
   padding-bottom: 3px;
   border-bottom: 1px solid rgba(201, 162, 39, 0.1);
@@ -2045,9 +2055,13 @@
   font-size: 9px;
   line-height: 1.35;
   color: var(--ink-bright);
-  overflow-wrap: anywhere;
+}
+.et-loadout__value {
+  overflow-wrap: normal;
+  word-break: normal;
 }
 .et-loadout__ability-list {
+  overflow-wrap: break-word;
   max-height: 40px;
   overflow-y: auto;
   scrollbar-width: thin;

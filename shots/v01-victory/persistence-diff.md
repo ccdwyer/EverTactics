@@ -2,6 +2,11 @@
 
 Source: before refresh `11-world-map-before-refresh.png`; immediate post-refresh `12-reload.png`.
 
+> Historical balance note (2026-07-29): this capture predates the encounter balance pass. The
+> changed starting levels and resulting event stream invalidate these exact gil, EXP, and JP
+> values as a description of the current game. The byte-for-byte
+> before/after comparison still proves that the captured save persisted correctly.
+
 Whole-save SHA-256: `6927f35b30920215532ea67133a6fb6957c55f7043a5514ed13ba5bd3e46b7d8` before and after; 4999 bytes before and after.
 
 | Scope | Field | Before refresh | After refresh | Identical |

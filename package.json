@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "assets": "node tools/decode-shp-seq.mjs && node tools/build-assets.mjs",
+    "balance": "vite-node tools/balance.ts",
     "shot": "node tools/shoot.mjs",
     "verify": "node tools/verify.mjs",
     "verify:quick": "node tools/verify.mjs --quick",

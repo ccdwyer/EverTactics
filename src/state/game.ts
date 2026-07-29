@@ -48,6 +48,7 @@ import {
   unitVM,
 } from './viewModels';
 import {
+  CAMPAIGN_START_SCENARIO_ID,
   buildScenario,
   campaignToBattle,
   getEncounter,
@@ -279,7 +280,7 @@ export class Game {
       this.campaign =
         loaded !== null && loaded.roster.length > 0
           ? loaded
-          : newGameCampaign(getScenario('battle-open'), Date.now());
+          : newGameCampaign(getScenario(CAMPAIGN_START_SCENARIO_ID), Date.now());
       // The map is a full-screen UI surface. Keep a real, deterministic field
       // behind it so renderer boot and tooling globals retain their normal shape,
       // but do not enter campaignToBattle or pin an unchosen destination.

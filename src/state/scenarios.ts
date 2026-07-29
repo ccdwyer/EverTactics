@@ -79,6 +79,9 @@ export const STARTER_CAMPAIGN_INVENTORY: Readonly<Record<string, number>> = {
   'use-potion': 3,
 };
 
+/** Canonical scenario whose player cast seeds a brand-new campaign company. */
+export const CAMPAIGN_START_SCENARIO_ID = 'first-lesson';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -541,7 +544,7 @@ export function campaignToBattle(
  * elevation bands are occupied, which is what makes the diorama read as a
  * diorama rather than as a chessboard.
  */
-const STARTER_PLAYER_UNITS: readonly UnitPlacement[] = [
+const BATTLE_OPEN_PLAYER_UNITS: readonly UnitPlacement[] = [
   // ── Player: the south steps and the west walk ────────────────────────────
   {
     id: 'p-aldric', name: 'Aldric', job: 'knight', gender: 'male', team: 'player',
@@ -588,6 +591,28 @@ const STARTER_PLAYER_UNITS: readonly UnitPlacement[] = [
   },
 ];
 
+/**
+ * The playable campaign starts below the screenshot cast's veteran levels.
+ *
+ * Keep this derivation separate from BATTLE_OPEN_PLAYER_UNITS: battle-open is a
+ * protected visual reference scene, while these levels shape campaign combat.
+ */
+const CAMPAIGN_START_LEVELS: Readonly<Record<UnitId, number>> = {
+  'p-aldric': 9,
+  'p-seryn': 8,
+  'p-belric': 8,
+  'p-ivane': 8,
+  'p-torvald': 9,
+  'p-nessa': 7,
+};
+
+const CAMPAIGN_PLAYER_UNITS: readonly UnitPlacement[] = BATTLE_OPEN_PLAYER_UNITS.map(
+  (unit) => ({
+    ...unit,
+    level: CAMPAIGN_START_LEVELS[unit.id] ?? unit.level,
+  }),
+);
+
 export const ENCOUNTERS: Readonly<Record<string, Encounter>> = AUTHORED_ENCOUNTERS;
 
 export function getEncounter(id: string | null | undefined): Encounter | undefined {
@@ -596,7 +621,7 @@ export function getEncounter(id: string | null | undefined): Encounter | undefin
 
 const BATTLE_OPEN_ENCOUNTER = ENCOUNTERS['orbonne-vanguard']!;
 const BATTLE_OPEN_UNITS: readonly UnitPlacement[] = [
-  ...STARTER_PLAYER_UNITS,
+  ...BATTLE_OPEN_PLAYER_UNITS,
   ...BATTLE_OPEN_ENCOUNTER.enemies,
 ];
 
@@ -777,9 +802,9 @@ const MANDALIA: Scenario = {
 };
 
 function scenarioPlayers(mapId: string): readonly UnitPlacement[] {
-  if (mapId === 'orbonne-courtyard') return STARTER_PLAYER_UNITS;
+  if (mapId === 'orbonne-courtyard') return CAMPAIGN_PLAYER_UNITS;
   const starts = getMapDef(mapId)?.playerStarts ?? [];
-  return STARTER_PLAYER_UNITS.map((unit, index) => ({
+  return CAMPAIGN_PLAYER_UNITS.map((unit, index) => ({
     ...unit,
     at: starts[index] ?? unit.at,
     facing: 'N' as Facing,

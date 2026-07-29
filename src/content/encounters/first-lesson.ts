@@ -11,21 +11,21 @@ export const firstLessonEncounter = {
   enemies: [
     {
       id: 'e-owain', name: 'Owain', job: 'squire', gender: 'male', team: 'enemy',
-      level: 4, zodiac: 'taurus', brave: 58, faith: 48,
+      level: 6, zodiac: 'taurus', brave: 58, faith: 48,
       at: { x: 6, y: 8 }, facing: 'N',
-      equipment: { rightHand: 'dagger', body: 'leather-outfit' },
+      equipment: { rightHand: 'broadsword', body: 'leather-outfit' },
       secondary: 'chemist', personality: 'defensive', ct: 8,
     },
     {
       id: 'e-maud', name: 'Maud', job: 'chemist', gender: 'female', team: 'enemy',
-      level: 3, zodiac: 'virgo', brave: 46, faith: 56,
+      level: 5, zodiac: 'virgo', brave: 46, faith: 56,
       at: { x: 4, y: 8 }, facing: 'N',
       equipment: { rightHand: 'dagger', head: 'feather-hat', body: 'linen-robe' },
       secondary: 'squire', personality: 'support', ct: 3,
     },
     {
       id: 'e-ren', name: 'Ren', job: 'archer', gender: 'male', team: 'enemy',
-      level: 4, zodiac: 'sagittarius', brave: 54, faith: 44,
+      level: 6, zodiac: 'sagittarius', brave: 54, faith: 44,
       at: { x: 8, y: 8 }, facing: 'N',
       equipment: { rightHand: 'long-bow', body: 'leather-outfit' },
       secondary: 'squire', personality: 'defensive', ct: 12,
