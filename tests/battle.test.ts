@@ -121,6 +121,18 @@ const ABILITIES: Ability[] = [
     range: { range: 3, radius: 0, vertical: 3, los: false },
     inflicts: [{ status: 'sleep', chance: 100, duration: 60 }],
   }),
+  ability({
+    id: 'poison-touch',
+    name: 'Poison Touch',
+    formula: 'status-only',
+    inflicts: [{ status: 'poison', chance: 100, duration: 2000 }],
+  }),
+  ability({
+    id: 'death-sentence',
+    name: 'Death Sentence',
+    formula: 'status-only',
+    inflicts: [{ status: 'death-sentence', chance: 100, duration: 1 }],
+  }),
   ability({ id: 'guard-up', name: 'Guard Up', slot: 'support' }),
   ability({
     id: 'potion',
@@ -373,6 +385,44 @@ describe('knockdown credit', () => {
     const restored = deserialize(serialize(campaign));
     expect(restored.roster[0]?.kills).toBe(1);
   });
+
+  it.each([
+    ['poison-touch', 'poison'],
+    ['death-sentence', 'death-sentence'],
+  ] as const)(
+    'credits a %s status-tick knockdown to the unit that applied it',
+    (abilityId, statusId) => {
+      const { state, hero, brute } = setup({ kind: 'defeat-all' });
+      advance(state);
+      brute.stats.hp = 1;
+
+      const applied = applyCommand(state, {
+        kind: 'act',
+        unit: hero.id,
+        ability: abilityId,
+        target: { ...brute.pos },
+      });
+      expect(applied).toContainEqual({
+        kind: 'status-add',
+        unit: brute.id,
+        status: statusId,
+      });
+      expect(brute.statuses.find((status) => status.status === statusId)?.source)
+        .toBe(hero.id);
+      applyCommand(state, { kind: 'wait', unit: hero.id });
+
+      const events = runUntil(
+        state,
+        (all) => all.some((event) => event.kind === 'knockdown'),
+      );
+      expect(events).toContainEqual({
+        kind: 'knockdown',
+        unit: brute.id,
+        source: hero.id,
+      });
+      expect(hero.kills).toBe(1);
+    },
+  );
 });
 
 describe('illegal commands', () => {

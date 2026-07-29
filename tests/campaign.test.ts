@@ -204,6 +204,21 @@ describe('campaign serialize / deserialize', () => {
     expect(restored.inventory).toEqual({ 'use-potion': 0 });
   });
 
+  it('preserves prototype-shaped inventory ids as own save-data keys', () => {
+    const inventory = JSON.parse(
+      '{"__proto__":0,"constructor":1,"prototype":2}',
+    ) as Record<string, number>;
+    const restored = deserialize(JSON.stringify(validV1Shell({ inventory })));
+
+    for (const [id, count] of Object.entries(inventory)) {
+      expect(
+        Object.prototype.hasOwnProperty.call(restored.inventory, id),
+        id,
+      ).toBe(true);
+      expect(restored.inventory[id], id).toBe(count);
+    }
+  });
+
   it('current-version learned array order is preserved (not sorted)', () => {
     const unit = validPersistedUnit({
       jobs: {

@@ -152,7 +152,7 @@ export function sellItem(
   const price = sellPrice(basePrice);
   if (
     itemId.length === 0 ||
-    price < 0 ||
+    price <= 0 ||
     !Number.isSafeInteger(quantity) ||
     quantity < 1
   ) {

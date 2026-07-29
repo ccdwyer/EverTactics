@@ -653,6 +653,28 @@ describe('job screen actions', () => {
     expect(canSwitchToJob(deathLive, 'death-knight', { kills: 29 })).toBe(false);
     expect(canSwitchToJob(deathLive, 'death-knight', { kills: 30 })).toBe(true);
   });
+
+  it('uses a unit lifetime kills when core unlock helpers receive no override', () => {
+    const candidate = unitFromPersisted(
+      unit({
+        id: 'earned',
+        name: 'Earned',
+        currentJob: 'knight',
+        kills: 20,
+        jobs: {
+          squire: { level: 8, jp: 0, totalJp: 3000, learned: [] },
+          knight: { level: 8, jp: 0, totalJp: 3000, learned: [] },
+          chemist: { level: 8, jp: 0, totalJp: 3000, learned: [] },
+          'black-mage': { level: 8, jp: 0, totalJp: 3000, learned: [] },
+        },
+      }),
+      { team: 'player', pos: { x: 0, y: 0, z: 0 }, facing: 'S' },
+    );
+
+    expect(canSwitchToJob(candidate, 'dark-knight')).toBe(true);
+    expect(unlockStatus(candidate, 'dark-knight', {}).unlocked).toBe(true);
+    expect(canSwitchToJob(candidate, 'dark-knight', { kills: 0 })).toBe(false);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

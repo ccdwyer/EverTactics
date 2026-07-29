@@ -258,7 +258,13 @@ function fraction(maxHp: number, denom: number): number {
  * Apply an HP change from a source that is not an ability (poison, regen, a death
  * sentence coming due) and handle falling over.
  */
-function changeHp(state: BattleState, unit: Unit, delta: number, events: BattleEvent[]): void {
+function changeHp(
+  state: BattleState,
+  unit: Unit,
+  delta: number,
+  events: BattleEvent[],
+  source?: UnitId,
+): void {
   if (delta === 0 || isGone(unit)) return;
   const maxHp = Math.max(1, deriveStats(unit).maxHp);
   unit.stats.maxHp = maxHp;
@@ -269,7 +275,7 @@ function changeHp(state: BattleState, unit: Unit, delta: number, events: BattleE
     unit.stats.hp -= amount;
     events.push({ kind: 'damage', unit: unit.id, amount, element: 'none', crit: false });
     log(state, { actor: unit.id, kind: 'damage', text: `${unit.name} takes ${amount} damage.` });
-    if (unit.stats.hp <= 0) knockOut(state, unit, events);
+    if (unit.stats.hp <= 0) knockOut(state, unit, events, source);
   } else {
     if (hasStatus(unit, 'ko')) return; // healing does not revive; Raise does.
     const amount = Math.min(delta, maxHp - unit.stats.hp);
@@ -279,7 +285,12 @@ function changeHp(state: BattleState, unit: Unit, delta: number, events: BattleE
   }
 }
 
-function knockOut(state: BattleState, unit: Unit, events: BattleEvent[]): void {
+function knockOut(
+  state: BattleState,
+  unit: Unit,
+  events: BattleEvent[],
+  source?: UnitId,
+): void {
   if (hasStatus(unit, 'ko')) return;
   unit.stats.hp = 0;
   dropCharges(state, unit.id);
@@ -298,9 +309,20 @@ function knockOut(state: BattleState, unit: Unit, events: BattleEvent[]): void {
       events.push({ kind: 'status-remove', unit: unit.id, status });
     }
   }
-  applyStatus(unit, 'ko', { duration: KO_COUNTDOWN_TURNS });
+  applyStatus(unit, 'ko', {
+    duration: KO_COUNTDOWN_TURNS,
+    ...(source !== undefined ? { source } : {}),
+  });
   events.push({ kind: 'status-add', unit: unit.id, status: 'ko' });
-  events.push({ kind: 'knockdown', unit: unit.id });
+  events.push({
+    kind: 'knockdown',
+    unit: unit.id,
+    ...(source !== undefined ? { source } : {}),
+  });
+  const scorer = source === undefined ? undefined : state.units.get(source);
+  if (scorer && areHostile(scorer.team, unit.team)) {
+    scorer.kills = (scorer.kills ?? 0) + 1;
+  }
   log(state, { actor: unit.id, kind: 'ko', text: `${unit.name} falls.` });
 }
 
@@ -385,7 +407,7 @@ function advanceStatusClock(state: BattleState, unit: Unit, ticks: number, event
     events.push({ kind: 'status-remove', unit: unit.id, status: active.status });
     if (kind === 'doom') {
       log(state, { actor: unit.id, kind: 'ko', text: `${unit.name}'s Death Sentence comes due.` });
-      knockOut(state, unit, events);
+      knockOut(state, unit, events, active.source);
     }
   }
 }
@@ -395,31 +417,74 @@ function applyTurnEffects(state: BattleState, unit: Unit, events: BattleEvent[])
   const maxHp = Math.max(1, deriveStats(unit).maxHp);
   const oiled = hasStatus(unit, 'oil');
   const undead = hasStatus(unit, 'undead');
+  const damage: { amount: number; source?: UnitId }[] = [];
+  let healing = 0;
   let delta = 0;
 
   for (const active of unit.statuses) {
     const stacks = active.stacks ?? 1;
     switch (statusDef(active.status).tick) {
-      case 'poison':
-        delta -= fraction(maxHp, TICK_FRACTIONS.poison);
-        break;
-      case 'regen': {
-        const heal = fraction(maxHp, TICK_FRACTIONS.regen);
-        delta += undead ? -heal : heal;
+      case 'poison': {
+        const amount = fraction(maxHp, TICK_FRACTIONS.poison);
+        delta -= amount;
+        damage.push({
+          amount,
+          ...(active.source !== undefined ? { source: active.source } : {}),
+        });
         break;
       }
-      case 'bleed':
-        delta -= fraction(maxHp, TICK_FRACTIONS.bleed) * stacks;
+      case 'regen': {
+        const amount = fraction(maxHp, TICK_FRACTIONS.regen);
+        if (undead) {
+          delta -= amount;
+          damage.push({
+            amount,
+            ...(active.source !== undefined ? { source: active.source } : {}),
+          });
+        } else {
+          delta += amount;
+          healing += amount;
+        }
         break;
-      case 'burn':
-        delta -= fraction(maxHp, TICK_FRACTIONS.burn) * stacks * (oiled ? 2 : 1);
+      }
+      case 'bleed': {
+        const amount = fraction(maxHp, TICK_FRACTIONS.bleed) * stacks;
+        delta -= amount;
+        damage.push({
+          amount,
+          ...(active.source !== undefined ? { source: active.source } : {}),
+        });
         break;
+      }
+      case 'burn': {
+        const amount =
+          fraction(maxHp, TICK_FRACTIONS.burn) * stacks * (oiled ? 2 : 1);
+        delta -= amount;
+        damage.push({
+          amount,
+          ...(active.source !== undefined ? { source: active.source } : {}),
+        });
+        break;
+      }
       default:
         break;
     }
   }
 
-  if (delta !== 0) changeHp(state, unit, delta, events);
+  let source: UnitId | undefined;
+  if (delta < 0 && unit.stats.hp + delta <= 0) {
+    const lethalThreshold = unit.stats.hp + healing;
+    let accumulated = 0;
+    for (const contribution of damage) {
+      accumulated += contribution.amount;
+      if (accumulated >= lethalThreshold) {
+        source = contribution.source;
+        break;
+      }
+    }
+  }
+
+  if (delta !== 0) changeHp(state, unit, delta, events, source);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

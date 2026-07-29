@@ -442,7 +442,7 @@ describe('Game campaign routing', () => {
     }
   });
 
-  it('routes a real player attack victory into the outcome and result screens', async () => {
+  it('opens the result flow when a player action wins the battle', async () => {
     routing.scenario = adjacentFinisherScenario();
     const campaign = createCampaign(99, 1_000);
     campaign.roster = [{
@@ -476,26 +476,6 @@ describe('Game campaign routing', () => {
     expect(uiCapture.outcome?.outcome).toBe('victory');
     expect(uiCapture.result?.outcome).toBe('victory');
   });
-
-  // REMOVED: 'opens the result flow when a player action wins the battle'.
-  //
-  // It asserted something worth asserting -- that a PLAYER-caused KO routes into
-  // the result flow -- but it could not actually get there. It reached past the
-  // public input path to assign `game.mode` directly, including a hand-built
-  // `legal` set, and `onClick` does not consult `legal` at all: it gates on
-  // `canAimAt`. So the setup constructed a state the real code path never
-  // produces, and the battle never ended.
-  //
-  // Three separate premises in it were false: the enemy sat six tiles from a
-  // range-1 attack, a level-99 hit does not one-shot a level-1 unit's 100 HP,
-  // and the forced `legal` entry conferred no legality on the rules engine.
-  // Patching each in turn still left it red, which is the tell that the test
-  // was mocking its way around the thing it claimed to verify.
-  //
-  // Victory routing itself IS covered, through the public surface, by the
-  // `onBattleOver` -> `result-dismiss` test below. Rewrite this one against
-  // that surface -- drive a real command through `submit` -- rather than
-  // restoring the version that poked at private fields.
 
   it('presents the authored map and encounter names before starting the first turn', async () => {
     const peaceful = peacefulFirstBattle();

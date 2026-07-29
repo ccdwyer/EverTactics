@@ -32,8 +32,15 @@ import {
   newGameCampaign,
 } from '../src/state/scenarios';
 import { campaignRosterScreenVM, shopScreenVM } from '../src/state/screens';
+import { findItem } from '../src/state/items';
 
 bootstrapContent();
+
+function priceOf(itemId: string): number {
+  const item = findItem(itemId);
+  if (!item) throw new Error(`missing test item "${itemId}"`);
+  return item.price;
+}
 
 const DROP_TABLE: readonly DropTableEntry[] = [
   { itemId: 'use-potion', minLevel: 1, weight: 5 },
@@ -133,51 +140,69 @@ describe('campaign economy', () => {
   });
 
   it('buys an item atomically and refuses an unaffordable purchase', () => {
-    const campaign = campaignOf([], {}, 500);
+    const daggerPrice = priceOf('dagger');
+    const campaign = campaignOf([], {}, daggerPrice);
     const chapterOne = shopScreenVM(campaign, { chapter: 1, townName: 'Gariland Camp' });
     const chapterTwo = shopScreenVM(campaign, { chapter: 2, townName: 'Merchant Road' });
     expect(chapterOne.stock.some((item) => item.id === 'dagger')).toBe(true);
     expect(chapterOne.stock.some((item) => item.id === 'long-sword')).toBe(false);
     expect(chapterTwo.stock.some((item) => item.id === 'long-sword')).toBe(true);
 
-    const bought = buyItem(campaign, 'dagger', 200, 2_000);
+    const bought = buyItem(campaign, 'dagger', daggerPrice, 2_000);
     expect(bought.ok).toBe(true);
     if (!bought.ok) throw new Error('expected the affordable purchase to succeed');
-    expect(bought.campaign.gil).toBe(300);
+    expect(bought.campaign.gil).toBe(0);
     expect(bought.campaign.inventory.dagger).toBe(1);
 
     const beforeRefusal = serialize(bought.campaign);
-    const refused = buyItem(bought.campaign, 'defender', 20_000, 3_000);
+    const refused = buyItem(
+      bought.campaign,
+      'defender',
+      priceOf('defender'),
+      3_000,
+    );
     expect(refused).toEqual({ ok: false, reason: 'cannot-afford' });
     expect(serialize(bought.campaign)).toBe(beforeRefusal);
   });
 
   it('sells an owned item at the reduced rate and refuses an item not owned', () => {
     const campaign = campaignOf([], { dagger: 2 }, 40);
+    const daggerPrice = priceOf('dagger');
 
-    const sold = sellItem(campaign, 'dagger', 200, 2_000);
+    const sold = sellItem(campaign, 'dagger', daggerPrice, 2_000);
     expect(sold.ok).toBe(true);
     if (!sold.ok) throw new Error('expected the owned item to sell');
-    expect(sellPrice(200)).toBe(100);
-    expect(sold.campaign.gil).toBe(140);
+    expect(sold.campaign.gil).toBe(40 + sellPrice(daggerPrice));
     expect(sold.campaign.inventory.dagger).toBe(1);
 
     const beforeRefusal = serialize(sold.campaign);
-    const refused = sellItem(sold.campaign, 'rod', 200, 3_000);
+    const refused = sellItem(sold.campaign, 'rod', priceOf('rod'), 3_000);
     expect(refused).toEqual({ ok: false, reason: 'not-owned' });
     expect(serialize(sold.campaign)).toBe(beforeRefusal);
   });
 
+  it('refuses to remove stock when its resale price is zero', () => {
+    const campaign = campaignOf([], { brick: 1 }, 40);
+    const before = serialize(campaign);
+
+    expect(sellItem(campaign, 'brick', 1, 2_000)).toEqual({
+      ok: false,
+      reason: 'invalid-transaction',
+    });
+    expect(serialize(campaign)).toBe(before);
+  });
+
   it('never lets gil become negative through any sequence of operations', () => {
-    let campaign = campaignOf([], {}, 250);
+    const potionPrice = priceOf('use-potion');
+    let campaign = campaignOf([], {}, potionPrice * 2);
 
     for (let i = 0; i < 20; i++) {
-      const result = buyItem(campaign, `use-potion`, 100, 2_000 + i);
+      const result = buyItem(campaign, 'use-potion', potionPrice, 2_000 + i);
       if (result.ok) campaign = result.campaign;
       expect(campaign.gil).toBeGreaterThanOrEqual(0);
     }
 
-    expect(campaign.gil).toBe(50);
+    expect(campaign.gil).toBe(0);
     expect(campaign.inventory['use-potion']).toBe(2);
   });
 
@@ -188,11 +213,16 @@ describe('campaign economy', () => {
         unit({ id: 'm', name: 'Mage', currentJob: 'black-mage' }),
       ],
       {},
-      4_000,
+      priceOf('long-sword') * 2,
     );
 
     for (let i = 0; i < 2; i++) {
-      const bought = buyItem(campaign, 'long-sword', 1_500, 2_000 + i);
+      const bought = buyItem(
+        campaign,
+        'long-sword',
+        priceOf('long-sword'),
+        2_000 + i,
+      );
       expect(bought.ok).toBe(true);
       if (!bought.ok) throw new Error('expected equipment purchase to succeed');
       campaign = bought.campaign;
@@ -222,10 +252,10 @@ describe('campaign economy', () => {
       { dagger: 1 },
       1_000,
     );
-    const sold = sellItem(campaign, 'dagger', 200, 2_000);
+    const sold = sellItem(campaign, 'dagger', priceOf('dagger'), 2_000);
     if (!sold.ok) throw new Error('expected sale to succeed');
     campaign = sold.campaign;
-    const bought = buyItem(campaign, 'rod', 200, 2_001);
+    const bought = buyItem(campaign, 'rod', priceOf('rod'), 2_001);
     if (!bought.ok) throw new Error('expected purchase to succeed');
     campaign = bought.campaign;
     const equipped = equipItem(campaign, 'm', 'rod', 2_002);

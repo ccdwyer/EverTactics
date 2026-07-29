@@ -11,30 +11,20 @@ inputs the game currently produces, and persistence blocked the whole roadmap.
 2. **Resolved in v0.1 step 9 — equipment key order is preserved.** `requireEquipment` validates
    slots in their serialized insertion order, so a current-version save is not cosmetically
    rewritten on deserialize/reserialize.
-3. **`{"__proto__": 0}` as an inventory key** vanishes through the inherited setter
-   (`requireInventory`, `campaign.ts:439`). No real item id looks like this.
-
 Delivered and verified: campaigns save/load/survive refresh, progress records on victory, storage
 failures log rather than fail silently, 469 tests green, typecheck clean.
 
 ## Step 3 residuals (reviewer-flagged, accepted)
 
-1. `tree.ts` reads only `ctx.kills`; `killCountOf(unit, ctx)` was removed. Production is fine
-   because `Game` always builds the context, but a core helper called with `{}` silently locks a
-   unit that has the kills. Same "nothing calls them" shape that cost step 2 four rounds —
-   restore the fallback if core helpers get used directly.
-2. The Dark Knight unlock test fixtures `kills: 20`, so it proves the ctx path, not "earn 20
-   knockdowns then unlock". Kill increment is tested separately.
-3. Status-tick KOs in `battle.ts` emit unattributed knockdowns, so those kills aren't credited.
-   Pre-existing.
+1. The Dark Knight unlock test fixtures `kills: 20`, so it proves the ctx path, not "earn 20
+   knockdowns then unlock". Left as a narrow tree test because battle knockdown credit and the
+   persisted-unit fallback are covered separately; a 20-KO integration grind would duplicate both.
 
 ## Step 5 residuals (reviewer-flagged, accepted)
 
-1. Economy tests hardcode prices (dagger 200, potion 100) rather than reading the item table — they
-   still exercise the rules, but a price change breaks the test instead of the test catching it.
-2. `sellItem` allows a resale price of `0` (`price < 0` rather than `<= 0`). Edge case.
-3. `world.test.ts` hand-builds reward objects from `computeBattleRewards`; the Game path is covered
-   in the routing tests instead.
+1. `world.test.ts` hand-builds reward objects from `computeBattleRewards`. Left as-is because that
+   test intentionally owns the pure world/reward seam; the cross-layer Game path is covered in the
+   routing tests.
 
 ## v0.1 acceptance (step 10 — partial, rounds exhausted)
 
@@ -59,19 +49,4 @@ rounds, and the reviewer correctly failed all three for it.
    rather than won, an empty shop, a formation below the deploy minimum, a completed final node).
 3. **No measured refresh-persistence diff.** The URL fix above makes refresh reach the title
    screen; nothing yet proves gil, JP, levels, learned abilities and inventory survive it.
-4. `tests/game-routing.test.ts` lost `opens the result flow when a player action wins the battle` —
-   it mocked past the code path it claimed to test (see the comment left in its place). Player-
-   caused victory routing should be re-tested through the public surface.
-
 None of this is known-broken; it is **unverified**, which is a different and more honest claim.
-
-## v0.1 step 13 residual (reviewer-flagged, accepted)
-
-1. **A sting test asserts the wrong mechanism.** `scheduleStingNote` already calls
-   `oscillator.stop(end)`, so the skip path's second `stop()` throws in real Web Audio and is
-   caught. Silence on skip actually comes from the voice gain fade and disconnect. The
-   `FakeAudioContext` test expects two stop timestamps, which the fake permits and a real
-   AudioContext would not — so it passes for a reason that does not hold in the browser. The
-   gain/duck assertions in the same suite are load-bearing and do test the real mechanism.
-   Worth correcting the next time this file is touched: this project's recurring failure is a
-   green test over a contract it is not actually exercising.

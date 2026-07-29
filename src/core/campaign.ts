@@ -522,7 +522,12 @@ function requireInventory(raw: object): Record<ItemId, number> {
         `campaign migrate: inventory["${id}"] must be a non-negative integer`,
       );
     }
-    out[id] = n as number;
+    Object.defineProperty(out, id, {
+      value: n as number,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   return out;
 }

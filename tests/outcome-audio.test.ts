@@ -88,13 +88,16 @@ class FakeAudioParam {
 
 class FakeAudioNode {
   readonly connections: unknown[] = [];
+  disconnectCalls = 0;
 
   connect<T>(destination: T): T {
     this.connections.push(destination);
     return destination;
   }
 
-  disconnect(): void {}
+  disconnect(): void {
+    this.disconnectCalls++;
+  }
 }
 
 class FakeGainNode extends FakeAudioNode {
@@ -119,6 +122,9 @@ class FakeOscillatorNode extends FakeAudioNode {
   }
 
   stop(time: number): void {
+    if (this.stops.length > 0) {
+      throw new DOMException('Oscillator has already been stopped', 'InvalidStateError');
+    }
     this.stops.push(time);
   }
 }
@@ -199,7 +205,7 @@ describe('outcome audio lifecycle', () => {
     expect(screen.root.classList.contains('is-open')).toBe(false);
   });
 
-  it('schedules the authored phrase, ducks SFX, and restores them on stop', async () => {
+  it('fades and disconnects the sting voice when the outcome is skipped', async () => {
     vi.useFakeTimers();
     const fakeWindow = new FakeWindow();
     fakeWindow.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
@@ -210,9 +216,11 @@ describe('outcome audio lifecycle', () => {
     const playback = playOutcomeSting('victory');
     const context = FakeAudioContext.instances[0]!;
     const effectsGain = context.gains[1]!.gain;
+    const filter = context.filters[0]!;
+    const voice = context.gains.find((gain) => gain.connections.includes(filter))!;
 
     expect(context.oscillators).toHaveLength(8);
-    expect(context.filters[0]!.connections).toContain(context.gains[0]);
+    expect(filter.connections).toContain(context.gains[0]);
     expect(
       effectsGain.changes.some(
         (change) => change.kind === 'linear' && change.value === 0.055,
@@ -220,13 +228,14 @@ describe('outcome audio lifecycle', () => {
     ).toBe(true);
 
     playback.stop();
-    const stopCounts = context.oscillators.map((oscillator) => oscillator.stops.length);
+    const fadeChanges = [...voice.gain.changes];
     playback.stop();
 
-    expect(stopCounts).toEqual(Array(8).fill(2));
-    expect(context.oscillators.map((oscillator) => oscillator.stops.length)).toEqual(
-      stopCounts,
-    );
+    expect(voice.gain.changes).toEqual(fadeChanges);
+    expect(voice.gain.changes.slice(-2)).toEqual([
+      { kind: 'hold', value: 1, time: 10 },
+      { kind: 'linear', value: 0.0001, time: 10.065 },
+    ]);
     expect(
       effectsGain.changes.some(
         (change) => change.kind === 'hold' && change.value === 0.055,
@@ -236,7 +245,13 @@ describe('outcome audio lifecycle', () => {
       kind: 'linear',
       value: 1,
     });
-    vi.runAllTimers();
+    expect(voice.disconnectCalls).toBe(0);
+    expect(filter.disconnectCalls).toBe(0);
+    vi.advanceTimersByTime(84);
+    expect(voice.disconnectCalls).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(voice.disconnectCalls).toBe(1);
+    expect(filter.disconnectCalls).toBe(1);
   });
 
   it('stops an active sting immediately when the master mute is engaged', async () => {
@@ -249,15 +264,21 @@ describe('outcome audio lifecycle', () => {
 
     const playback = playOutcomeSting('defeat');
     const context = FakeAudioContext.instances[0]!;
+    const filter = context.filters[0]!;
+    const voice = context.gains.find((gain) => gain.connections.includes(filter))!;
     setSoundEnabled(false);
-    const stopCounts = context.oscillators.map((oscillator) => oscillator.stops.length);
+    const gainChanges = [...voice.gain.changes];
     playback.stop();
 
     expect(context.oscillators).toHaveLength(6);
-    expect(stopCounts).toEqual(Array(6).fill(2));
-    expect(context.oscillators.map((oscillator) => oscillator.stops.length)).toEqual(
-      stopCounts,
-    );
+    expect(voice.gain.changes).toEqual(gainChanges);
+    expect(voice.gain.changes.at(-1)).toEqual({
+      kind: 'set',
+      value: 0.0001,
+      time: 10,
+    });
+    expect(voice.disconnectCalls).toBe(1);
+    expect(filter.disconnectCalls).toBe(1);
     expect(context.suspendCalls).toBe(1);
     vi.runAllTimers();
   });
