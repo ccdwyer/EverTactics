@@ -428,6 +428,13 @@ export interface AaSettings {
   spritePolicy: SpritePolicy;
 }
 
+export interface HighlightShoulderSettings {
+  /** Strength of the display-space shoulder. Zero disables it. */
+  amount: number;
+  /** Display luminance where compression begins. Lower values reach further into midtones. */
+  start: number;
+}
+
 export interface PostSettings {
   ao: AoSettings;
   bloom: BloomSettings;
@@ -439,6 +446,7 @@ export interface PostSettings {
   chroma: ChromaSettings;
   spriteGrade: SpriteGradeSettings;
   aa: AaSettings;
+  highlightShoulder: HighlightShoulderSettings;
   /** Linear exposure multiplier applied just before the tonemapper. */
   exposure: number;
   /**
@@ -640,6 +648,14 @@ export function defaultPostSettings(tileSize = 1): PostSettings {
     // white centre only a few pixels across. 0.45 puts the crossover there — hue is intact
     // through the bloom halo and the flame body, and only the last stop goes neutral.
     highlightWhite: 0.45,
+    highlightShoulder: {
+      // Measured on the torch-lit battle-open baseline. The previous local levers moved
+      // lumaP95 by less than one point, while the night references sit 10 to 29 points
+      // lower. Starting at 0.38 leaves shadows and most midtones unchanged; the smooth
+      // shoulder compresses broad bright surfaces while preserving isolated white cores.
+      amount: 0.58,
+      start: 0.38,
+    },
     ao: {
       enabled: true,
       intensity: 1.0,
@@ -1596,6 +1612,8 @@ export class PostStack implements PostEffectsHost {
       uBloomTint: { value: new Vector3(1, 1, 1) },
       uExposure: { value: 1 },
       uHighlightWhite: { value: this.settings.highlightWhite },
+      uHighlightShoulder: { value: this.settings.highlightShoulder.amount },
+      uHighlightShoulderStart: { value: this.settings.highlightShoulder.start },
       uVignetteAmount: { value: this.settings.vignette.amount },
       uVignetteRadius: { value: this.settings.vignette.radius },
       uVignetteSoftness: { value: this.settings.vignette.softness },
@@ -2101,6 +2119,8 @@ export class PostStack implements PostEffectsHost {
     (cu['uBloomTint']!.value as Vector3).set(bloom.tint[0], bloom.tint[1], bloom.tint[2]);
     cu['uExposure']!.value = this.settings.exposure;
     cu['uHighlightWhite']!.value = this.settings.highlightWhite;
+    cu['uHighlightShoulder']!.value = this.settings.highlightShoulder.amount;
+    cu['uHighlightShoulderStart']!.value = this.settings.highlightShoulder.start;
     const vig = this.settings.vignette;
     const floor = this.respectReferenceFloor;
     cu['uVignetteAmount']!.value = vig.enabled

@@ -45,6 +45,8 @@ uniform float uExposure;
 
 /** 0 = hue survives to pure peak, 1 = classic per-channel ACES walk to white. */
 uniform float uHighlightWhite;
+uniform float uHighlightShoulder;
+uniform float uHighlightShoulderStart;
 
 uniform float uVignetteAmount;
 uniform float uVignetteRadius;
@@ -529,6 +531,14 @@ void main() {
 
   if (uDebug != 6) {
     color = mix(color, applyLUT(color), uLutAmount);
+  }
+
+  if (uHighlightShoulder > 0.0) {
+    float shoulderLuma = luma(color);
+    float shoulderWeight = smoothstep(uHighlightShoulderStart, 1.0, shoulderLuma);
+    float compressedLuma =
+      shoulderLuma - uHighlightShoulder * shoulderWeight * (1.0 - shoulderLuma);
+    color *= compressedLuma / max(shoulderLuma, 1e-5);
   }
 
   // Highlight desaturation — the two-source read.

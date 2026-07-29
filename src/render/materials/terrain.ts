@@ -1097,7 +1097,7 @@ const TUNING: Record<TerrainMaterialKind, SurfaceTuning> = {
     // Gloss on paving is now earned rather than given: 'etWet' still multiplies
     // roughness by 0.34 in the tide band, so wet stone is the only stone that
     // shines and it is legible *because* the dry stone next to it does not.
-    roughRange: [0.56, 0.98], weather: 0.55,
+    roughRange: [0.70, 0.98], weather: 0.55,
     uvScale: 1.06, roughness: 1, metalness: 0, color: 0xffffff,
     aoStrength: 1.0, macroStrength: 0.30, macroScale: 0.13,
     batchStrength: 0.50, batchSize: 2.40,

@@ -21,3 +21,6 @@ tools/_delegate/
 !shots/acc-mine*/
 !shots/v01-victory/
 !shots/vfx/
+
+# Agent scratch state; not project content
+.omx/
