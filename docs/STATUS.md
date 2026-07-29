@@ -487,6 +487,23 @@ Consequences now baked in, do not remove them:
 
 ---
 
+### Later additions to the list of tools that lied
+
+7. **`metrics.mjs` silently ignored `--in`.** The image argument is positional, so
+   `metrics.mjs --in ref.png` measured the default image instead — five different reference frames
+   all reported identical metrics, which is the only reason it was caught. Unknown flags are now
+   fatal. A measurement tool printing confident nonsense is the worst version of this bug, because
+   every conclusion drawn from it is wrong in a way that looks rigorous.
+8. **`play.mjs` defaulted to `--host 127.0.0.1`** while `vite preview` binds the IPv6 loopback, so
+   every run died with "dev server did not start" while `curl` to the same port returned 200. Cost
+   three delegated rounds that were asked for frames by a harness that could not reach the game.
+9. **`npm run verify` exited 0 with a failing metrics gate.** Gates were computed, printed, and
+   never enforced. Fixed in v0.1 step 12 — so any green `verify` recorded before that proves less
+   than it appears to.
+10. **`.gitignore` `shots/*` discarded the acceptance frames**, the one step whose deliverable was
+    the frames. Then the over-correction — directory negations — put 428MB of screenshots into a
+    public repo. Evidence is now allow-listed file by file.
+
 ## Working with parallel agents
 
 Agents run concurrently in one repo, so **file ownership is the only thing preventing lost work.**

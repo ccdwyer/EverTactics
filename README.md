@@ -9,6 +9,16 @@ Three.js. HD-2D: pixel-art sprites billboarded inside a fully lit, post-processe
 
 ## What's here
 
+**A campaign, not a demo.** Title screen → new game → world map → choose a battle → arrange the
+formation → fight → results → rewards → shop → back to the map, and **all of it survives a browser
+refresh**. That last part is measured rather than claimed: a battle was driven to victory through
+real keyboard and mouse input, and the save is byte-identical across the reload — same SHA-256,
+same 4999 bytes, every unit's level, JP, learned abilities and equipment intact. The evidence is
+`shots/v01-victory/persistence-diff.md`.
+
+Six maps and ten encounters across two chapters, on a fourteen-node world map with locked and
+unlocked branches.
+
 **A complete battle engine.** Charge-Time turn order with a predictive forecast, movement with
 height and jump rules, facing with back-attack bonuses, FFT damage formulas, zodiac compatibility,
 a full status engine, and reaction abilities that actually fire. Everything is deterministic: the
@@ -25,12 +35,20 @@ totems placed on tiles, warder pets, stance-shifting, threat and wards.
 **An AI that plays properly.** It scores every reachable destination against every legal ability,
 weighing expected damage through the real combat formulas, height advantage, facing exposure, AoE
 friendly-fire, and charge-time prediction. Seven personality archetypes produce visibly different
-behaviour. Verified to resolve 16/16 battles across 8 seeds and 2 maps.
+behaviour. Verified to resolve 16/16 battles across 8 seeds and 2 maps, plus a 30-battle sweep over
+every shipped encounter — 4504 commands, zero rejected by the rules engine.
 
 **A renderer built to a measured target.** Procedural PBR-ish terrain with stochastic tiling and
 role-based stone materials, a surround of silhouette architecture with practical lights, source-
 driven bounce GI, contact-hardening shadows, tilt-shift depth of field, and a colour grade tuned
 against measured reference bands rather than taste.
+
+**Audio and presentation, synthesised.** Battle SFX scale with damage and jitter so repeats do not
+sound mechanical; eight signature ability effects are distinguishable in a still frame rather than
+being one shape at different hues; a sparse ability camera pushes in for heavy spells and never for
+a basic attack. Victory and defeat stings are authored phrases — no sample files anywhere, so there
+is nothing to license. There is deliberately no background music: silence beat a weak procedural
+loop.
 
 **Authentic sprite animation.** The original FFT `SHP`/`SEQ` part-assembly format is decoded from
 the game's own binaries — animation frames are composited from heads, limbs, capes and boots exactly
@@ -46,7 +64,7 @@ npm run dev            # http://localhost:5173
 
 npm run verify         # typecheck + tests + build + render + measure (~2 min)
 npm run verify:quick   # typecheck + tests only
-npm test               # 429 tests
+npm test               # 566 tests
 ```
 
 Controls: arrow keys and Enter drive the command menu, `J` opens the job screen, `F` formation,
@@ -89,7 +107,7 @@ The interesting part of this project may be the verification harness rather than
   filmstrip. Movement needs a click, not a key — a keys-only harness silently tests nothing.
 - **`tools/workflows/`** — multi-agent workflows that fan out fixers and blind-judge the result.
 
-`docs/STATUS.md` carries the full development record, including a list of **seven separate times a
+`docs/STATUS.md` carries the full development record, including a list of **ten separate times a
 tool reported success while silently doing nothing or the wrong thing.** That list is the most
 useful thing in the repository.
 
