@@ -195,6 +195,9 @@ function transactionCampaign(
     roster: [...campaign.roster],
     inventory,
     formation: campaign.formation.map((entry) => ({ ...entry })),
+    recruitment: {
+      townCycles: { ...campaign.recruitment.townCycles },
+    },
     progress: {
       ...campaign.progress,
       completed: [...campaign.progress.completed],

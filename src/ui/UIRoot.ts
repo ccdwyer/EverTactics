@@ -27,6 +27,7 @@ import {
 } from './screens/BattlePresentationScreen';
 import { FormationScreen } from './screens/FormationScreen';
 import { JobScreen } from './screens/JobScreen';
+import { RecruitScreen } from './screens/RecruitScreen';
 import { ResultScreen } from './screens/ResultScreen';
 import { RosterScreen } from './screens/RosterScreen';
 import { ShopScreen } from './screens/ShopScreen';
@@ -39,6 +40,7 @@ import type {
   FormationScreenVM,
   IntentHandler,
   JobScreenVM,
+  RecruitScreenVM,
   ResultScreenVM,
   RosterScreenVM,
   ScreenName,
@@ -97,6 +99,7 @@ export class UIRoot {
   private readonly formationScreen: FormationScreen;
   private readonly rosterScreen: RosterScreen;
   private readonly shopScreen: ShopScreen;
+  private readonly recruitScreen: RecruitScreen;
   private readonly resultScreen: ResultScreen;
   private readonly battlePresentation: BattlePresentationScreen;
   private readonly titleScreen: TitleScreen;
@@ -181,6 +184,7 @@ export class UIRoot {
     this.formationScreen = new FormationScreen(emit);
     this.rosterScreen = new RosterScreen(emit);
     this.shopScreen = new ShopScreen(emit);
+    this.recruitScreen = new RecruitScreen(emit);
     this.resultScreen = new ResultScreen(emit);
     this.battlePresentation = new BattlePresentationScreen();
     this.titleScreen = new TitleScreen(emit);
@@ -429,6 +433,15 @@ export class UIRoot {
     this.shopScreen.set(vm);
   }
 
+  openRecruitScreen(vm: RecruitScreenVM): void {
+    this.recruitScreen.set(vm);
+    this.presentScreen('recruit', this.recruitScreen);
+  }
+
+  updateRecruitScreen(vm: RecruitScreenVM): void {
+    this.recruitScreen.set(vm);
+  }
+
   /** Push new data into an already-open job screen (after learning, job change…). */
   updateJobScreen(vm: JobScreenVM): void {
     this.jobScreen.set(vm);
@@ -486,6 +499,7 @@ export class UIRoot {
       | WorldMapScreen
       | TitleScreen
       | ShopScreen
+      | RecruitScreen
       | JobScreen
       | FormationScreen
       | RosterScreen
@@ -518,6 +532,7 @@ export class UIRoot {
     | TitleScreen
     | WorldMapScreen
     | ShopScreen
+    | RecruitScreen
     | JobScreen
     | FormationScreen
     | RosterScreen
@@ -526,6 +541,7 @@ export class UIRoot {
       case 'title': return this.titleScreen;
       case 'world': return this.worldMapScreen;
       case 'shop': return this.shopScreen;
+      case 'recruit': return this.recruitScreen;
       case 'job': return this.jobScreen;
       case 'formation': return this.formationScreen;
       case 'roster': return this.rosterScreen;

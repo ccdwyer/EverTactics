@@ -869,6 +869,10 @@ describe('rename and dismiss', () => {
         equipment: { rightHand: 'dagger' },
       }),
     ]);
+    two.formation = [
+      { unitId: 'a', startIndex: 0 },
+      { unitId: 'b', startIndex: 1 },
+    ];
     // Gear on the dismissed unit returns to inventory.
     const gone = dismissUnit(two, 'b', 15);
     expect(gone.ok).toBe(true);
@@ -876,6 +880,7 @@ describe('rename and dismiss', () => {
     expect(gone.campaign.roster).toHaveLength(1);
     expect(gone.campaign.roster[0]!.id).toBe('a');
     expect(gone.campaign.inventory.dagger).toBe(1);
+    expect(gone.campaign.formation).toEqual([{ unitId: 'a', startIndex: 0 }]);
 
     const last = dismissUnit(gone.campaign, 'a', 16);
     expect(last.ok).toBe(false);
@@ -883,6 +888,55 @@ describe('rename and dismiss', () => {
     expect(gone.campaign.roster).toHaveLength(1);
 
     expect(roundTrip(gone.campaign).roster).toHaveLength(1);
+  });
+
+  it('dismisses a deployed recruit from a seven-member company without losing the bench', () => {
+    const recruitId = 'recruit:77:gariland-camp:0:0';
+    const company = campaignOf([
+      ...Array.from({ length: 6 }, (_, index) =>
+        unit({
+          id: `member-${index}`,
+          name: `Member ${index}`,
+          currentJob: 'squire',
+        }),
+      ),
+      unit({
+        id: recruitId,
+        name: 'Rowan',
+        currentJob: 'squire',
+        equipment: { rightHand: 'dagger' },
+      }),
+    ]);
+    company.formation = [
+      ...company.roster.slice(0, 5).map((member, startIndex) => ({
+        unitId: member.id,
+        startIndex,
+      })),
+      { unitId: recruitId, startIndex: 5 },
+    ];
+
+    const dismissed = dismissUnit(company, recruitId, 17);
+    expect(dismissed.ok).toBe(true);
+    if (!dismissed.ok) throw new Error('expected deployed recruit dismissal');
+
+    expect(dismissed.campaign.roster.map((member) => member.id)).toEqual([
+      'member-0',
+      'member-1',
+      'member-2',
+      'member-3',
+      'member-4',
+      'member-5',
+    ]);
+    expect(dismissed.campaign.formation).toEqual(
+      company.formation.filter((entry) => entry.unitId !== recruitId),
+    );
+    expect(dismissed.campaign.inventory.dagger).toBe(1);
+    const restored = roundTrip(dismissed.campaign);
+    expect(restored.roster.map((member) => member.id)).toEqual(
+      dismissed.campaign.roster.map((member) => member.id),
+    );
+    expect(restored.formation).toEqual(dismissed.campaign.formation);
+    expect(restored.inventory.dagger).toBe(1);
   });
 });
 

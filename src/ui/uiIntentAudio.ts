@@ -142,6 +142,16 @@ export const UI_INTENT_AUDIO_POLICY = {
     source: 'interaction-and-state',
     reason: 'Selection confirms and the campaign reports sale success or refusal.',
   },
+  'shop-open-recruit': {
+    sounds: ['confirm', 'close', 'open'],
+    source: 'interaction',
+    reason: 'The shop action confirms while the provisioner gives way to recruitment.',
+  },
+  'recruit-hire': {
+    sounds: ['confirm', 'error'],
+    source: 'state-result',
+    reason: 'Hiring is acknowledged only after campaign pricing, capacity, and identity validation.',
+  },
   'open-job-screen': {
     sounds: ['confirm', 'error', 'close', 'open'],
     source: 'interaction-and-state',

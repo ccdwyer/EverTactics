@@ -44,7 +44,7 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Current on-disk schema version. Bump when the shape of CampaignState changes. */
-export const CAMPAIGN_VERSION = 1;
+export const CAMPAIGN_VERSION = 2;
 
 export interface PersistedJobProgress {
   level: number;
@@ -99,6 +99,16 @@ export interface FormationEntry {
   startIndex: number;
 }
 
+/**
+ * Durable recruitment lifecycle.
+ *
+ * Offers themselves are derived from campaign seed + town id + this cycle. Only
+ * the cycle advances on hire, so revisiting or reloading cannot reroll a batch.
+ */
+export interface RecruitmentState {
+  townCycles: Record<string, number>;
+}
+
 export interface CampaignState {
   version: number;
   /** Campaign-level seed so random encounters stay deterministic. */
@@ -112,6 +122,8 @@ export interface CampaignState {
    * Empty means "first N roster members on start tiles 0..N-1" (legacy default).
    */
   formation: FormationEntry[];
+  /** Per-town offer generations; see src/core/recruit.ts. */
+  recruitment: RecruitmentState;
   progress: CampaignProgress;
   /** Epoch ms; always passed in, never read from the clock in core. */
   createdAt: number;
@@ -141,6 +153,7 @@ export function createCampaign(seed: number, timestamp: number): CampaignState {
     roster: [],
     inventory: {},
     formation: [],
+    recruitment: { townCycles: {} },
     progress: { completed: [] },
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -314,15 +327,16 @@ export function migrate(raw: unknown): CampaignState {
       roster,
       inventory,
       formation: normalizeFormation(obj.formation),
+      recruitment: { townCycles: {} },
       progress,
       createdAt,
       updatedAt,
     };
   }
 
-  // v1 (current): strict content validation. Any malformed field throws.
-  // Never floor, default, or drop — a corrupt current-version save fails loudly.
-  return parseCurrentVersion(obj);
+  // v1 remains strict while gaining the empty recruitment lifecycle. v2 is the
+  // current shape and must carry recruitment explicitly.
+  return parseVersionedCampaign(obj, version);
 }
 
 /**
@@ -361,7 +375,7 @@ const ZODIACS: ReadonlySet<string> = new Set([
 ]);
 
 /** Top-level keys of a current-version CampaignState. Any other key is corrupt/future. */
-const CAMPAIGN_KEYS: ReadonlySet<string> = new Set([
+const CAMPAIGN_V1_KEYS: ReadonlySet<string> = new Set([
   'version',
   'seed',
   'gil',
@@ -373,7 +387,13 @@ const CAMPAIGN_KEYS: ReadonlySet<string> = new Set([
   'updatedAt',
 ]);
 
+const CAMPAIGN_KEYS: ReadonlySet<string> = new Set([
+  ...CAMPAIGN_V1_KEYS,
+  'recruitment',
+]);
+
 const PROGRESS_KEYS: ReadonlySet<string> = new Set(['completed', 'current']);
+const RECRUITMENT_KEYS: ReadonlySet<string> = new Set(['townCycles']);
 
 const PERSISTED_UNIT_KEYS: ReadonlySet<string> = new Set([
   'id',
@@ -424,9 +444,16 @@ function rejectUnknownKeys(
   }
 }
 
-function parseCurrentVersion(obj: Record<string, unknown>): CampaignState {
+function parseVersionedCampaign(
+  obj: Record<string, unknown>,
+  sourceVersion: number,
+): CampaignState {
   // Unknown top-level keys would be stripped by reconstruction — reject instead.
-  rejectUnknownKeys(obj, CAMPAIGN_KEYS, 'campaign');
+  rejectUnknownKeys(
+    obj,
+    sourceVersion < CAMPAIGN_VERSION ? CAMPAIGN_V1_KEYS : CAMPAIGN_KEYS,
+    'campaign',
+  );
 
   if (!isFiniteInt(obj.seed)) {
     throw new Error('campaign migrate: missing or invalid seed (must be an integer)');
@@ -449,6 +476,16 @@ function parseCurrentVersion(obj: Record<string, unknown>): CampaignState {
   if (obj.progress === null || typeof obj.progress !== 'object' || Array.isArray(obj.progress)) {
     throw new Error('campaign migrate: missing or invalid progress');
   }
+  if (
+    sourceVersion >= CAMPAIGN_VERSION &&
+    (
+      obj.recruitment === null ||
+      typeof obj.recruitment !== 'object' ||
+      Array.isArray(obj.recruitment)
+    )
+  ) {
+    throw new Error('campaign migrate: missing or invalid recruitment');
+  }
 
   // Accept integers as-is — never floor fractions into a plausible save.
   // `formation` is optional on disk for v1 saves written before party management;
@@ -463,10 +500,44 @@ function parseCurrentVersion(obj: Record<string, unknown>): CampaignState {
     roster: requireRoster(obj.roster),
     inventory: requireInventory(obj.inventory),
     formation,
+    recruitment:
+      sourceVersion < CAMPAIGN_VERSION
+        ? { townCycles: {} }
+        : requireRecruitment(obj.recruitment as object),
     progress: requireProgress(obj.progress),
     createdAt: obj.createdAt as number,
     updatedAt: obj.updatedAt as number,
   };
+}
+
+function requireRecruitment(raw: object): RecruitmentState {
+  const obj = raw as Record<string, unknown>;
+  rejectUnknownKeys(obj, RECRUITMENT_KEYS, 'recruitment');
+  if (
+    obj.townCycles === null ||
+    typeof obj.townCycles !== 'object' ||
+    Array.isArray(obj.townCycles)
+  ) {
+    throw new Error('campaign migrate: recruitment.townCycles must be an object');
+  }
+
+  const townCycles: Record<string, number> = {};
+  for (const [nodeId, cycle] of Object.entries(
+    obj.townCycles as Record<string, unknown>,
+  )) {
+    if (nodeId.length === 0 || !isFiniteNonNegInt(cycle)) {
+      throw new Error(
+        `campaign migrate: recruitment.townCycles["${nodeId}"] must be a non-negative integer`,
+      );
+    }
+    Object.defineProperty(townCycles, nodeId, {
+      value: cycle,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return { townCycles };
 }
 
 function requireFormation(raw: unknown): FormationEntry[] {
@@ -941,6 +1012,7 @@ export function setCurrentWorldNode(
     roster: campaign.roster.map(structuredClonePersisted),
     inventory: { ...campaign.inventory },
     formation: (campaign.formation ?? []).map((e) => ({ ...e })),
+    recruitment: cloneRecruitment(campaign.recruitment),
     progress: {
       completed: [...campaign.progress.completed],
       current: nodeId,
@@ -980,6 +1052,7 @@ export function battleToCampaign(
       roster: campaign.roster.map(structuredClonePersisted),
       inventory: { ...campaign.inventory },
       formation: campaign.formation.map((entry) => ({ ...entry })),
+      recruitment: cloneRecruitment(campaign.recruitment),
       progress: {
         completed: [...campaign.progress.completed],
         ...(campaign.progress.current !== undefined
@@ -1051,6 +1124,7 @@ export function battleToCampaign(
     inventory,
     // Formation is a pre-battle choice; write-back leaves it alone.
     formation: (campaign.formation ?? []).map((e) => ({ ...e })),
+    recruitment: cloneRecruitment(campaign.recruitment),
     progress,
     createdAt: campaign.createdAt,
     updatedAt: timestamp,
@@ -1063,6 +1137,10 @@ function stockToRecord(stock: ReadonlyMap<ItemId, number>): Record<ItemId, numbe
     if (n > 0) out[id] = n;
   }
   return out;
+}
+
+function cloneRecruitment(state: RecruitmentState): RecruitmentState {
+  return { townCycles: { ...state.townCycles } };
 }
 
 function structuredClonePersisted(u: PersistedUnit): PersistedUnit {

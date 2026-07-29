@@ -11,19 +11,23 @@ import { describe, expect, it } from 'vitest';
 import { allJobs, getJob } from '../src/core/jobs';
 import { jobLevelOf, unlockStatus } from '../src/core/jobs/tree';
 import { canSwitchToJob } from '../src/core/party';
+import { createCampaign, unitToPersisted } from '../src/core/campaign';
 import { deriveStats, gainJp, jobProgress, learnAbility, setJob } from '../src/core/unit';
 import { bootstrapContent } from '../src/state/content';
 import { buildScenario, getScenario } from '../src/state/scenarios';
 import {
   abilitySlotVMs,
+  campaignFormationScreenVM,
   formationScreenVM,
   jobNodeVMs,
   jobScreenVM,
   jobTier,
   learnableVMs,
+  recruitScreenVM,
   rosterScreenVM,
 } from '../src/state/screens';
 import type { BattleState, Unit } from '../src/core/types';
+import { WORLD_NODES } from '../src/core/world';
 
 bootstrapContent();
 
@@ -49,6 +53,79 @@ describe('job tree geometry', () => {
   it('puts the starting jobs at the root', () => {
     expect(jobTier('squire')).toBe(0);
     expect(jobTier('chemist')).toBe(0);
+  });
+});
+
+describe('recruitment and grown-company view models', () => {
+  it('shows three stable candidates, live terms, and the explicit roster cap', () => {
+    const state = battle();
+    const campaign = createCampaign(77, 1_000);
+    campaign.roster = [...state.units.values()]
+      .filter((unit) => unit.team === 'player')
+      .map(unitToPersisted);
+    campaign.gil = 5_000;
+    const town = WORLD_NODES.find((node) => node.id === 'gariland-camp')!;
+
+    const first = recruitScreenVM(campaign, {
+      nodeId: town.id,
+      townName: town.name,
+    });
+    const second = recruitScreenVM(campaign, {
+      nodeId: town.id,
+      townName: town.name,
+    });
+
+    expect(first.offers).toHaveLength(3);
+    expect(second.offers).toEqual(first.offers);
+    expect(first.rosterCap).toBe(16);
+    expect(first.rosterCount).toBe(campaign.roster.length);
+    expect(first.unavailableReason).toBeUndefined();
+    expect(first.jobs.male.some((job) => job.id === 'squire')).toBe(true);
+    expect(first.jobs.female.some((job) => job.id === 'chemist')).toBe(true);
+
+    while (campaign.roster.length < 16) {
+      const base = campaign.roster[0]!;
+      campaign.roster.push({
+        ...base,
+        id: `bench-${campaign.roster.length}`,
+        name: `Bench ${campaign.roster.length}`,
+      });
+    }
+    const full = recruitScreenVM(campaign, {
+      nodeId: town.id,
+      townName: town.name,
+    });
+    expect(full.unavailableReason).toBe(
+      'Roster full (16/16). Dismiss a unit before hiring.',
+    );
+  });
+
+  it('lists a seven-member roster while keeping deployment to authored slots', () => {
+    const state = battle();
+    const campaign = createCampaign(88, 1_000);
+    campaign.roster = [...state.units.values()]
+      .filter((unit) => unit.team === 'player')
+      .map(unitToPersisted);
+    const base = campaign.roster[0]!;
+    campaign.roster.push({ ...base, id: 'recruit:bench', name: 'New Recruit' });
+    campaign.formation = campaign.roster.slice(0, 4).map((unit, startIndex) => ({
+      unitId: unit.id,
+      startIndex,
+    }));
+
+    const vm = campaignFormationScreenVM(campaign, {
+      startTiles: [
+        { x: 0, y: 0 },
+        { x: 1, y: 0 },
+        { x: 2, y: 0 },
+        { x: 3, y: 0 },
+      ],
+    });
+
+    expect(vm.roster).toHaveLength(7);
+    expect(vm.slots).toHaveLength(4);
+    expect(vm.maxDeployed).toBe(4);
+    expect(vm.slots.filter((slot) => slot.unitId !== undefined)).toHaveLength(4);
   });
 });
 

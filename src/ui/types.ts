@@ -319,8 +319,49 @@ export interface ShopScreenVM {
   subtitle?: string;
   chapter: number;
   gil: number;
+  rosterCount: number;
+  rosterCap: number;
   stock: readonly ShopStockItemVM[];
   inventory: readonly ShopInventoryItemVM[];
+}
+
+export interface RecruitJobOptionVM {
+  id: string;
+  name: string;
+  equipment: readonly string[];
+  price: number;
+}
+
+export interface RecruitOfferVM {
+  index: number;
+  id: string;
+  defaultName: string;
+  defaultNames: Readonly<Record<'male' | 'female', string>>;
+  defaultGender: 'male' | 'female';
+  defaultJobId: string;
+  defaultJobName: string;
+  zodiac: string;
+  brave: number;
+  faith: number;
+  raw: Readonly<{
+    hp: number;
+    mp: number;
+    pa: number;
+    ma: number;
+    spd: number;
+  }>;
+  price: number;
+}
+
+export interface RecruitScreenVM {
+  title: string;
+  subtitle?: string;
+  gil: number;
+  rosterCount: number;
+  rosterCap: number;
+  offers: readonly RecruitOfferVM[];
+  jobs: Readonly<Record<'male' | 'female', readonly RecruitJobOptionVM[]>>;
+  unavailableReason?: string;
 }
 
 export type EquipSlotName =
@@ -455,6 +496,16 @@ export type UIIntent =
   | { kind: 'shop-buy'; itemId: string }
   /** Shop: sell one item from campaign inventory. */
   | { kind: 'shop-sell'; itemId: string }
+  /** Shop: open this town's stable recruit offers. */
+  | { kind: 'shop-open-recruit' }
+  /** Recruit: hire the selected offer with the player's chosen identity. */
+  | {
+      kind: 'recruit-hire';
+      offerIndex: number;
+      jobId: string;
+      gender: 'male' | 'female';
+      name: string;
+    }
   /** Roster screen: open the job screen for a unit. */
   | { kind: 'open-job-screen'; unitId: string }
   /** Roster: equip an inventory item onto a unit. */
@@ -478,6 +529,7 @@ export type ScreenName =
   | 'title'
   | 'world'
   | 'shop'
+  | 'recruit'
   | 'job'
   | 'formation'
   | 'roster'

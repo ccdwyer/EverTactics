@@ -131,7 +131,12 @@ export class InputRouter {
     const target = ev.target;
     if (target instanceof HTMLElement) {
       const tag = target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target.isContentEditable
+      ) return;
     }
     let key = KEY_MAP[ev.code];
     if (key === 'next' && ev.shiftKey) key = 'prev';

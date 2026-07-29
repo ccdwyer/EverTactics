@@ -22,6 +22,7 @@ import {
 } from '../src/core/campaign';
 import { advance, applyCommand, evaluateObjective } from '../src/core/battle';
 import { decideTurn } from '../src/core/ai';
+import { hireRecruit } from '../src/core/recruit';
 import { WORLD_NODES } from '../src/core/world';
 import { gainExp, gainJp } from '../src/core/unit';
 import type { BattleEvent, BattleState, Unit } from '../src/core/types';
@@ -197,6 +198,28 @@ describe('campaign serialize / deserialize', () => {
     expect(restored.version).toBe(CAMPAIGN_VERSION);
     expect(restored.roster[0]!.jobs['knight']!.learned).toEqual(['throw-stone', 'accumulate']);
     expect(restored.inventory['use-ether']).toBe(0);
+  });
+
+  it('migrates v1 with an empty offer lifecycle and strictly persists v2 town cycles', () => {
+    const migrated = migrate(validV1Shell());
+    expect(migrated.version).toBe(CAMPAIGN_VERSION);
+    expect(migrated.recruitment).toEqual({ townCycles: {} });
+
+    const current = createCampaign(9, 100);
+    current.recruitment.townCycles['gariland-camp'] = 2;
+    expect(deserialize(serialize(current)).recruitment).toEqual({
+      townCycles: { 'gariland-camp': 2 },
+    });
+
+    const missing = JSON.parse(serialize(current)) as Record<string, unknown>;
+    delete missing.recruitment;
+    expect(() => migrate(missing)).toThrow(/recruitment/);
+
+    const corrupt = JSON.parse(serialize(current)) as {
+      recruitment: { townCycles: Record<string, unknown> };
+    };
+    corrupt.recruitment.townCycles['gariland-camp'] = -1;
+    expect(() => migrate(corrupt)).toThrow(/non-negative integer/);
   });
 
   it('current-version inventory count of 0 is preserved (not dropped)', () => {
@@ -731,13 +754,33 @@ describe('campaign roster identity', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('determinism across save/load', () => {
-  it('produces identical event streams from a live campaign and its deserialized twin', () => {
+  it('produces identical event streams after hiring into a seven-unit company and reloading', () => {
     const seed = 1234;
-    const live = campaignFromBattleOpen(seed, 9_000);
+    const beforeHire = campaignFromBattleOpen(seed, 9_000);
+    beforeHire.gil = 50_000;
+    const townId = WORLD_NODES.find((node) => node.id === 'gariland-camp')!.id;
+    const hired = hireRecruit(
+      beforeHire,
+      townId,
+      {
+        offerIndex: 0,
+        job: 'squire',
+        gender: 'female',
+        name: 'Maren',
+      },
+      10_000,
+    );
+    expect(hired.ok).toBe(true);
+    if (!hired.ok) throw new Error('expected recruitment fixture to hire');
+    const live = hired.campaign;
     const restored = deserialize(serialize(live));
 
-    // Campaigns match first.
+    // The durable company, including the recruit's rolled stats and equipment,
+    // must survive before either side launches its next battle.
+    expect(live.roster).toHaveLength(7);
     expect(restored).toEqual(live);
+    expect(restored.roster).toEqual(live.roster);
+    expect(restored.roster.at(-1)).toEqual(hired.unit);
 
     // Use the stock scenario definition — battle RNG comes from campaign.seed,
     // so we must NOT overwrite scenario.seed to paper over seed usage.
@@ -769,6 +812,11 @@ describe('determinism across save/load', () => {
 
     expect(snap(battleB)).toEqual(snap(battleA));
     expect(battleB.rngState).toBe(battleA.rngState);
+    const deployedIds = [...battleA.units.values()]
+      .filter((unit) => unit.team === 'player')
+      .map((unit) => unit.id);
+    expect(deployedIds).toHaveLength(6);
+    expect(deployedIds).not.toContain(hired.unit.id);
 
     const playedA = playBattle(battleA);
     const playedB = playBattle(battleB);

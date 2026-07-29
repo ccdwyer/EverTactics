@@ -24,7 +24,16 @@ import { buyPrice, canAfford, sellPrice } from '@core/economy';
 import { JOBS, allJobs, findJob } from '@core/jobs';
 import { jobLevelOf, unlockStatus, type UnlockContext } from '@core/jobs/tree';
 import { canEquipItem, canSwitchToJob, EQUIP_SLOT_ORDER, type EquipSlot } from '@core/party';
+import {
+  ROSTER_CAP,
+  availableRecruitJobs,
+  recruitCandidate,
+  recruitPrice,
+  rosterRecruitLevel,
+  townRecruitOffers,
+} from '@core/recruit';
 import { jobProgress } from '@core/unit';
+import type { WorldNodeId } from '@core/ids';
 import type { Ability, AbilitySetId, BattleState, Job, JobId, Unit, UnitId } from '@core/types';
 import { WORLD_NODES, isUnlocked, nextObjective } from '@core/world';
 import type {
@@ -34,6 +43,8 @@ import type {
   JobNodeVM,
   JobScreenVM,
   LearnableVM,
+  RecruitJobOptionVM,
+  RecruitScreenVM,
   RosterEquipSlotVM,
   RosterScreenVM,
   RosterUnitEditVM,
@@ -518,9 +529,86 @@ export function shopScreenVM(
     subtitle: `Chapter ${chapter} provisions`,
     chapter,
     gil: campaign.gil,
+    rosterCount: campaign.roster.length,
+    rosterCap: ROSTER_CAP,
     stock,
     inventory,
   };
+}
+
+export function recruitScreenVM(
+  campaign: CampaignState,
+  opts: { nodeId: WorldNodeId; townName: string },
+): RecruitScreenVM {
+  const maleJobs = recruitJobOptions(campaign, opts.nodeId, 'male');
+  const femaleJobs = recruitJobOptions(campaign, opts.nodeId, 'female');
+  const jobs = { male: maleJobs, female: femaleJobs };
+  const offers = townRecruitOffers(campaign, opts.nodeId).map((offer) => {
+    const maleJob =
+      maleJobs.find((job) => job.id === offer.unit.currentJob)?.id ??
+      maleJobs[0]?.id ??
+      'squire';
+    const femaleJob =
+      femaleJobs.find((job) => job.id === offer.unit.currentJob)?.id ??
+      femaleJobs[0]?.id ??
+      'squire';
+    const maleName = recruitCandidate(campaign, opts.nodeId, offer.index, {
+      job: maleJob,
+      gender: 'male',
+    }).name;
+    const femaleName = recruitCandidate(campaign, opts.nodeId, offer.index, {
+      job: femaleJob,
+      gender: 'female',
+    }).name;
+    return {
+      index: offer.index,
+      id: offer.unit.id,
+      defaultName: offer.unit.name,
+      defaultNames: { male: maleName, female: femaleName },
+      defaultGender: offer.unit.gender as 'male' | 'female',
+      defaultJobId: offer.unit.currentJob,
+      defaultJobName: findJob(offer.unit.currentJob)?.name ?? offer.unit.currentJob,
+      zodiac: offer.unit.zodiac,
+      brave: offer.unit.brave,
+      faith: offer.unit.faith,
+      raw: { ...offer.unit.raw },
+      price: offer.price,
+    };
+  });
+  const unavailableReason =
+    campaign.roster.length >= ROSTER_CAP
+      ? `Roster full (${campaign.roster.length}/${ROSTER_CAP}). Dismiss a unit before hiring.`
+      : undefined;
+
+  return {
+    title: `${opts.townName} Recruits`,
+    subtitle: 'Choose a candidate, then shape their place in the company.',
+    gil: campaign.gil,
+    rosterCount: campaign.roster.length,
+    rosterCap: ROSTER_CAP,
+    offers,
+    jobs,
+    ...(unavailableReason !== undefined ? { unavailableReason } : {}),
+  };
+}
+
+function recruitJobOptions(
+  campaign: CampaignState,
+  nodeId: WorldNodeId,
+  gender: 'male' | 'female',
+): RecruitJobOptionVM[] {
+  return availableRecruitJobs(campaign, gender).map((jobId) => {
+    const job = findJob(jobId);
+    const unit = recruitCandidate(campaign, nodeId, 0, { job: jobId, gender });
+    const equipment = Object.values(unit.equipment)
+      .map((itemId) => findItem(itemId)?.name ?? itemId);
+    return {
+      id: jobId,
+      name: job?.name ?? jobId,
+      equipment,
+      price: recruitPrice(rosterRecruitLevel(campaign.roster), jobId),
+    };
+  });
 }
 
 const EQUIP_SLOT_LABELS: Record<EquipSlot, string> = {

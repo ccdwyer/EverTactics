@@ -512,6 +512,9 @@ function withUpdate(
     roster: patch.roster ?? campaign.roster.map(structuredClonePersisted),
     inventory: patch.inventory ?? { ...campaign.inventory },
     formation: patch.formation ?? (campaign.formation ? campaign.formation.map((e) => ({ ...e })) : []),
+    recruitment: {
+      townCycles: { ...campaign.recruitment.townCycles },
+    },
     progress: {
       completed: [...campaign.progress.completed],
       ...(campaign.progress.current !== undefined

@@ -18,8 +18,7 @@ import type {
   UIIntent,
 } from '../types';
 import { Screen } from './Screen';
-
-type ShopPane = 'stock' | 'inventory';
+import { shopPaneTransition, type ShopPane } from './shopNavigation';
 
 export class ShopScreen extends Screen {
   readonly name = 'shop-screen';
@@ -29,6 +28,7 @@ export class ShopScreen extends Screen {
   private readonly inventoryPanel: Panel;
   private readonly stockList: MenuList<ShopStockItemVM>;
   private readonly inventoryList: MenuList<ShopInventoryItemVM>;
+  private readonly recruitButton: HTMLButtonElement;
   private pane: ShopPane = 'stock';
 
   constructor(private readonly emit: (intent: UIIntent) => void) {
@@ -97,11 +97,16 @@ export class ShopScreen extends Screen {
     this.inventoryPanel.body.appendChild(this.inventoryList.root);
 
     const heading = div('et-shop__intro');
+    const introCopy = div('et-shop__intro-copy');
     add(
-      heading,
+      introCopy,
       icon('gil', 'et-shop__intro-icon'),
-      el('span', 'et-shop__intro-copy', 'Outfit the company for the road ahead.'),
+      el('span', undefined, 'Outfit the company for the road ahead.'),
     );
+    this.recruitButton = el('button', 'et-shop__recruit', 'Recruit');
+    this.recruitButton.type = 'button';
+    this.recruitButton.addEventListener('click', () => this.openRecruitment());
+    add(heading, introCopy, this.recruitButton);
     add(this.content, heading, this.stockPanel.root, this.inventoryPanel.root);
     this.stockPanel.root.classList.add('et-entered');
     this.inventoryPanel.root.classList.add('et-entered');
@@ -113,6 +118,10 @@ export class ShopScreen extends Screen {
       icon('gil'),
       document.createTextNode(`${vm.gil.toLocaleString()} gil`),
     );
+    this.recruitButton.textContent =
+      vm.rosterCount >= vm.rosterCap
+        ? `Roster full · ${vm.rosterCount}/${vm.rosterCap}`
+        : `Recruit · ${vm.rosterCount}/${vm.rosterCap}`;
     this.stockList.setItems(vm.stock, true);
     this.inventoryList.setItems(vm.inventory, true);
     this.applyPane();
@@ -120,10 +129,12 @@ export class ShopScreen extends Screen {
 
   private applyPane(): void {
     const stock = this.pane === 'stock';
+    const inventory = this.pane === 'inventory';
     this.stockPanel.root.classList.toggle('is-focused', stock);
-    this.inventoryPanel.root.classList.toggle('is-focused', !stock);
+    this.inventoryPanel.root.classList.toggle('is-focused', inventory);
+    this.recruitButton.classList.toggle('is-focused', this.pane === 'recruit');
     this.stockList.onFocusChange(stock);
-    this.inventoryList.onFocusChange(!stock);
+    this.inventoryList.onFocusChange(inventory);
   }
 
   private switchPane(next: ShopPane): void {
@@ -134,21 +145,26 @@ export class ShopScreen extends Screen {
   }
 
   protected handleKey(key: UIKey): boolean {
-    if (key === 'next' || key === 'prev') {
-      this.switchPane(this.pane === 'stock' ? 'inventory' : 'stock');
+    const nextPane = shopPaneTransition(this.pane, key);
+    if (nextPane) {
+      this.switchPane(nextPane);
       return true;
     }
     if (this.pane === 'stock') {
-      if (key === 'right') {
-        this.switchPane('inventory');
-        return true;
-      }
       return this.stockList.onKey(key);
     }
-    if (key === 'left') {
-      this.switchPane('stock');
+    if (this.pane === 'inventory') {
+      return this.inventoryList.onKey(key);
+    }
+    if (key === 'confirm') {
+      this.openRecruitment();
       return true;
     }
-    return this.inventoryList.onKey(key);
+    return false;
+  }
+
+  private openRecruitment(): void {
+    play('confirm');
+    this.emit({ kind: 'shop-open-recruit' });
   }
 }

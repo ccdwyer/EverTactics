@@ -86,6 +86,11 @@ shots/softlock/lost-legacy/*
 !shots/softlock/campaign-complete/
 shots/softlock/campaign-complete/*
 !shots/softlock/campaign-complete/03-campaign-complete.png
+!shots/recruit/
+shots/recruit/*
+!shots/recruit/01-offer.png
+!shots/recruit/02-naming.png
+!shots/recruit/03-roster-seven.png
 .vite/
 *.log
 refs/

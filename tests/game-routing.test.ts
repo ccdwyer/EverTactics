@@ -13,7 +13,9 @@ import type {
   BattleState,
 } from '../src/core/types';
 import type {
+  RecruitScreenVM,
   ResultScreenVM,
+  ScreenName,
   UIIntent,
   WorldMapScreenVM,
 } from '../src/ui/types';
@@ -38,6 +40,8 @@ const uiCapture = vi.hoisted(() => ({
     chapter?: number;
     stock?: Array<{ id: string }>;
   } | null,
+  openedRecruitVM: null as RecruitScreenVM | null,
+  currentScreen: null as ScreenName | null,
   openedTitleVM: null as { continueAvailable: boolean } | null,
   openedWorldMapVM: null as WorldMapScreenVM | null,
   intro: null as { mapName: string; encounterName: string } | null,
@@ -156,7 +160,12 @@ vi.mock('../src/ui/UIRoot', () => ({
     closeMenus = vi.fn();
     hideAbilityMenu = vi.fn();
     hideCommandMenu = vi.fn();
-    closeScreen = vi.fn();
+    get currentScreen() {
+      return uiCapture.currentScreen;
+    }
+    closeScreen = vi.fn(() => {
+      uiCapture.currentScreen = null;
+    });
     banner = vi.fn();
     presentBattleIntro = vi.fn((vm: { mapName: string; encounterName: string }) => {
       uiCapture.intro = vm;
@@ -172,15 +181,29 @@ vi.mock('../src/ui/UIRoot', () => ({
     sound = vi.fn();
     openTitleScreen = vi.fn((vm: typeof uiCapture.openedTitleVM) => {
       uiCapture.openedTitleVM = vm;
+      uiCapture.currentScreen = 'title';
     });
     openWorldMapScreen = vi.fn((vm: WorldMapScreenVM) => {
       uiCapture.openedWorldMapVM = vm;
+      uiCapture.currentScreen = 'world';
     });
     openShopScreen = vi.fn((vm: typeof uiCapture.openedShopVM) => {
       uiCapture.openedShopVM = vm;
+      uiCapture.currentScreen = 'shop';
+    });
+    updateShopScreen = vi.fn((vm: typeof uiCapture.openedShopVM) => {
+      uiCapture.openedShopVM = vm;
+    });
+    openRecruitScreen = vi.fn((vm: RecruitScreenVM) => {
+      uiCapture.openedRecruitVM = vm;
+      uiCapture.currentScreen = 'recruit';
+    });
+    updateRecruitScreen = vi.fn((vm: RecruitScreenVM) => {
+      uiCapture.openedRecruitVM = vm;
     });
     openJobScreen = vi.fn((vm: typeof uiCapture.openedJobVM) => {
       uiCapture.openedJobVM = vm;
+      uiCapture.currentScreen = 'job';
     });
     setTurnOrder = vi.fn();
     setActiveUnit = vi.fn();
@@ -327,6 +350,8 @@ beforeEach(() => {
   uiCapture.intentHandler = null;
   uiCapture.openedJobVM = null;
   uiCapture.openedShopVM = null;
+  uiCapture.openedRecruitVM = null;
+  uiCapture.currentScreen = null;
   uiCapture.openedTitleVM = null;
   uiCapture.openedWorldMapVM = null;
   uiCapture.intro = null;
@@ -382,6 +407,60 @@ describe('Game campaign routing', () => {
     });
     expect(firstLesson.campaign.progress.current).toBe('battle-open');
     expect(saves.written.at(-1)?.progress.current).toBe('battle-open');
+  });
+
+  it('routes town recruitment through the real campaign mutation and persistence path', () => {
+    routing.scenario = peacefulFirstBattle();
+    const initial = newGame().campaign;
+    saves.loaded = {
+      ...initial,
+      gil: 5_000,
+      progress: {
+        completed: [WORLD_NODES[0]!.id],
+        current: WORLD_NODES[0]!.id,
+      },
+    };
+    const map = new Game({
+      scenarioId: 'battle-open',
+      worldMap: true,
+      container: {} as HTMLElement,
+      uiMount: {} as HTMLElement,
+    });
+
+    (map as unknown as { onWorldNodeSelect(nodeId: string): void })
+      .onWorldNodeSelect('gariland-camp');
+    expect(uiCapture.currentScreen).toBe('shop');
+
+    const beforeCount = map.campaign.roster.length;
+    const beforeGil = map.campaign.gil;
+    uiCapture.intentHandler?.({ kind: 'shop-open-recruit' });
+    expect(uiCapture.currentScreen).toBe('recruit');
+    expect(uiCapture.openedRecruitVM?.offers).toHaveLength(3);
+
+    uiCapture.intentHandler?.({
+      kind: 'recruit-hire',
+      offerIndex: 0,
+      jobId: 'squire',
+      gender: 'male',
+      name: '  Rowan  ',
+    });
+
+    expect(map.campaign.roster).toHaveLength(beforeCount + 1);
+    expect(map.campaign.roster.at(-1)).toMatchObject({
+      name: 'Rowan',
+      currentJob: 'squire',
+      gender: 'male',
+    });
+    expect(map.campaign.roster.at(-1)?.id).toMatch(
+      /^recruit:.*:gariland-camp:0:0$/,
+    );
+    expect(map.campaign.gil).toBeLessThan(beforeGil);
+    expect(map.campaign.recruitment.townCycles['gariland-camp']).toBe(1);
+    expect(saves.written.at(-1)?.roster).toEqual(map.campaign.roster);
+    expect(uiCapture.openedRecruitVM?.rosterCount).toBe(beforeCount + 1);
+
+    uiCapture.intentHandler?.({ kind: 'close-screen', screen: 'recruit' });
+    expect(uiCapture.currentScreen).toBe('shop');
   });
 
   it('returns from the world map to a title screen that can continue the campaign', () => {

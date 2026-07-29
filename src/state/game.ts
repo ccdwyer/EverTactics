@@ -65,6 +65,7 @@ import {
   campaignFormationScreenVM,
   campaignJobScreenVM,
   campaignRosterScreenVM,
+  recruitScreenVM,
   shopScreenVM,
   worldMapScreenVM,
 } from './screens';
@@ -84,6 +85,7 @@ import {
   type FormationEntry,
 } from '@core/campaign';
 import { buyItem, computeBattleRewards, sellItem } from '@core/economy';
+import { hireRecruit } from '@core/recruit';
 import { stockAwareWorld } from '@core/inventory';
 import { WORLD_NODES, completeTravelNode, isUnlocked, type WorldNode } from '@core/world';
 import { IllegalCommandError, advance, affectedTiles, applyCommand } from '@core/battle';
@@ -1347,6 +1349,15 @@ export class Game {
           this.showTitle();
           break;
         }
+        if (intent.screen === 'recruit' && this.shopNode) {
+          this.ui.openShopScreen(
+            shopScreenVM(this.campaign, {
+              chapter: this.shopNode.chapter,
+              townName: this.shopNode.name,
+            }),
+          );
+          break;
+        }
         if (intent.screen === 'shop') this.shopNode = null;
         this.screenUnit = null;
         this.screenJob = null;
@@ -1388,6 +1399,16 @@ export class Game {
 
       case 'shop-sell': {
         this.onShopSell(intent.itemId);
+        break;
+      }
+
+      case 'shop-open-recruit': {
+        this.openRecruitScreen();
+        break;
+      }
+
+      case 'recruit-hire': {
+        this.onRecruitHire(intent);
         break;
       }
 
@@ -1607,7 +1628,12 @@ export class Game {
       const target = ev.target;
       if (target instanceof HTMLElement) {
         const tag = target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable
+        ) return;
       }
       // While a screen is up it owns the keyboard; `UIRoot`'s own focus stack
       // handles navigation and Escape.
@@ -1846,6 +1872,62 @@ export class Game {
     this.ui.updateShopScreen(
       shopScreenVM(this.campaign, {
         chapter: this.shopNode.chapter,
+        townName: this.shopNode.name,
+      }),
+    );
+  }
+
+  private openRecruitScreen(): void {
+    if (this.ui.currentScreen !== 'shop' || !this.shopNode) {
+      this.ui.sound('error');
+      return;
+    }
+    this.ui.openRecruitScreen(
+      recruitScreenVM(this.campaign, {
+        nodeId: this.shopNode.id,
+        townName: this.shopNode.name,
+      }),
+    );
+  }
+
+  private onRecruitHire(
+    intent: Extract<UIIntent, { kind: 'recruit-hire' }>,
+  ): void {
+    if (this.ui.currentScreen !== 'recruit' || !this.shopNode) {
+      this.ui.sound('error');
+      return;
+    }
+    const result = hireRecruit(
+      this.campaign,
+      this.shopNode.id,
+      {
+        offerIndex: intent.offerIndex,
+        job: intent.jobId as JobId,
+        gender: intent.gender,
+        name: intent.name,
+      },
+      Date.now(),
+    );
+    if (!result.ok) {
+      this.ui.sound('error');
+      this.refreshRecruitIfOpen();
+      return;
+    }
+    this.persistCampaign(result.campaign);
+    this.ui.sound('confirm');
+    this.ui.banner(`${result.unit.name} joined the company`, {
+      subtitle: `${getJob(result.unit.currentJob).name} · ${result.price.toLocaleString()} gil`,
+      tone: 'victory',
+      duration: 1800,
+    });
+    this.refreshRecruitIfOpen();
+  }
+
+  private refreshRecruitIfOpen(): void {
+    if (this.ui.currentScreen !== 'recruit' || !this.shopNode) return;
+    this.ui.updateRecruitScreen(
+      recruitScreenVM(this.campaign, {
+        nodeId: this.shopNode.id,
         townName: this.shopNode.name,
       }),
     );
