@@ -43,10 +43,19 @@ rounds, and the reviewer correctly failed all three for it.
   the signature of the reported lockup instead of screenshotting past it.
 - 21 acceptance frames in `shots/v01-acceptance/`, now un-gitignored so they are durable.
 
-**Outstanding — the actual question is still unanswered:**
-1. No stage-by-stage WORKS/BROKEN/UNREACHABLE table for the loop.
-2. No answers to the five Part B questions, including the soft-lock checks (a battle **lost**
-   rather than won, an empty shop, a formation below the deploy minimum, a completed final node).
-3. **No measured refresh-persistence diff.** The URL fix above makes refresh reach the title
-   screen; nothing yet proves gil, JP, levels, learned abilities and inventory survive it.
-None of this is known-broken; it is **unverified**, which is a different and more honest claim.
+**Resolved by subsequent acceptance work:** the loop evidence and measured refresh-persistence
+diff now live in `docs/V01-ACCEPTANCE.md`. The previously unchecked unhappy paths are recorded in
+`docs/SOFTLOCK-AUDIT.md`.
+
+## v0.1 soft-lock audit residuals
+
+These are unclear or awkward, but none traps the player:
+
+1. An empty shop inventory renders a blank Sell pane without an empty-state explanation
+   (`src/ui/screens/ShopScreen.ts:110-118`). Close and Escape still return to the world map.
+2. The result screen offers no clickable continue control; its visible route is the
+   keyboard-only `Enter — continue` hint (`src/ui/screens/ResultScreen.ts:41-53`,
+   `src/ui/screens/ResultScreen.ts:199-208`). Escape also dismisses the result.
+3. Formation's Begin Battle action is a mouse button; keyboard confirm while the deployment slate
+   is focused edits a slot instead (`src/ui/screens/FormationScreen.ts:41-46`,
+   `src/ui/screens/FormationScreen.ts:173-213`). Close and Escape still return to the world map.

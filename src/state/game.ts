@@ -1264,6 +1264,11 @@ export class Game {
 
       case 'close-screen': {
         this.ui.closeScreen();
+        if (intent.screen === 'world') {
+          this.appSurface = 'title';
+          this.showTitle();
+          break;
+        }
         if (intent.screen === 'shop') this.shopNode = null;
         this.screenUnit = null;
         this.screenJob = null;

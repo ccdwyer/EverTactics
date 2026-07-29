@@ -37,6 +37,7 @@ const uiCapture = vi.hoisted(() => ({
     chapter?: number;
     stock?: Array<{ id: string }>;
   } | null,
+  openedTitleVM: null as { continueAvailable: boolean } | null,
   openedWorldMapVM: null as WorldMapScreenVM | null,
   intro: null as { mapName: string; encounterName: string } | null,
   outcome: null as { outcome: 'victory' | 'defeat'; subtitle: string } | null,
@@ -66,6 +67,7 @@ vi.mock('../src/state/scenarios', async (importOriginal) => {
 });
 
 vi.mock('../src/state/save', () => ({
+  hasSave: () => saves.loaded !== null,
   loadCampaign: () => {
     saves.loadCalls += 1;
     return saves.loaded;
@@ -164,6 +166,9 @@ vi.mock('../src/ui/UIRoot', () => ({
       uiCapture.result = vm;
     });
     sound = vi.fn();
+    openTitleScreen = vi.fn((vm: typeof uiCapture.openedTitleVM) => {
+      uiCapture.openedTitleVM = vm;
+    });
     openWorldMapScreen = vi.fn((vm: WorldMapScreenVM) => {
       uiCapture.openedWorldMapVM = vm;
     });
@@ -318,6 +323,7 @@ beforeEach(() => {
   uiCapture.intentHandler = null;
   uiCapture.openedJobVM = null;
   uiCapture.openedShopVM = null;
+  uiCapture.openedTitleVM = null;
   uiCapture.openedWorldMapVM = null;
   uiCapture.intro = null;
   uiCapture.outcome = null;
@@ -372,6 +378,24 @@ describe('Game campaign routing', () => {
     });
     expect(firstLesson.campaign.progress.current).toBe('battle-open');
     expect(saves.written.at(-1)?.progress.current).toBe('battle-open');
+  });
+
+  it('returns from the world map to a title screen that can continue the campaign', () => {
+    routing.scenario = peacefulFirstBattle();
+    const campaign = newGame().campaign;
+    saves.loaded = campaign;
+    const map = new Game({
+      scenarioId: 'battle-open',
+      worldMap: true,
+      container: {} as HTMLElement,
+      uiMount: {} as HTMLElement,
+    });
+
+    expect(uiCapture.intentHandler).not.toBeNull();
+    uiCapture.intentHandler?.({ kind: 'close-screen', screen: 'world' });
+
+    expect(uiCapture.openedTitleVM).toMatchObject({ continueAvailable: true });
+    expect(map.campaign).toEqual(campaign);
   });
 
   it('does not replace a world-node current value during a direct scenario boot', () => {

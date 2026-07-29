@@ -31,7 +31,7 @@ export class WorldMapScreen extends Screen {
   private cursor = 0;
 
   constructor(private readonly emit: (intent: UIIntent) => void) {
-    super({ title: 'World Map', className: 'et-worldmap', closable: false });
+    super({ title: 'World Map', className: 'et-worldmap' });
 
     this.funds = el('span', 'et-worldmap__funds');
     this.rail().appendChild(this.funds);
@@ -232,10 +232,6 @@ export class WorldMapScreen extends Screen {
         return true;
       case 'confirm':
         this.confirm();
-        return true;
-      case 'cancel':
-        // The campaign map is the top-level screen.
-        play('error');
         return true;
       default:
         return false;
