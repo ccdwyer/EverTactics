@@ -26,6 +26,22 @@ const arg = (n, d) => {
 };
 const positional = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--')));
 
+// The image is POSITIONAL. An unrecognised flag used to be dropped in silence, so
+// `metrics.mjs --in ref.png` measured shots/battle-open.png instead and happily
+// printed identical numbers for five different reference frames — a measurement
+// tool reporting confident nonsense, which is this project's most expensive
+// recurring bug. Unknown flags are now fatal.
+const KNOWN_FLAGS = new Set(['--compare', '--gate']);
+const unknown = argv.filter((a) => a.startsWith('--') && !KNOWN_FLAGS.has(a));
+if (unknown.length > 0) {
+  console.error(
+    `FAIL: unknown flag(s): ${unknown.join(', ')}\n`
+    + 'Usage: node tools/metrics.mjs <image.png> [--compare <image>] [--gate]\n'
+    + 'The image is positional — there is no --in.',
+  );
+  process.exit(2);
+}
+
 const target = resolve(positional[0] ?? 'shots/battle-open.png');
 const compare = arg('compare', '');
 const gate = argv.includes('--gate');
