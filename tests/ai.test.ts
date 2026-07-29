@@ -199,6 +199,133 @@ const OPEN_9 = [
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('AI world estimates', () => {
+  it('prices fallible revival abilities at their authored hit chance', () => {
+    const field = makeField(OPEN_9);
+    const raise: Ability = {
+      id: 'raise',
+      name: 'Raise',
+      set: 'white-magic',
+      slot: 'action',
+      description: 'Revive a fallen ally.',
+      mp: 14,
+      ct: 6,
+      element: 'holy',
+      range: { range: 4, radius: 0, vertical: 3, los: false },
+      formula: 'raise',
+      power: 30,
+      accuracy: 60,
+      vfx: 'raise',
+    };
+    const caster = makeUnit('caster', 'enemy', { x: 4, y: 4, z: 0 }, {
+      job: 'white-mage',
+      learned: ['raise'],
+    });
+    const fallen = makeUnit('fallen', 'enemy', { x: 4, y: 3, z: 0 }, {
+      hp: 0,
+      statuses: [{ status: 'ko', remaining: 2 }],
+    });
+    const state = makeState(field, [caster, fallen]);
+    const world = createAiWorld({ abilities: new Map([[raise.id, raise]]) });
+
+    const estimate = world.estimate({
+      state,
+      actor: caster,
+      actorPos: caster.pos,
+      facing: caster.facing,
+      ability: raise,
+      target: fallen,
+      targetPos: fallen.pos,
+    });
+
+    expect(estimate.hitChance).toBe(0.6);
+    expect(estimate.revives).toBe(true);
+  });
+
+  it('does not score removing KO twice when a revival succeeds', () => {
+    const field = makeField(OPEN_9);
+    const raise: Ability = {
+      id: 'raise',
+      name: 'Raise',
+      set: 'white-magic',
+      slot: 'action',
+      description: 'Revive a fallen ally.',
+      mp: 14,
+      ct: 6,
+      element: 'holy',
+      range: { range: 4, radius: 0, vertical: 3, los: false },
+      formula: 'raise',
+      power: 30,
+      accuracy: 60,
+      vfx: 'raise',
+      cures: ['ko'],
+    };
+    const caster = makeUnit('caster', 'enemy', { x: 4, y: 4, z: 0 }, {
+      job: 'white-mage',
+      learned: ['raise'],
+    });
+    const fallen = makeUnit('fallen', 'enemy', { x: 4, y: 3, z: 0 }, {
+      hp: 0,
+      statuses: [{ status: 'ko', remaining: 2 }],
+    });
+    const foe = makeUnit('foe', 'player', { x: 8, y: 8, z: 0 });
+    const state = makeState(field, [caster, fallen, foe]);
+
+    const plan = planTurn(state, caster.id, {
+      personality: 'support',
+      abilities: new Map([[raise.id, raise]]),
+    });
+
+    expect(plan?.candidate.ability?.id).toBe('raise');
+    expect(plan?.terms.revive).toBeGreaterThan(0);
+    expect(plan?.terms.statusCure).toBe(0);
+  });
+
+  it('takes a finishing blow once engagement pressure outweighs another revival', () => {
+    const field = makeField(OPEN_9);
+    const raise: Ability = {
+      id: 'raise',
+      name: 'Raise',
+      set: 'white-magic',
+      slot: 'action',
+      description: 'Revive a fallen ally.',
+      mp: 14,
+      ct: 0,
+      element: 'holy',
+      range: { range: 4, radius: 0, vertical: 3, los: false },
+      formula: 'raise',
+      power: 30,
+      accuracy: 60,
+      vfx: 'raise',
+      cures: ['ko'],
+    };
+    const caster = makeUnit('caster', 'enemy', { x: 4, y: 4, z: 0 }, {
+      job: 'white-mage',
+      learned: ['raise'],
+      pa: 14,
+    });
+    const fallen = makeUnit('fallen', 'enemy', { x: 4, y: 5, z: 0 }, {
+      hp: 0,
+      statuses: [{ status: 'ko', remaining: 2 }],
+    });
+    const foe = makeUnit('foe', 'player', { x: 4, y: 3, z: 0 }, {
+      hp: 20,
+      maxHp: 200,
+    });
+    const state = makeState(field, [caster, fallen, foe]);
+    const options = {
+      personality: 'support' as const,
+      abilities: new Map([[raise.id, raise]]),
+    };
+
+    expect(actOf(decideTurn(state, caster.id, options))?.ability).toBe('raise');
+
+    state.tick = 100;
+    expect(actOf(decideTurn(state, caster.id, options))?.ability).toBe('attack');
+  });
+
+});
+
 describe('decideTurn — lethal kills', () => {
   it('takes the kill when one is available', () => {
     const field = makeField(OPEN_9);
@@ -305,6 +432,37 @@ describe('decideTurn — terrain', () => {
 });
 
 describe('decideTurn — friendly fire', () => {
+  it('never selects an action that makes its target permanently untargetable', () => {
+    const field = makeField(OPEN_9);
+    const ghostStrike: Ability = {
+      id: 'ghost-strike',
+      name: 'Ghost Strike',
+      set: 'jump',
+      slot: 'action',
+      description: 'A malformed jump action.',
+      mp: 0,
+      ct: 0,
+      element: 'none',
+      range: { range: 3, radius: 0, vertical: 3, los: false },
+      formula: 'physical',
+      power: 2,
+      accuracy: 100,
+      vfx: 'jump',
+      inflicts: [{ status: 'jumping', chance: 100 }],
+    };
+    const ai = makeUnit('ai', 'enemy', { x: 4, y: 4, z: 0 }, {
+      learned: [ghostStrike.id],
+    });
+    const foe = makeUnit('foe', 'player', { x: 4, y: 3, z: 0 });
+    const state = makeState(field, [ai, foe]);
+
+    const commands = decideTurn(state, ai.id, {
+      abilities: new Map([[ghostStrike.id, ghostStrike]]),
+    });
+
+    expect(actOf(commands)?.ability).not.toBe(ghostStrike.id);
+  });
+
   it('places an area spell so it misses its own ally', () => {
     const field = makeField(OPEN_9);
     const caster = makeUnit('caster', 'enemy', { x: 0, y: 2, z: 0 }, {
@@ -859,6 +1017,20 @@ describe('decideTurn — engaging rather than hovering', () => {
 });
 
 describe('computeReachable — agrees with the reducer about footing', () => {
+  it('uses Frog-reduced Move when planning paths', () => {
+    const field = makeField(['00000']);
+    const frog = makeUnit('frog', 'enemy', { x: 0, y: 0, z: 0 }, {
+      move: 4,
+      statuses: [{ status: 'frog', remaining: 3, source: 'caster' }],
+    });
+
+    const state = makeState(field, [frog]);
+    const reachable = createAiWorld().reachable(state, frog);
+
+    expect(Math.max(...reachable.map((option) => option.cost))).toBe(3);
+    expect(reachable.some((option) => option.pos.x === 4)).toBe(false);
+  });
+
   it('walks through allies but blocks enemies and neutral units', () => {
     const field = makeField(['00000']);
     const mover = makeUnit('mover', 'player', { x: 0, y: 0, z: 0 }, { move: 4 });

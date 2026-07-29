@@ -277,10 +277,8 @@ export function deriveStats(unit: Unit): Stats {
   if (hasStatus(unit, 'frog')) {
     pa = Math.max(1, Math.floor(pa / 2));
     ma = Math.max(1, Math.floor(ma / 2));
-    move = Math.max(1, move - 1);
   }
-  if (hasStatus(unit, 'float')) jump += 1;
-  if (isImmobile(unit)) move = 0;
+  ({ move, jump } = movementStatsWithStatuses(unit, move, jump));
 
   return {
     hp: Math.max(0, Math.min(unit.stats.hp, maxHp)),
@@ -295,6 +293,20 @@ export function deriveStats(unit: Unit): Stats {
     brave: clamp(brave, 0, 100),
     faith: clamp(faith, 0, 100),
   };
+}
+
+/** Apply the movement-related status rules shared by the reducer and AI pathfinding. */
+export function movementStatsWithStatuses(
+  unit: Unit,
+  baseMove: number,
+  baseJump: number,
+): { move: number; jump: number } {
+  let move = baseMove;
+  let jump = baseJump;
+  if (hasStatus(unit, 'frog')) move = Math.max(1, move - 1);
+  if (hasStatus(unit, 'float')) jump += 1;
+  if (isImmobile(unit)) move = 0;
+  return { move, jump };
 }
 
 function clamp(v: number, lo: number, hi: number): number {

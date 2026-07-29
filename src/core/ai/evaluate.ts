@@ -33,7 +33,7 @@ import type {
   Zodiac,
 } from '../types';
 import { isAbilityInRange } from '../targeting';
-import { effectiveRange } from '../unit';
+import { effectiveRange, movementStatsWithStatuses } from '../unit';
 import { canPassThroughOccupant } from '../grid';
 import { battleCaution, type Personality, type ScoreTerm } from './personalities';
 
@@ -199,12 +199,14 @@ export function computeReachable(
   const origin: Vec3 = { x: unit.pos.x, y: unit.pos.y, z: unit.pos.z };
   const originOption: MoveOption = { pos: origin, path: [origin], cost: 0 };
 
-  const immobile =
-    hasStatus(unit, 'stop') || hasStatus(unit, 'petrify') || hasStatus(unit, 'sleep') ||
-    hasStatus(unit, 'rooted') || hasStatus(unit, 'crystal') || hasStatus(unit, 'ko');
-  const move = Math.max(0, Math.floor(opts.move ?? unit.stats.move));
-  const jump = Math.max(0, Math.floor(opts.jump ?? unit.stats.jump));
-  if (immobile || move <= 0) return [originOption];
+  const movement = movementStatsWithStatuses(
+    unit,
+    opts.move ?? unit.stats.move,
+    opts.jump ?? unit.stats.jump,
+  );
+  const move = Math.max(0, Math.floor(movement.move));
+  const jump = Math.max(0, Math.floor(movement.jump));
+  if (move <= 0) return [originOption];
 
   const occupied = opts.ignoreOccupancy ? new Map<number, Unit>() : occupancyMap(state);
   const field = state.field;
@@ -722,7 +724,10 @@ export function createAiWorld(opts: AiWorldOptions = {}): AiWorld {
 
     let hit = clamp01(ability.accuracy / 100);
     if (beneficial) {
-      hit = 1;
+      // Healing and buffs are authored as automatic, but revival abilities keep
+      // their explicit success chance. Pricing a 60% Raise as certain made the
+      // AI feed long revive loops instead of choosing a reliable finishing play.
+      hit = ability.formula === 'raise' ? clamp01(ability.accuracy / 100) : 1;
     } else {
       const raw = magical ? evade.magical : evade.physical;
       const applied = undefended ? 0 : (raw / 100) * sideFactor;
@@ -824,7 +829,9 @@ export function createAiWorld(opts: AiWorldOptions = {}): AiWorld {
 
   const base: AiWorld = {
     abilitiesFor: defaultAbilitiesFor,
-    reachable: (state, unit) => computeReachable(state, unit, { jump: lookupJob(unit.currentJob)?.jump }),
+    reachable: (state, unit) => computeReachable(state, unit, {
+      jump: lookupJob(unit.currentJob)?.jump,
+    }),
     estimate: defaultEstimate,
     ability: lookupAbility,
     item: lookupItem,
@@ -1556,6 +1563,10 @@ function filterAbilities(ctx: AiContext, abilities: readonly Ability[]): Ability
     if (ability.slot !== 'action') continue;
     if (ability.mp > actor.stats.mp) continue;
     if (silenced && ability.mp > 0) continue;
+    // Jump is currently authored as applying the permanent airborne marker to
+    // its target. That makes defeat-all unwinnable, so the AI must not select it
+    // until the action models the caster leaving and returning instead.
+    if (ability.inflicts?.some((status) => status.status === 'jumping')) continue;
     // Berserk removes access to everything except the plain attack.
     if (berserk && ability.id !== BASIC_ATTACK.id) continue;
     out.push(ability);
@@ -1726,6 +1737,10 @@ export function scoreCandidate(
       }
 
       for (const cured of outcome.cures) {
+        // Revival already has a dedicated term. Raise abilities also declare KO
+        // in their cures list for the reducer, but counting both made one action
+        // look like two separate rescues.
+        if (cured === 'ko' && outcome.revives) continue;
         const value = statusValue(cured);
         if (!hostile && value > 0) terms.statusCure += value * p;
         if (hostile && value < 0) terms.statusInflict += -value * p * 0.5; // stripping a buff

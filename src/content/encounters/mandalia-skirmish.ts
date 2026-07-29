@@ -12,28 +12,28 @@ export const mandaliaSkirmishEncounter = {
   enemies: [
     {
       id: 'e-merek', name: 'Merek', job: 'knight', gender: 'male', team: 'enemy',
-      level: 12, zodiac: 'taurus', brave: 70, faith: 48,
+      level: 16, zodiac: 'taurus', brave: 70, faith: 48,
       at: { x: 12, y: 2 }, facing: 'S', equipment: KNIGHT_KIT,
       secondary: 'squire', reaction: 'counter', support: 'defense-up',
       movement: 'move-plus-1', personality: 'defensive', ct: 38,
     },
     {
       id: 'e-linnet', name: 'Linnet', job: 'archer', gender: 'female', team: 'enemy',
-      level: 11, zodiac: 'sagittarius', brave: 68, faith: 52,
+      level: 15, zodiac: 'sagittarius', brave: 68, faith: 52,
       at: { x: 13, y: 3 }, facing: 'S', equipment: ARCHER_KIT,
       secondary: 'squire', reaction: 'arrow-guard', support: 'concentrate',
       personality: 'assassin', ct: 22,
     },
     {
       id: 'e-osric', name: 'Osric', job: 'monk', gender: 'male', team: 'enemy',
-      level: 11, zodiac: 'aries', brave: 78, faith: 42,
+      level: 15, zodiac: 'aries', brave: 78, faith: 42,
       at: { x: 11, y: 3 }, facing: 'S', equipment: MONK_KIT,
       secondary: 'squire', reaction: 'brave-up', support: 'martial-arts',
       personality: 'aggressive', ct: 51,
     },
     {
       id: 'e-vara', name: 'Vara', job: 'black-mage', gender: 'female', team: 'enemy',
-      level: 11, zodiac: 'scorpio', brave: 46, faith: 78,
+      level: 15, zodiac: 'scorpio', brave: 46, faith: 78,
       at: { x: 12, y: 4 }, facing: 'S', equipment: BLACK_MAGE_KIT,
       secondary: 'chemist', reaction: 'absorb-mp', support: 'magick-attack-up',
       personality: 'tactician', ct: 16,

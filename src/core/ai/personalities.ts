@@ -436,9 +436,9 @@ export function battleCaution(tick: number): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Ticks a stand-off is tolerated before the clock starts forcing an engagement. */
-const PRESSURE_TICKS = 120;
+const PRESSURE_TICKS = 16;
 /** Ticks over which pressure climbs from 1 to `MAX_PRESSURE`. */
-const PRESSURE_RAMP = 240;
+const PRESSURE_RAMP = 32;
 /** Ceiling on the multiplier. Large on purpose: see the note below. */
 const MAX_PRESSURE = 8;
 
@@ -457,17 +457,16 @@ const MAX_PRESSURE = 8;
  * So the approach term gets a multiplier that grows with the clock instead.
  * The shape:
  *
- *   tick <= 120          pressure 1     — untouched; a healthy battle is decided
- *                                         here and plays with full tactical judgement
- *   tick 120..360        1 -> 8 linear  — a stand-off decays into an engagement
- *   tick > 360           pressure 8     — the approach term dominates position,
+ *   tick <= 16           pressure 1     — squads have time to establish contact
+ *   tick 16..48          1 -> 8 linear  — a stand-off decays into an engagement
+ *   tick > 48            pressure 8     — the approach term dominates position,
  *                                         so somebody always closes
  *
  * It multiplies `closeDistance` (pull in), divides `keepDistance` (stop backing
  * off) and multiplies `idle` (make doing nothing progressively embarrassing).
- * It deliberately does NOT touch damage, healing, friendly fire, taunt or the
- * target-selection terms: a late-battle unit still fights intelligently, it just
- * stops being willing to wait forever for a better opening.
+ * It leaves damage, friendly fire, taunt and target selection intact. Sustain
+ * tapers under pressure so a long fight cannot recycle the same casualty forever:
+ * ordinary healing decays gently, while revival gives way to a finishing attack.
  *
  * Tuning: raise `PRESSURE_TICKS` to let cagey play run longer, raise
  * `MAX_PRESSURE` to make the eventual commitment more absolute.
@@ -524,6 +523,8 @@ export function effectiveWeights(
     out.closeDistance *= pressure;
     out.keepDistance /= pressure;
     out.idle *= pressure;
+    out.heal /= pressure;
+    out.revive /= pressure * pressure;
   }
   return out;
 }

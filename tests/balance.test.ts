@@ -54,18 +54,21 @@ describe('campaign encounter balance', () => {
   it('renders stable Markdown rows for the checked balance document', () => {
     expect(renderBalanceTable([
       {
-        encounterId: 'example',
-        encounterName: 'Example',
-        chapter: 2,
+        encounterId: 'orbonne-vanguard',
+        encounterName: 'Orbonne Monastery — Cloister Garden',
+        chapter: 1,
         battles: 12,
         resolved: 12,
-        playerWins: 4,
-        playerWinRate: 1 / 3,
-        medianTurns: 64,
-        medianSurvivingPlayersOnWin: 3,
+        playerWins: 10,
+        playerWinRate: 5 / 6,
+        medianTurns: 58.5,
+        medianSurvivingPlayersOnWin: 4,
         playerKnockdownBattles: 12,
         playerKnockdownRate: 1,
       },
-    ])).toContain('| 2 | Example | 4/12 (33.3%) | 64 | 3 | 12/12 (100%) |');
+    ])).toContain(
+      '| 1 | Orbonne Monastery — Cloister Garden | 11/12 (91.7%) | 10/12 (83.3%) '
+      + '| 116.5 | 58.5 | 6 | 4 | 12/12 (100%) | 12/12 (100%) |',
+    );
   });
 });

@@ -10,7 +10,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { BattleEvent } from '../src/core/types';
-import { runAiBattle as battle } from './helpers/aiBattle';
+import {
+  runAiBattle as battle,
+  type AiCommandRejection,
+} from './helpers/aiBattle';
 
 const kindsOf = (events: BattleEvent[]) => new Set(events.map((e) => e.kind));
 
@@ -83,28 +86,32 @@ describe('systems are wired into real battles', () => {
       } as const;
       let battles = 0;
       let commands = 0;
-      let rejectedCommands = 0;
+      const rejections: AiCommandRejection[] = [];
 
       for (const [map, seeds] of Object.entries(seedsByMap)) {
         for (const seed of seeds) {
-          const result = battle(seed, map, true, 400, false);
+          const result = battle(seed, map, {
+            productionAi: true,
+            collectEvents: false,
+            rejectionMode: 'collect',
+          });
           expect(result.turns, `${map} seed ${seed} hit the turn cap`).toBeLessThan(400);
           expect(['victory', 'defeat'], `${map} seed ${seed} did not resolve`).toContain(
             result.state.phase,
           );
           battles++;
           commands += result.commands;
-          rejectedCommands += result.rejectedCommands;
+          rejections.push(...result.rejections);
         }
       }
 
       console.info(
         `[integration] AI command sweep: battles=${battles}, commands=${commands}, ` +
-          `rejected=${rejectedCommands}`,
+          `rejected=${rejections.length}`,
       );
-      expect(battles).toBe(16);
-      expect(commands).toBeGreaterThan(0);
-      expect(rejectedCommands).toBe(0);
+      // Battle/command totals are telemetry, not guards: fixed completed loops make the
+      // former tautological, and every normal AI plan includes at least a wait command.
+      expect(rejections, JSON.stringify(rejections, null, 2)).toEqual([]);
     },
     30_000,
   );

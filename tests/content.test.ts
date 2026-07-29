@@ -40,7 +40,10 @@ import {
   getEncounter,
   getScenario,
 } from '../src/state/scenarios';
-import { runAiBattle } from './helpers/aiBattle';
+import {
+  runAiBattle,
+  type AiCommandRejection,
+} from './helpers/aiBattle';
 
 bootstrapContent();
 
@@ -420,17 +423,22 @@ describe('campaign map and encounter content', () => {
       const encounters = Object.values(ENCOUNTERS);
       let battles = 0;
       let commands = 0;
-      let rejectedCommands = 0;
+      const rejections: AiCommandRejection[] = [];
 
       for (const encounter of encounters) {
         const scenario = Object.values(SCENARIOS).find(
           (candidate) => candidate.encounterId === encounter.id,
         );
-        expect(scenario, `${encounter.id} has no scenario`).toBeDefined();
-        if (scenario === undefined) continue;
+        if (scenario === undefined) {
+          throw new Error(`${encounter.id} has no scenario`);
+        }
 
         for (const seed of seeds) {
-          const result = runAiBattle(seed, scenario.id, true, 400, false);
+          const result = runAiBattle(seed, scenario.id, {
+            productionAi: true,
+            collectEvents: false,
+            rejectionMode: 'collect',
+          });
           expect(result.turns, `${encounter.id} seed ${seed} hit the turn cap`).toBeLessThan(400);
           expect(
             ['victory', 'defeat'],
@@ -438,18 +446,18 @@ describe('campaign map and encounter content', () => {
           ).toContain(result.state.phase);
           battles++;
           commands += result.commands;
-          rejectedCommands += result.rejectedCommands;
+          rejections.push(...result.rejections);
         }
       }
 
       console.info(
         `[content] campaign sweep: maps=${listMaps().length}, ` +
           `encounters=${Object.keys(ENCOUNTERS).length}, battles=${battles}, ` +
-          `commands=${commands}, rejected=${rejectedCommands}`,
+          `commands=${commands}, rejected=${rejections.length}`,
       );
-      expect(battles).toBe(encounters.length * seeds.length);
-      expect(commands).toBeGreaterThan(0);
-      expect(rejectedCommands).toBe(0);
+      // Battle/command totals are telemetry, not guards: fixed completed loops make the
+      // former tautological, and every normal AI plan includes at least a wait command.
+      expect(rejections, JSON.stringify(rejections, null, 2)).toEqual([]);
     },
     90_000,
   );

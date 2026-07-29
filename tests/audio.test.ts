@@ -110,11 +110,13 @@ describe('battle audio event observer', () => {
   it('does not perturb a seeded battle event stream when attached', () => {
     const baseline = runAiBattle(1234);
     const observe = createBattleAudioObserver();
-    const observed = runAiBattle(1234, 'battle-open', false, 400, true, (events, state) => {
-      for (const event of events) {
-        const unit = 'unit' in event ? state.units.get(event.unit) : undefined;
-        observe(event, { maxHp: unit?.stats.maxHp });
-      }
+    const observed = runAiBattle(1234, 'battle-open', {
+      onEvents: (events, state) => {
+        for (const event of events) {
+          const unit = 'unit' in event ? state.units.get(event.unit) : undefined;
+          observe(event, { maxHp: unit?.stats.maxHp });
+        }
+      },
     });
 
     expect(observed.turns).toBe(baseline.turns);

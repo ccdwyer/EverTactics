@@ -82,10 +82,12 @@ describe('signature ability presentation', () => {
 
   it('keeps seeded event bytes stable when applying the render-side presentation policy', () => {
     const baseline = runAiBattle(7);
-    const observed = runAiBattle(7, 'battle-open', false, 400, true, (events) => {
-      for (const event of events) {
-        if (event.kind === 'cast-fire') abilityCameraProfile(event.ability);
-      }
+    const observed = runAiBattle(7, 'battle-open', {
+      onEvents: (events) => {
+        for (const event of events) {
+          if (event.kind === 'cast-fire') abilityCameraProfile(event.ability);
+        }
+      },
     });
 
     expect(observed.turns).toBe(baseline.turns);
