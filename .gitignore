@@ -101,3 +101,4 @@ tools/_delegate/
 
 # Agent scratch state; not project content
 .omx/
+!shots/milestones/battle-ux-complete.png
