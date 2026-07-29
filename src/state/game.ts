@@ -1076,21 +1076,23 @@ export class Game {
       case 'cast-fire': {
         const ability = abilityById(event.ability);
         if (!ability) break;
-        if (sprite) {
-          const anim = SPRITE_ANIM_FOR_FORMULA[ability.formula] ?? 'attack';
-          void sprite.playOnce(anim);
-        }
+        const anim = SPRITE_ANIM_FOR_FORMULA[ability.formula] ?? 'attack';
+        const delaysPlainAttackMotion = ability.id === 'attack' && sprite !== undefined;
+        if (sprite && !delaysPlainAttackMotion) void sprite.playOnce(anim);
         this.chargeVfx.get(event.unit)?.release();
         this.chargeVfx.delete(event.unit);
         const origin = unit ? this.worldOf(unit.pos) : this.worldOf(event.target);
         const target = this.worldOf(event.target);
         const impacts = this.impactPoints(unit, ability, event.target);
+        const cameraTargets =
+          ability.id === 'attack' && unit ? [origin, ...impacts] : impacts;
         const vfxImpacts = impacts.slice(0, 8);
         const playEffect = async (): Promise<void> => {
           let feedback: Promise<void> | null = null;
           const startFeedback = (): void => {
             feedback ??= playImpactFeedback();
           };
+          if (delaysPlainAttackMotion) void sprite.playOnce(anim);
           await this.vfx.play(resolveVfxKey(ability), {
             origin,
             target,
@@ -1106,9 +1108,9 @@ export class Game {
         };
         await this.abilityCamera.present(
           abilityCameraProfile(ability.id),
-          abilityCameraFocus(target, impacts),
+          abilityCameraFocus(target, cameraTargets),
           playEffect,
-          impacts,
+          cameraTargets,
         );
         break;
       }
@@ -1304,6 +1306,10 @@ export class Game {
         else if (intent.action === 'rotate-ccw') void this.camera.rotate(-1);
         else if (intent.action === 'zoom-in') void this.camera.zoomIn();
         else if (intent.action === 'zoom-out') void this.camera.zoomOut();
+        else if (intent.action === 'pan-up') this.camera.panScreen(0, 1);
+        else if (intent.action === 'pan-down') this.camera.panScreen(0, -1);
+        else if (intent.action === 'pan-left') this.camera.panScreen(-1, 0);
+        else if (intent.action === 'pan-right') this.camera.panScreen(1, 0);
         else this.frameCamera();
         break;
       }

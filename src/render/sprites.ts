@@ -2531,7 +2531,8 @@ export class UnitSprite {
     this.setCell(unit.pos.x, unit.pos.y, unit.pos.z);
     this.facing = unit.facing;
     this.setTeam(unit.team);
-    if (unit.sprite.palette > 0) this.setPaletteSlot(unit.sprite.palette);
+    const override = explicitUnitPalette(unit.team, unit.sprite.palette);
+    if (override !== undefined) this.setPaletteSlot(override);
     this.setStatuses(unit.statuses);
   }
 
@@ -3319,6 +3320,22 @@ export class UnitSprite {
     this.labels = [];
     this.object.removeFromParent();
   }
+}
+
+const LEGACY_TEAM_PALETTE: Readonly<Record<Team, number>> = {
+  player: 0,
+  enemy: 1,
+  ally: 2,
+  neutral: 3,
+};
+
+/**
+ * Old scenario data stores its team-default palette number on every unit. That
+ * value is metadata, not an authored override, so renderer-selected ACT team
+ * rows win unless content deliberately supplies a different slot.
+ */
+export function explicitUnitPalette(team: Team, palette: number): number | undefined {
+  return palette === LEGACY_TEAM_PALETTE[team] ? undefined : palette;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

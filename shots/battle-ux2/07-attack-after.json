@@ -1,0 +1,343 @@
+{
+  "booted": true,
+  "scene": "battle-open",
+  "outDir": "/Users/chris/Developer/EverTactics/shots/battle-ux2/07-attack-after",
+  "steps": [
+    {
+      "step": 0,
+      "action": "boot",
+      "shot": "00-boot.png"
+    },
+    {
+      "action": "action-freeze:attack@Aldric@390",
+      "shot": "01-attack-impact.png",
+      "state": {
+        "location": "http://localhost:4173/?debug=1&scene=battle-open",
+        "surface": "battle",
+        "screen": null,
+        "resultOutcome": null,
+        "mode": "command",
+        "phase": "awaiting-command",
+        "active": "Aldric",
+        "capture": {
+          "ability": "attack",
+          "target": "p-aldric",
+          "targetTile": {
+            "x": 4,
+            "y": 12,
+            "z": 2
+          },
+          "targetScreen": {
+            "x": 680.1856083301553,
+            "y": 497.96062879484435,
+            "depth": -0.4990623534927332,
+            "visible": true
+          },
+          "pixelScale": 3.18,
+          "focus": [
+            4,
+            1.6118952641510578,
+            12
+          ]
+        },
+        "campaign": {
+          "digest": "6927f35b30920215532ea67133a6fb6957c55f7043a5514ed13ba5bd3e46b7d8",
+          "bytes": 4999,
+          "gil": 490,
+          "inventory": {
+            "long-sword": 1,
+            "rod": 1,
+            "buckler": 1,
+            "use-potion": 3,
+            "use-antidote": 1
+          },
+          "completed": [
+            "battle-open"
+          ],
+          "current": "battle-open",
+          "roster": [
+            {
+              "id": "p-aldric",
+              "level": 14,
+              "exp": 95,
+              "totalExp": 95,
+              "currentJob": "knight",
+              "equipment": {
+                "rightHand": "broadsword",
+                "leftHand": "buckler",
+                "head": "bronze-helm",
+                "body": "chain-mail",
+                "accessory": "bracer"
+              },
+              "jobs": {
+                "knight": {
+                  "level": 6,
+                  "jp": 1442,
+                  "totalJp": 1442,
+                  "learned": [
+                    "accumulate",
+                    "armor-break",
+                    "cheer-up",
+                    "dash",
+                    "equip-armor",
+                    "equip-shield",
+                    "head-break",
+                    "heal-wounds",
+                    "magick-break",
+                    "mind-break",
+                    "power-break",
+                    "rally",
+                    "riposte",
+                    "shield-bash",
+                    "shield-break",
+                    "speed-break",
+                    "stasis-sword",
+                    "throw-stone",
+                    "weapon-break",
+                    "wish",
+                    "yell"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "p-seryn",
+              "level": 13,
+              "exp": 36,
+              "totalExp": 36,
+              "currentJob": "white-mage",
+              "equipment": {
+                "rightHand": "white-staff",
+                "head": "feather-hat",
+                "body": "linen-robe",
+                "accessory": "bracer"
+              },
+              "jobs": {
+                "white-mage": {
+                  "level": 6,
+                  "jp": 1325,
+                  "totalJp": 1325,
+                  "learned": [
+                    "arise",
+                    "cura",
+                    "curaga",
+                    "curaja",
+                    "cure",
+                    "esuna",
+                    "holy",
+                    "magick-defense-up",
+                    "protect",
+                    "protectja",
+                    "raise",
+                    "regen",
+                    "reraise",
+                    "shell",
+                    "shellja",
+                    "use-antidote",
+                    "use-echo-herbs",
+                    "use-ether",
+                    "use-eye-drops",
+                    "use-hi-ether",
+                    "use-hi-potion",
+                    "use-holy-water",
+                    "use-maiden-kiss",
+                    "use-phoenix-down",
+                    "use-potion",
+                    "use-remedy",
+                    "use-soft",
+                    "use-x-potion",
+                    "wall"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "p-belric",
+              "level": 14,
+              "exp": 95,
+              "totalExp": 195,
+              "currentJob": "archer",
+              "equipment": {
+                "rightHand": "long-bow",
+                "head": "green-beret",
+                "body": "leather-outfit",
+                "accessory": "spike-shoes"
+              },
+              "jobs": {
+                "archer": {
+                  "level": 6,
+                  "jp": 1395,
+                  "totalJp": 1395,
+                  "learned": [
+                    "accumulate",
+                    "arrow-guard",
+                    "charge-plus-1",
+                    "charge-plus-10",
+                    "charge-plus-2",
+                    "charge-plus-20",
+                    "charge-plus-3",
+                    "charge-plus-4",
+                    "charge-plus-5",
+                    "charge-plus-7",
+                    "cheer-up",
+                    "dash",
+                    "equip-bow",
+                    "heal-wounds",
+                    "rally",
+                    "shield-bash",
+                    "throw-stone",
+                    "wish",
+                    "yell"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "p-ivane",
+              "level": 13,
+              "exp": 55,
+              "totalExp": 55,
+              "currentJob": "black-mage",
+              "equipment": {
+                "rightHand": "flame-rod",
+                "head": "feather-hat",
+                "body": "silk-robe",
+                "accessory": "battle-boots"
+              },
+              "jobs": {
+                "black-mage": {
+                  "level": 6,
+                  "jp": 1332,
+                  "totalJp": 1332,
+                  "learned": [
+                    "blizzaga",
+                    "blizzaja",
+                    "blizzara",
+                    "blizzard",
+                    "death",
+                    "demi",
+                    "demiga",
+                    "disable",
+                    "fira",
+                    "firaga",
+                    "firaja",
+                    "fire",
+                    "flare",
+                    "float",
+                    "haste",
+                    "hastega",
+                    "immobilize",
+                    "magick-attack-up",
+                    "poison",
+                    "reflect",
+                    "slow",
+                    "slowga",
+                    "stabilize",
+                    "stop",
+                    "thundaga",
+                    "thundaja",
+                    "thundara",
+                    "thunder",
+                    "toad"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "p-torvald",
+              "level": 14,
+              "exp": 75,
+              "totalExp": 75,
+              "currentJob": "monk",
+              "equipment": {
+                "head": "headband",
+                "body": "leather-outfit",
+                "accessory": "bracer"
+              },
+              "jobs": {
+                "monk": {
+                  "level": 6,
+                  "jp": 1432,
+                  "totalJp": 1432,
+                  "learned": [
+                    "armor-break",
+                    "chakra",
+                    "counter",
+                    "earth-slash",
+                    "head-break",
+                    "magick-break",
+                    "martial-arts",
+                    "mind-break",
+                    "power-break",
+                    "repeating-fist",
+                    "revive",
+                    "secret-fist",
+                    "shield-break",
+                    "speed-break",
+                    "spin-fist",
+                    "stasis-sword",
+                    "stigma-magick",
+                    "wave-fist",
+                    "weapon-break"
+                  ]
+                }
+              }
+            },
+            {
+              "id": "p-nessa",
+              "level": 13,
+              "exp": 80,
+              "totalExp": 180,
+              "currentJob": "thief",
+              "equipment": {
+                "rightHand": "mythril-knife",
+                "head": "green-beret",
+                "body": "leather-outfit",
+                "accessory": "battle-boots"
+              },
+              "jobs": {
+                "thief": {
+                  "level": 6,
+                  "jp": 1295,
+                  "totalJp": 1295,
+                  "learned": [
+                    "charge-plus-1",
+                    "charge-plus-2",
+                    "charge-plus-3",
+                    "charge-plus-4",
+                    "charge-plus-5",
+                    "charge-plus-7",
+                    "move-plus-2",
+                    "steal-accessory",
+                    "steal-armor",
+                    "steal-exp",
+                    "steal-gil",
+                    "steal-heart",
+                    "steal-helmet",
+                    "steal-shield",
+                    "steal-weapon",
+                    "treasure-hunter"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "posed": {
+          "ability": "attack",
+          "actor": "Aldric",
+          "target": "Aldric",
+          "freezeMs": 390
+        }
+      }
+    }
+  ],
+  "errors": [],
+  "ignoredMissingFavicon": false,
+  "failedResponses": [],
+  "warnings": [],
+  "rejectedCommands": [],
+  "logs": [
+    "info: [evertactics] Orbonne Monastery — Cloister Garden · 12 units · 34 jobs, 525 abilities, 49 items · scenarios: battle-open, terrain-only, sprites-only, ui-only, mandalia-ford, first-lesson, mandalia-skirmish, gariland-bridge, zeirchele-charge, lionel-gate, dorter-storehouse, mandalia-ambush, orbonne-return, lionel-reckoning"
+  ]
+}

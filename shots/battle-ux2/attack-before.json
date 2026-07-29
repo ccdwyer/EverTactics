@@ -1,0 +1,12 @@
+{
+  "actor": "Aldric",
+  "cameraLandedMs": 246.39999985694885,
+  "motionStartedMs": 0.6999998092651367,
+  "motionEndedMs": null,
+  "impactMs": 627.8999998569489,
+  "motionStartRelativeToCameraMs": -245.70000004768372,
+  "postLandingMaxPosePixels": 15.434474600315879,
+  "samples": 23,
+  "errors": [],
+  "failedResponses": []
+}

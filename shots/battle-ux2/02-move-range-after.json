@@ -1,0 +1,331 @@
+{
+  "origin": "http://localhost:4173",
+  "highlighted": "/Users/chris/Developer/EverTactics/shots/battle-ux2/02-move-range-after.png",
+  "control": "/Users/chris/Developer/EverTactics/shots/battle-ux2/02-move-range-after-control.png",
+  "formula": {
+    "saturation": "(maxRGB - minRGB) / maxRGB",
+    "luminance": "0.2126R + 0.7152G + 0.0722B"
+  },
+  "pose": {
+    "points": [
+      {
+        "tile": "7,8,3",
+        "x": 577.3345952139559,
+        "y": 484.780780294945,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "7,10,3",
+        "x": 420.0574027104695,
+        "y": 555.1843616980833,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "8,8,3",
+        "x": 632.3979331036563,
+        "y": 524.1000784208165,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "6,8,3",
+        "x": 522.2712573242554,
+        "y": 445.46148216907335,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "9,9,2",
+        "x": 608.8226747416135,
+        "y": 644.1668829040274,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "8,10,2",
+        "x": 475.1207406001699,
+        "y": 632.5493609059718,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "8,7,4",
+        "x": 711.0365293553995,
+        "y": 467.39448552353645,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "9,8,3",
+        "x": 687.4612709933567,
+        "y": 563.4193765466881,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "5,8,3",
+        "x": 467.2079194345549,
+        "y": 406.14218404320184,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "8,11,2",
+        "x": 396.4821443484266,
+        "y": 659.0206529501098,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      },
+      {
+        "tile": "7,12,2",
+        "x": 262.780210206983,
+        "y": 647.8616226637912,
+        "visible": true,
+        "occupied": false,
+        "resolvesToTile": true,
+        "canvasVisible": true
+      }
+    ],
+    "reachableTiles": 15,
+    "active": "p-aldric",
+    "activeName": "Aldric",
+    "camera": {
+      "focus": [
+        6,
+        1,
+        6
+      ],
+      "pixelScale": 3,
+      "yawIndex": 0
+    }
+  },
+  "measurements": {
+    "sampleRadius": 10,
+    "sampledTiles": 11,
+    "highlighted": {
+      "meanSaturation": 0.445,
+      "meanLuminance": 93.65
+    },
+    "control": {
+      "meanSaturation": 0.443,
+      "meanLuminance": 79.751
+    },
+    "delta": {
+      "meanSaturation": 0.002,
+      "meanLuminance": 13.899
+    },
+    "tiles": [
+      {
+        "tile": "7,8,3",
+        "screen": {
+          "x": 577.3345952139559,
+          "y": 484.780780294945
+        },
+        "highlighted": {
+          "saturation": 0.36015692058334586,
+          "luminance": 127.1605123028392,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.4480442347745984,
+          "luminance": 108.98464542586754,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "7,10,3",
+        "screen": {
+          "x": 420.0574027104695,
+          "y": 555.1843616980833
+        },
+        "highlighted": {
+          "saturation": 0.6821988114541675,
+          "luminance": 76.3985059936908,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.6893366161441349,
+          "luminance": 72.37291735015769,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "8,8,3",
+        "screen": {
+          "x": 632.3979331036563,
+          "y": 524.1000784208165
+        },
+        "highlighted": {
+          "saturation": 0.31314292405874466,
+          "luminance": 131.3291217665615,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.34733792196336144,
+          "luminance": 134.67625299684534,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "6,8,3",
+        "screen": {
+          "x": 522.2712573242554,
+          "y": 445.46148216907335
+        },
+        "highlighted": {
+          "saturation": 0.5665645132138059,
+          "luminance": 103.46793880126184,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.5665645132138059,
+          "luminance": 103.46793880126184,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "9,9,2",
+        "screen": {
+          "x": 608.8226747416135,
+          "y": 644.1668829040274
+        },
+        "highlighted": {
+          "saturation": 0.5207780495347449,
+          "luminance": 76.32350410094637,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.5774942288312948,
+          "luminance": 27.84967760252366,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "8,10,2",
+        "screen": {
+          "x": 475.1207406001699,
+          "y": 632.5493609059718
+        },
+        "highlighted": {
+          "saturation": 0.2610964954035364,
+          "luminance": 48.00891987381708,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.2610964954035364,
+          "luminance": 48.00891987381708,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "8,7,4",
+        "screen": {
+          "x": 711.0365293553995,
+          "y": 467.39448552353645
+        },
+        "highlighted": {
+          "saturation": 0.5947750821060963,
+          "luminance": 71.8923621451104,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.5595209874944125,
+          "luminance": 44.011879495268175,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "9,8,3",
+        "screen": {
+          "x": 687.4612709933567,
+          "y": 563.4193765466881
+        },
+        "highlighted": {
+          "saturation": 0.2786384694375923,
+          "luminance": 135.46497728706615,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.3039575210492266,
+          "luminance": 163.10598359621451,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "5,8,3",
+        "screen": {
+          "x": 467.2079194345549,
+          "y": 406.14218404320184
+        },
+        "highlighted": {
+          "saturation": 0.21812253457695366,
+          "luminance": 129.14129842271302,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.21812253457695366,
+          "luminance": 129.14129842271302,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "8,11,2",
+        "screen": {
+          "x": 396.4821443484266,
+          "y": 659.0206529501098
+        },
+        "highlighted": {
+          "saturation": 0.5091757535568471,
+          "luminance": 60.92001829652995,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.4568505844031005,
+          "luminance": 14.96973627760252,
+          "pixels": 317
+        }
+      },
+      {
+        "tile": "7,12,2",
+        "screen": {
+          "x": 262.780210206983,
+          "y": 647.8616226637912
+        },
+        "highlighted": {
+          "saturation": 0.5894105559173272,
+          "luminance": 70.04507381703472,
+          "pixels": 317
+        },
+        "control": {
+          "saturation": 0.4393343441650389,
+          "luminance": 30.676765930599345,
+          "pixels": 317
+        }
+      }
+    ]
+  },
+  "errors": [],
+  "failedResponses": []
+}

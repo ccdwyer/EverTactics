@@ -24,6 +24,10 @@ export type UIKey =
   | 'zoom-in'
   | 'zoom-out'
   | 'reset-view'
+  | 'pan-up'
+  | 'pan-down'
+  | 'pan-left'
+  | 'pan-right'
   | 'menu';
 
 export interface FocusLayer {
@@ -63,6 +67,10 @@ const KEY_MAP: Readonly<Record<string, UIKey>> = {
   Minus: 'zoom-out',
   NumpadSubtract: 'zoom-out',
   KeyR: 'reset-view',
+  KeyI: 'pan-up',
+  KeyK: 'pan-down',
+  KeyJ: 'pan-left',
+  KeyL: 'pan-right',
   KeyC: 'menu',
 };
 

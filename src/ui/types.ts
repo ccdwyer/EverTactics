@@ -22,6 +22,12 @@ export interface StatusVM {
   description?: string;
 }
 
+export interface UnitLoadoutVM {
+  equipment: readonly { slot: string; name: string }[];
+  actionGroups: readonly { name: string; abilities: readonly string[] }[];
+  passives: readonly { slot: string; name: string }[];
+}
+
 export interface UnitVM {
   id: string;
   name: string;
@@ -57,6 +63,8 @@ export interface UnitVM {
   exp?: number;
   /** Spendable JP in the current job. */
   jp?: number;
+  /** Read-only tactical loadout shown when inspecting allies or hostiles. */
+  loadout?: UnitLoadoutVM;
 }
 
 export interface TurnEntryVM {
@@ -412,7 +420,19 @@ export type UIIntent =
   /** A turn-order portrait was clicked or focused. */
   | { kind: 'inspect-unit'; unitId: string; focus: boolean }
   /** Camera nudges the UI owns keybinds for. */
-  | { kind: 'camera'; action: 'rotate-cw' | 'rotate-ccw' | 'zoom-in' | 'zoom-out' | 'reset' }
+  | {
+      kind: 'camera';
+      action:
+        | 'rotate-cw'
+        | 'rotate-ccw'
+        | 'zoom-in'
+        | 'zoom-out'
+        | 'reset'
+        | 'pan-up'
+        | 'pan-down'
+        | 'pan-left'
+        | 'pan-right';
+    }
   /** Job screen: set the unit's current job. */
   | { kind: 'set-job'; unitId: string; jobId: string }
   /** Job screen: the tree cursor moved — the game layer resends `learnables`. */

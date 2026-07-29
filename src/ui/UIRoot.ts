@@ -62,11 +62,13 @@ import type {
  * which is part of what the critics meant by the chrome crowding the board. The
  * two camera binds fold into one group.
  */
+const CAMERA_HINT: HintDef = { keys: ['IJKL', 'Q/E', '±'], label: 'Camera' };
+
 const FIELD_HINTS: readonly HintDef[] = [
   { keys: ['↑', '↓'], label: 'Select' },
   { keys: ['Enter'], label: 'Confirm' },
   { keys: ['Esc'], label: 'Back' },
-  { keys: ['Q', 'E', '±'], label: 'Camera' },
+  CAMERA_HINT,
 ];
 
 export class UIRoot {
@@ -138,7 +140,12 @@ export class UIRoot {
     // screen corners. Every other consumer (the roster detail pane) keeps the
     // stacked card, which is the right shape for a narrow sidebar.
     this.activeInfo = new UnitInfoPanel({ variant: 'full', side: 'left', band: true });
-    this.inspectInfo = new UnitInfoPanel({ variant: 'compact', side: 'right', band: true });
+    this.inspectInfo = new UnitInfoPanel({
+      variant: 'compact',
+      side: 'right',
+      band: true,
+      showLoadout: true,
+    });
     this.commandMenu = new CommandMenu({
       onConfirm: (id) => this.emit({ kind: 'command', id }),
       onHighlight: (id) => this.emit({ kind: 'command-highlight', id }),
@@ -200,6 +207,12 @@ export class UIRoot {
             return true;
           case 'reset-view':
             this.emit({ kind: 'camera', action: 'reset' });
+            return true;
+          case 'pan-up':
+          case 'pan-down':
+          case 'pan-left':
+          case 'pan-right':
+            this.emit({ kind: 'camera', action: key });
             return true;
           case 'cancel':
             play('cancel');
@@ -306,6 +319,7 @@ export class UIRoot {
       { keys: ['↑', '↓'], label: 'Select' },
       { keys: ['Enter'], label: 'Confirm' },
       { keys: ['Esc'], label: 'Back' },
+      CAMERA_HINT,
     ]);
   }
 
@@ -328,6 +342,7 @@ export class UIRoot {
       { keys: ['↑', '↓'], label: 'Select' },
       { keys: ['Enter'], label: 'Confirm' },
       { keys: ['Esc'], label: 'Back' },
+      CAMERA_HINT,
     ]);
   }
 

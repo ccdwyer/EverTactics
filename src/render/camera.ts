@@ -633,6 +633,27 @@ export class IsoCamera {
   }
 
   /**
+   * Move the gameplay focus along the current screen axes while staying on the
+   * battlefield plane. Positive horizontal moves right; positive vertical moves
+   * toward the top of the frame. Repeated key presses accumulate immediately
+   * against the desired focus while the camera eases toward it.
+   */
+  panScreen(horizontal: number, vertical: number, distance = TILE_SIZE): void {
+    const right = this.tmpVecA.setFromMatrixColumn(this.camera.matrixWorld, 0);
+    right.y = 0;
+    if (right.lengthSq() > 1e-8) right.normalize();
+
+    const screenUp = this.tmpVecB.setFromMatrixColumn(this.camera.matrixWorld, 1);
+    screenUp.y = 0;
+    if (screenUp.lengthSq() > 1e-8) screenUp.normalize();
+
+    this.desiredFocus
+      .addScaledVector(right, horizontal * distance)
+      .addScaledVector(screenUp, vertical * distance);
+    this.followTauOverride = null;
+  }
+
+  /**
    * On-screen height of a standing character at the current zoom, as a fraction of the
    * frame. Compare against {@link REFERENCE_CHARACTER_FRAME_FRACTION}.
    */

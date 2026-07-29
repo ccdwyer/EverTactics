@@ -92,6 +92,7 @@ vi.mock('../src/render/camera', () => ({
     camera = { layers: { enable: vi.fn() } };
     devicePixelsPerTexel = 3;
     focusTile = vi.fn();
+    panScreen = vi.fn();
     worldToScreen = vi.fn(() => ({ x: 0, y: 0, depth: 0, visible: true }));
     cinematic = vi.fn(async () => undefined);
     endCinematic = vi.fn(async () => undefined);
@@ -462,7 +463,11 @@ describe('Game campaign routing', () => {
 
     expect(battleStateBytes(game.state)).toBe(stateBefore);
     expect(game.camera.cinematic).toHaveBeenCalledWith({
-      focus: new Vector3(target.x, 0.75, target.y),
+      focus: new Vector3(
+        (actor.pos.x + target.x) / 2,
+        0.75,
+        (actor.pos.y + target.y) / 2,
+      ),
       pixelScale: 3.18,
       pitchDegrees: undefined,
       duration: 0.2,
@@ -515,6 +520,38 @@ describe('Game campaign routing', () => {
 
     expect(trace).toEqual(['impact', 'damage', 'restore']);
     expect(sprite.popLabel).toHaveBeenCalledWith('37', 'damage');
+  });
+
+  it('starts a plain attack motion only after the camera push has landed', async () => {
+    routing.scenario = peacefulFirstBattle();
+    const game = newGame();
+    const actor = [...game.state.units.values()][0]!;
+    let landCamera!: () => void;
+    const cameraPush = new Promise<void>((resolve) => {
+      landCamera = resolve;
+    });
+    vi.mocked(game.camera.cinematic).mockReturnValue(cameraPush);
+    const sprite = {
+      playOnce: vi.fn(async () => undefined),
+    };
+    vi.mocked(game.sprites.get).mockReturnValue(
+      sprite as unknown as NonNullable<ReturnType<typeof game.sprites.get>>,
+    );
+
+    const playing = game.play([
+      {
+        kind: 'cast-fire',
+        unit: actor.id,
+        ability: 'attack',
+        target: { ...actor.pos },
+      },
+    ]);
+    await Promise.resolve();
+    expect(sprite.playOnce).not.toHaveBeenCalled();
+
+    landCamera();
+    await playing;
+    expect(sprite.playOnce).toHaveBeenCalledWith('attack');
   });
 
   it('records a victory in the first battle without assigning BattleState fields', () => {

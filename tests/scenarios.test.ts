@@ -97,9 +97,23 @@ describe('scenarios', () => {
     expect(vm.maxHp).toBeGreaterThan(0);
     expect(vm.job.length).toBeGreaterThan(0);
     expect(vm.portrait).toBeTruthy();
+    expect(vm.loadout?.equipment).toHaveLength(5);
+    expect(vm.loadout?.actionGroups[0]?.abilities.length).toBeGreaterThan(0);
     const order = turnOrderVM(state);
     expect(order.length).toBeGreaterThan(0);
     expect(order[0]?.current).toBe(true);
+  });
+
+  it('exposes the same tactical inspection fields for hostile units', () => {
+    const { state } = buildScenario(getScenario('battle-open'));
+    const hostile = [...state.units.values()].find((unit) => unit.team === 'enemy');
+    expect(hostile).toBeDefined();
+    const vm = unitVM(state, hostile!);
+    expect(vm.team).toBe('enemy');
+    expect(vm.pa).toBeGreaterThan(0);
+    expect(vm.loadout?.equipment).toHaveLength(5);
+    expect(vm.loadout?.actionGroups.length).toBeGreaterThan(0);
+    expect(vm.loadout?.passives).toHaveLength(3);
   });
 });
 

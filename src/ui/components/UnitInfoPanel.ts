@@ -28,6 +28,8 @@ export interface UnitInfoOptions {
    * screen, where it squeezed the meters to 70px and the stat cells to 26.
    */
   band?: boolean;
+  /** Show the full derived stat line, equipment and learned ability loadout. */
+  showLoadout?: boolean;
 }
 
 export class UnitInfoPanel {
@@ -44,13 +46,16 @@ export class UnitInfoPanel {
   private readonly faithNode: HTMLSpanElement;
   private readonly statStrip: HTMLDivElement;
   private readonly statusStrip: HTMLDivElement;
+  private readonly loadout: HTMLDivElement;
   private readonly variant: 'full' | 'compact';
   private readonly band: boolean;
+  private readonly showLoadout: boolean;
   private currentId: string | null = null;
 
   constructor(opts: UnitInfoOptions = {}) {
     this.variant = opts.variant ?? 'full';
     this.band = opts.band ?? false;
+    this.showLoadout = opts.showLoadout ?? false;
     this.panel = new Panel({
       className: `et-unitinfo et-unitinfo--${this.variant}${this.band ? ' et-unitinfo--band' : ''}`,
       from: opts.side === 'right' ? 'right' : 'left',
@@ -111,21 +116,24 @@ export class UnitInfoPanel {
 
     this.statStrip = div('et-unitinfo__stats');
     this.statusStrip = div('et-unitinfo__statuses');
+    this.loadout = div('et-unitinfo__loadout');
 
     // Both variants use the same band, the compact one only narrower and without
     // the derived stats. The compact card carried the same defect the full one
     // did — a 104px portrait beside a two-line ident block, so the lower two
     // thirds of the portrait column faced nothing but flat panel navy.
     const rows =
-      this.variant === 'full'
+      this.variant === 'full' || this.showLoadout
         ? [head, meters, bf, this.statStrip, this.statusStrip]
         : [head, meters, bf, this.statusStrip];
     if (this.band) {
       add(column, ...rows);
       add(layout, this.faceSlot, column);
       this.panel.body.appendChild(layout);
+      if (this.showLoadout) this.panel.body.appendChild(this.loadout);
     } else {
       add(this.panel.body, ...rows);
+      if (this.showLoadout) this.panel.body.appendChild(this.loadout);
     }
   }
 
@@ -167,7 +175,7 @@ export class UnitInfoPanel {
     this.braveNode.textContent = String(unit.brave);
     this.faithNode.textContent = String(unit.faith);
 
-    if (this.variant === 'full') {
+    if (this.variant === 'full' || this.showLoadout) {
       this.statStrip.replaceChildren();
       const pairs: [string, number | undefined][] = [
         ['PA', unit.pa],
@@ -189,8 +197,58 @@ export class UnitInfoPanel {
       }
     }
 
+    if (this.showLoadout) this.setLoadout(unit);
     this.setStatuses(unit.statuses);
     this.setVisible(true);
+  }
+
+  private setLoadout(unit: UnitVM): void {
+    this.loadout.replaceChildren();
+    const loadout = unit.loadout;
+    if (!loadout) {
+      this.loadout.classList.add('is-empty');
+      return;
+    }
+    this.loadout.classList.remove('is-empty');
+
+    const equipment = div('et-loadout__section');
+    equipment.appendChild(el('span', 'et-loadout__heading', 'Equipment'));
+    const equipmentGrid = div('et-loadout__equipment');
+    for (const entry of loadout.equipment) {
+      const row = div('et-loadout__equipment-row');
+      add(
+        row,
+        el('span', 'et-loadout__label', entry.slot),
+        el('span', 'et-loadout__value', entry.name),
+      );
+      equipmentGrid.appendChild(row);
+    }
+    equipment.appendChild(equipmentGrid);
+
+    const abilities = div('et-loadout__section');
+    abilities.appendChild(el('span', 'et-loadout__heading', 'Abilities'));
+    for (const group of loadout.actionGroups) {
+      const row = div('et-loadout__ability-group');
+      const names = group.abilities.length > 0 ? group.abilities.join(' · ') : 'None learned';
+      add(
+        row,
+        el('span', 'et-loadout__label', group.name),
+        el('span', 'et-loadout__ability-list', names),
+      );
+      row.title = names;
+      abilities.appendChild(row);
+    }
+    for (const passive of loadout.passives) {
+      const row = div('et-loadout__ability-group et-loadout__ability-group--passive');
+      add(
+        row,
+        el('span', 'et-loadout__label', passive.slot),
+        el('span', 'et-loadout__ability-list', passive.name),
+      );
+      abilities.appendChild(row);
+    }
+
+    add(this.loadout, equipment, abilities);
   }
 
   setStatuses(statuses: readonly StatusVM[]): void {

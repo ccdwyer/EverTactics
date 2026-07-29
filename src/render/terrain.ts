@@ -742,7 +742,7 @@ void main() {
   float intensity = s.b;
 
   vec3 col;
-  if (kind < 1.5)       col = vec3(0.06, 0.38, 1.00);   // movement
+  if (kind < 1.5)       col = vec3(0.01, 0.12, 0.68);   // movement
   else if (kind < 2.5)  col = vec3(1.00, 0.24, 0.20);   // attack
   else if (kind < 3.5)  col = vec3(1.00, 0.70, 0.16);   // area of effect
   else if (kind < 4.5)  col = vec3(0.32, 1.00, 0.52);   // beneficial
@@ -769,29 +769,32 @@ void main() {
   float isCursor = kind > 5.5 ? 1.0 : 0.0;
   float rimSoftW = mix(0.20, 0.34, isCursor);
   float rimCoreW = mix(0.06, 0.14, isCursor);
-  float rimSoft = 1.0 - smoothstep(0.0, rimSoftW, d);
-  float rimCore = 1.0 - smoothstep(0.0, rimCoreW, d);
+  float regionSoft = 1.0 - smoothstep(0.0, rimSoftW, d);
+  float regionCore = 1.0 - smoothstep(0.0, rimCoreW, d);
+  float rimSoft = regionSoft;
+  float rimCore = regionCore;
 
   // The region outline says where movement stops; restrained cell seams make the
   // reachable tiles countable and preserve height changes within that region.
   float cellD = min(min(vLocal.x, 1.0 - vLocal.x), min(vLocal.y, 1.0 - vLocal.y));
   float cellSoft = 1.0 - smoothstep(0.0, 0.15, cellD);
   float cellCore = 1.0 - smoothstep(0.0, 0.045, cellD);
-  rimSoft = max(rimSoft, cellSoft * isMove * 0.58);
-  rimCore = max(rimCore, cellCore * isMove * 0.68);
+  rimSoft = max(rimSoft, cellSoft * isMove * 0.42);
+  rimCore = max(rimCore, cellCore * isMove * 0.34);
 
   float fill = 0.24 + 0.08 * hatch + rimSoft * 0.22;
-  // A denser blue field separates reachable ground from merely visible ground.
-  fill = mix(fill, 0.56 + 0.05 * hatch + rimSoft * 0.14, isMove);
+  // A dark cobalt field stays chromatic below the highlight-desaturation knee.
+  fill = mix(fill, 0.72 + 0.035 * hatch + regionSoft * 0.08, isMove);
   fill = mix(fill, 0.42 + 0.10 * hatch + rimSoft * 0.35, isCursor);
   float a = mix(fill, mix(0.92, 1.0, isCursor), rimCore) * pulse * intensity;
   a = mix(a, min(1.0, a * 1.25), isCursor);
 
   vec3 c = mix(col * 1.05, mix(col, vec3(1.0), 0.65), rimCore);
   c += col * rimSoft * 0.55;
-  // Dark cell seams survive pale stone; the bright region edge survives shadow.
-  vec3 moveC = mix(col * 1.08, vec3(0.025, 0.12, 0.34), cellSoft * 0.82);
-  moveC = mix(moveC, vec3(0.72, 0.92, 1.00), rimCore);
+  // Dark cell seams preserve elevation; cyan is reserved for the outer boundary.
+  vec3 moveC = mix(col, vec3(0.004, 0.025, 0.12), cellSoft * 0.76);
+  moveC = mix(moveC, vec3(0.03, 0.38, 0.72), regionSoft * 0.62);
+  moveC = mix(moveC, vec3(0.04, 0.55, 0.85), regionCore * 0.82);
   c = mix(c, moveC, isMove);
   c = mix(c, mix(col * 1.15, vec3(1.0), 0.55 * rimCore), isCursor);
 
@@ -3528,10 +3531,6 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
 
       // ── highlight overlay quad ──────────────────────────────────────────
       {
-        const surfaceH = tile.height;
-        const hy = (u: number, vv: number): number =>
-          (surfaceH + slopeOffsetHalf(isWaterSurface(tile.surface) ? 'flat' : tile.slope, u, vv)) *
-          HEIGHT_UNIT;
         const base = hlPos.length / 3;
         for (let j = 0; j <= S; j++) {
           const vv = inner(j / S);
@@ -3540,7 +3539,7 @@ export function buildTerrain(field: Battlefield, opts: TerrainOptions = {}): Ter
             const n = normalAt(tile, u, vv);
             hlPos.push(
               ox + (u - 0.5) * TILE_SIZE + n[0] * 0.022,
-              hy(u, vv) + n[1] * 0.022,
+              solidTopY(tile, tx, ty, u, vv) + n[1] * 0.022,
               oz + (vv - 0.5) * TILE_SIZE + n[2] * 0.022,
             );
             hlNrm.push(n[0], n[1], n[2]);

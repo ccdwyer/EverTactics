@@ -1,0 +1,128 @@
+{
+  "paletteRows": [
+    {
+      "id": "p-aldric",
+      "name": "Aldric",
+      "team": "player",
+      "sheet": "1000_Knight_Male_hd",
+      "legacyPalette": 0,
+      "renderedRow": 0,
+      "selectedTeamRow": 0
+    },
+    {
+      "id": "p-seryn",
+      "name": "Seryn",
+      "team": "player",
+      "sheet": "1014_White_Mage_Female_hd",
+      "legacyPalette": 0,
+      "renderedRow": 1,
+      "selectedTeamRow": 1
+    },
+    {
+      "id": "p-belric",
+      "name": "Belric",
+      "team": "player",
+      "sheet": "1004_Archer_Male_hd",
+      "legacyPalette": 0,
+      "renderedRow": 0,
+      "selectedTeamRow": 0
+    },
+    {
+      "id": "p-ivane",
+      "name": "Ivane",
+      "team": "player",
+      "sheet": "1018_Black_Mage_Female_hd",
+      "legacyPalette": 0,
+      "renderedRow": 0,
+      "selectedTeamRow": 0
+    },
+    {
+      "id": "p-torvald",
+      "name": "Torvald",
+      "team": "player",
+      "sheet": "1008_Monk_Male_hd",
+      "legacyPalette": 0,
+      "renderedRow": 4,
+      "selectedTeamRow": 4
+    },
+    {
+      "id": "p-nessa",
+      "name": "Nessa",
+      "team": "player",
+      "sheet": "1030_Thief_Female_hd",
+      "legacyPalette": 0,
+      "renderedRow": 1,
+      "selectedTeamRow": 1
+    },
+    {
+      "id": "e-corvin",
+      "name": "Corvin",
+      "team": "enemy",
+      "sheet": "1044_Dragoon_Male_hd",
+      "legacyPalette": 1,
+      "renderedRow": 0,
+      "selectedTeamRow": 0
+    },
+    {
+      "id": "e-sable",
+      "name": "Sable",
+      "team": "enemy",
+      "sheet": "1006_Archer_Female_hd",
+      "legacyPalette": 1,
+      "renderedRow": 4,
+      "selectedTeamRow": 4
+    },
+    {
+      "id": "e-halden",
+      "name": "Halden",
+      "team": "enemy",
+      "sheet": "1016_Black_Mage_Male_hd",
+      "legacyPalette": 1,
+      "renderedRow": 4,
+      "selectedTeamRow": 4
+    },
+    {
+      "id": "e-bram",
+      "name": "Bram",
+      "team": "enemy",
+      "sheet": "1008_Monk_Male_hd",
+      "legacyPalette": 1,
+      "renderedRow": 2,
+      "selectedTeamRow": 2
+    },
+    {
+      "id": "e-quill",
+      "name": "Quill",
+      "team": "enemy",
+      "sheet": "1030_Thief_Female_hd",
+      "legacyPalette": 1,
+      "renderedRow": 2,
+      "selectedTeamRow": 2
+    },
+    {
+      "id": "e-maelor",
+      "name": "Maelor",
+      "team": "enemy",
+      "sheet": "1020_Time_Mage_Male_hd",
+      "legacyPalette": 1,
+      "renderedRow": 2,
+      "selectedTeamRow": 2
+    }
+  ],
+  "palettesMatchingTeamSelection": 12,
+  "inspectedTeam": "enemy",
+  "equipmentRows": 5,
+  "abilityGroups": 5,
+  "statCells": 6,
+  "panelBounds": {
+    "x": 1558,
+    "y": 32,
+    "width": 330,
+    "height": 422.078125,
+    "right": 1888,
+    "bottom": 454.078125
+  },
+  "panelText": "CorvinDragoonLv 15HostileHP329/ 329MP47/ 47Brave74Faith50PA9MA6SPD8MOVE4JUMP4JP1470EquipmentRight handLongswordLeft handRound ShieldHeadBronze HelmBodyChain MailAccessoryBattle BootsAbilitiesJumpLevel Jump 2 · Vertical Jump 2 · Level Jump 3 · Vertical Jump 3 · Level Jump 4 · Vertical Jump 4 · Level Jump 5 · Vertical Jump 5 · Level Jump 8 · Vertical Jump 8 · High Jump · Dragon Dive · JumpBasic SkillFocus · Dash · Throw Stone · Tend · Yell · Steel · Wish · Rally · Shield BashReactionCounterSupportDefense UpMovementMove +1",
+  "errors": [],
+  "failedResponses": []
+}

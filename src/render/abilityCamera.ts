@@ -77,8 +77,10 @@ function listenForAbilityCameraSkip(
   onSkip: () => void,
 ): () => void {
   const skip = (event: Event): void => {
+    const code = 'code' in event ? String(event.code) : '';
+    const handsBackToCameraControls = CAMERA_CONTROL_CODES.has(code);
     event.preventDefault();
-    event.stopPropagation();
+    if (!handsBackToCameraControls) event.stopPropagation();
     onSkip();
   };
   const capture = { capture: true };
@@ -92,6 +94,20 @@ function listenForAbilityCameraSkip(
     target.removeEventListener('wheel', skip, wheel);
   };
 }
+
+const CAMERA_CONTROL_CODES = new Set([
+  'KeyI',
+  'KeyJ',
+  'KeyK',
+  'KeyL',
+  'KeyQ',
+  'KeyE',
+  'Equal',
+  'NumpadAdd',
+  'Minus',
+  'NumpadSubtract',
+  'KeyR',
+]);
 
 export class AbilityCameraDirector {
   constructor(

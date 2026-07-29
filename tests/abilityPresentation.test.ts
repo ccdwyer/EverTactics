@@ -396,4 +396,22 @@ describe('IsoCamera ability framing', () => {
     expect(cameraFrame(camera)).toEqual(before);
     expect(camera.settled).toBe(true);
   });
+
+  it('pans by one screen-relative tile at every camera yaw', () => {
+    for (const yawIndex of [0, 1, 2, 3] as const) {
+      const camera = new IsoCamera({ pixelScale: 3, pitchDegrees: 30, yawIndex });
+      camera.setViewport(1600, 900, 1);
+      camera.focus(new Vector3(0, 0, 0), { immediate: true });
+      const before = camera.worldToScreen(new Vector3(0, 0, 0));
+
+      camera.panScreen(1, 0);
+      for (let frame = 0; frame < 60; frame++) camera.update(1 / 60);
+
+      const horizontalDistance = Math.hypot(camera.focusPoint.x, camera.focusPoint.z);
+      const after = camera.worldToScreen(new Vector3(0, 0, 0));
+      expect(horizontalDistance).toBeCloseTo(1, 5);
+      expect(after.x).toBeLessThan(before.x);
+      expect(camera.focusPoint.y).toBe(0);
+    }
+  });
 });

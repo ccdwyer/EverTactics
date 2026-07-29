@@ -22,7 +22,7 @@ import { statusDef } from '@core/combat/status';
 import { inventoryOf, isConsumable } from '@core/inventory';
 import { getJob } from '@core/jobs';
 import { createRng } from '@core/rng';
-import { deriveStats, isKO, jobProgress, weaponOf } from '@core/unit';
+import { deriveStats, getItem as lookupItem, isKO, jobProgress, weaponOf } from '@core/unit';
 import type {
   Ability,
   AbilitySetId,
@@ -104,11 +104,17 @@ export function statusVMs(unit: Unit): StatusVM[] {
 export function unitVM(_state: BattleState, unit: Unit): UnitVM {
   const derived = deriveStats(unit);
   const progress = jobProgress(unit, unit.currentJob);
+  const job = getJob(unit.currentJob);
+  const primary = actionSetOf(job);
+  const actionSets = [primary];
+  if (unit.secondaryAction && unit.secondaryAction !== primary) {
+    actionSets.push(unit.secondaryAction);
+  }
   return {
     id: unit.id,
     name: unit.name,
     team: unit.team,
-    job: getJob(unit.currentJob).name,
+    job: job.name,
     jobId: unit.currentJob,
     level: unit.level,
     hp: Math.max(0, unit.stats.hp),
@@ -127,8 +133,40 @@ export function unitVM(_state: BattleState, unit: Unit): UnitVM {
     jump: derived.jump,
     exp: unit.exp,
     jp: progress.jp,
+    loadout: {
+      equipment: EQUIPMENT_SLOTS.map(({ slot, label }) => {
+        const id = unit.equipment[slot];
+        return { slot: label, name: lookupItem(id)?.name ?? (id ? String(id) : 'Empty') };
+      }),
+      actionGroups: actionSets.map((setId) => ({
+        name: setLabel(setId),
+        abilities: abilitiesAvailable(unit, setId).map((ability) => ability.name),
+      })),
+      passives: [
+        {
+          slot: 'Reaction',
+          name: unit.reaction ? lookupAbility(unit.reaction)?.name ?? unit.reaction : 'None',
+        },
+        {
+          slot: 'Support',
+          name: unit.support ? lookupAbility(unit.support)?.name ?? unit.support : 'None',
+        },
+        {
+          slot: 'Movement',
+          name: unit.movement ? lookupAbility(unit.movement)?.name ?? unit.movement : 'None',
+        },
+      ],
+    },
   };
 }
+
+const EQUIPMENT_SLOTS = [
+  { slot: 'rightHand', label: 'Right hand' },
+  { slot: 'leftHand', label: 'Left hand' },
+  { slot: 'head', label: 'Head' },
+  { slot: 'body', label: 'Body' },
+  { slot: 'accessory', label: 'Accessory' },
+] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Turn order
