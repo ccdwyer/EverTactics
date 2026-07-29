@@ -46,6 +46,17 @@ for `progress.current`, and eight signature ability VFX with a sparse ability ca
 
 **555 tests, typecheck clean, all four metrics gates green.**
 
+**Verified from a clean clone** (not just from this working copy): `git clone` → `npm ci` →
+`npx tsc --noEmit` → `npx vitest run` → `npm run build` → `tools/shoot.mjs` all succeed on a fresh
+checkout, rendering a correct battle frame with `brokenMaterials: []`. Worth re-running after any
+change to committed assets or `public/` — a repo that only builds on the author's machine stays
+broken indefinitely, because nobody's job is to notice.
+
+**Clone size is a known problem.** A fresh clone is ~942MB; `.git` alone is ~465MB because 173
+screenshot frames were committed before evidence was allow-listed file by file. History still holds
+them. Shrinking it requires `git filter-repo` on `shots/` plus a force-push over a published repo,
+which rewrites every commit SHA — Chris's call, not an agent's.
+
 Two things worth carrying forward:
 - `npm run verify` previously exited 0 even when a metrics gate FAILED — gates were computed,
   printed, and not enforced. Fixed in step 12; verification is now stricter than it was for most
