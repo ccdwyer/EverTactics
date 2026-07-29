@@ -5,6 +5,17 @@ dist/
 # the README's images silently 404'd on the published repo because of exactly this.
 shots/*
 !shots/milestones/
+
+# Evidence is allow-listed FILE BY FILE, not by directory. Directory negations
+# put 428MB of screenshots into a public repo (272MB of it burst frames from one
+# VFX round) and took a fresh clone to 942MB. Keep the frames a document actually
+# cites; leave the rest on disk.
+!shots/vfx/final-eight-contact.png
+!shots/v01-victory/persistence-diff.md
+!shots/v01-acceptance/01-title.png
+!shots/acc-mine/01-Enter.png
+!shots/acc-mine2/02-click-0.113-0.75.png
+!shots/acc-mine4/04-reload.png
 .vite/
 *.log
 refs/
@@ -17,10 +28,6 @@ tools/_delegate/
 # macOS Finder metadata; was tracked and kept tripping the delegate dirty-tree guard
 .DS_Store
 **/.DS_Store
-!shots/v01-acceptance/
-!shots/acc-mine*/
-!shots/v01-victory/
-!shots/vfx/
 
 # Agent scratch state; not project content
 .omx/
