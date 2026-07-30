@@ -79,11 +79,17 @@ campaign can teach, and `docs/ROADMAP-v0.1.md` records that lesson.
 
 ---
 
-## Open decisions for Chris
+## Decided
 
-1. **Permadeath: yes, no, or optional?** This changes what recruitment is for.
-2. **How long should a v0.2 campaign be?** Four chapters at ~5 encounters each is a real evening.
-3. **Story: authored, or a light framing?** A full script is a different project; named characters
+1. **Permadeath: FFT's crystal timer.** A downed unit has a few turns before it is gone for good.
+   Chris chose this over KO-only and over a toggle. It is what the step-1 recruitment system exists
+   to feed, and it settles the question the roadmap called the one that shapes the rest.
+2. **Campaign length: keep two chapters and deepen them.** No chapter 3. Instead: optional side
+   encounters, random battles, and town content on the existing map. This changes item 3 below from
+   "author chapters 3-4" to "make the existing map worth revisiting".
+
+## Still open for Chris
+1. **Story: authored, or a light framing?** A full script is a different project; named characters
    and a paragraph per battle is not.
-4. **Blind-judge round?** Still unspent, still the original success metric, and the renderer has
+2. **Blind-judge round?** Still unspent, still the original success metric, and the renderer has
    changed materially since the last one (highlight rolloff, enemy palettes, range overlay).
